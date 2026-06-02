@@ -38,6 +38,6 @@ func ConnectDb(env config.Env) (*sql.DB, error) {
 	return db, nil
 }
 
-func registerTLSConfig(serverName string) (string, error) {
+func registerTLSConfig() (string, error) {
 	return "", fmt.Errorf("tls registration removed")
 }
