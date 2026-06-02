@@ -1,0 +1,54 @@
+
+# Environment / secrets
+.env
+.env.*
+.env.local
+secrets.json
+secrets/*.json
+
+# Certificates and private keys
+*.pem
+*.key
+*.crt
+*.p12
+certs/
+private/
+
+# Build artifacts
+tmp/
+tmp/*
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+tmp/main
+tmp/main.exe
+build-errors.log
+*.log
+
+# Go
+vendor/
+*.test
+
+# Node / frontend
+node_modules/
+.next/
+out/
+dist/
+
+# IDE / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+
+# Coverage and reports
+coverage.out
+coverage/
+*.coverprofile
+
