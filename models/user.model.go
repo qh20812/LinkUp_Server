@@ -53,5 +53,3 @@ func ParseUserStatus(value string) UserStatus {
 		return UserStatusActive
 	}
 }
-
-
