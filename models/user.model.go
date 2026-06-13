@@ -1,0 +1,57 @@
+package models
+
+import (
+	"strings"
+	"time"
+)
+
+type UserStatus string
+
+const (
+	UserStatusActive    UserStatus = "active"
+	UserStatusBanned    UserStatus = "banned"
+	UserStatusSuspended UserStatus = "suspended"
+)
+
+type User struct {
+	ID           int64      `json:"id" db:"id"`
+	Email        string     `json:"email" db:"email"`
+	PasswordHash string     `json:"password_hash" db:"password_hash"`
+	Status       UserStatus `json:"status" db:"status"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+}
+
+func NewUser(email, passwordHash string) User {
+	return User{
+		Email:        email,
+		PasswordHash: passwordHash,
+		Status:       UserStatusActive,
+	}
+}
+
+func (u User) IsActive() bool {
+	return u.Status == UserStatusActive
+}
+
+func (u User) IsBanned() bool {
+	return u.Status == UserStatusBanned
+}
+
+func (u User) IsSuspended() bool {
+	return u.Status == UserStatusSuspended
+}
+
+func ParseUserStatus(value string) UserStatus {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(UserStatusActive):
+		return UserStatusActive
+	case string(UserStatusBanned):
+		return UserStatusBanned
+	case string(UserStatusSuspended):
+		return UserStatusSuspended
+	default:
+		return UserStatusActive
+	}
+}
+
+

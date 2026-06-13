@@ -1,0 +1,391 @@
+// ==========================================
+// 1. MODULE: USER, AUTHENTICATION & ROLES
+// ==========================================
+
+Table users {
+  id integer [primary key, increment]
+  email varchar(255) [unique, not null]
+  password_hash varchar(255) [not null]
+  status varchar(20) [note: "active, banned, suspended", default: "active"]
+  created_at timestamp [default: `now()` ]
+}
+
+// Bảng danh mục định nghĩa các vai trò trong hệ thống
+Table roles {
+  id integer [primary key, increment]
+  name varchar(50) [unique, not null, note: "SUPER_ADMIN, COMM_ADMIN, CHAT_ADMIN, USER"]
+  description varchar(255) [note: "Mô tả chi tiết về phạm vi quyền hạn"]
+}
+
+// Bảng trung gian giải quyết mối quan hệ một user có nhiều role (Dạng mảng)
+Table user_roles {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  role_id integer [not null]
+  assigned_at timestamp [default: `now()` ]
+
+  Indexes {
+    (user_id, role_id) [unique]
+  }
+}
+
+Table profiles {
+  id integer [primary key, increment]
+  user_id integer [unique, not null]
+  username varchar(50)
+  avatar_uri varchar(500) [note: "Lưu đường dẫn cục bộ / local URI"]
+  bio varchar(150) [note: "Giới hạn 150 ký tự"]
+  is_private_profile boolean [default: false, note: "true: Chỉ bạn bè xem được profile, false: Công khai"]
+  is_private_posts boolean [default: false, note: "true: Chỉ bạn bè xem được bài viết, false: Công khai"]
+  allow_stranger_friend_request boolean [default: true, note: "true: Mọi người, false: Chỉ bạn của bạn"]
+  updated_at timestamp
+}
+
+
+// ==========================================
+// 2. MODULE: SOCIAL NETWORK (POST & INTERACTIONS)
+// ==========================================
+
+Table posts {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  title varchar(255) [not null]
+  content varchar(3000) [note: "Giới hạn 3000 ký tự cho bài viết"]
+  views_count integer [default: 0, note: "Lượt xem của bài post"]
+  status varchar(20) [note: "active, hidden, deleted", default: "active"]
+  created_at timestamp [default: `now()` ]
+}
+
+Table stories {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  media_uri varchar(500) [not null, note: "Đường dẫn cục bộ tới video hoặc ảnh của story"]
+  media_type varchar(20) [note: "image, video", default: "video"]
+  caption varchar(500) [note: "Đoạn chữ ngắn đính kèm trên story (nếu có)"]
+  created_at timestamp [default: `now()` ]
+  expires_at timestamp [note: "Thời gian hết hạn của story, thường là sau 24h"]
+}
+
+Table media {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  post_id integer [note: "Có thể null nếu upload ở nơi khác hoặc trong chat"]
+  file_uri varchar(500) [not null, note: "Lưu đường dẫn cục bộ / local URI"]
+  file_type varchar(50) [note: "png, jpg, jpeg, gif, mp4, mov"]
+  file_size float [note: "Lưu dung lượng chính xác dưới dạng số thực (Ví dụ: 2.5 MB)"]
+  status varchar(20) [note: "pending, approved, rejected", default: "approved"]
+  created_at timestamp [default: `now()` ]
+}
+
+Table emojis {
+  id integer [primary key, increment]
+  code varchar(50) [note: "Ví dụ: :like:, :heart:, :haha:"]
+  image_uri varchar(500) [note: "Đường dẫn đến hình ảnh emoji cục bộ"]
+}
+
+Table post_reactions {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  post_id integer [not null]
+  emoji_id integer [not null]
+  created_at timestamp [default: `now()` ]
+  
+  Indexes {
+    (user_id, post_id) [unique]
+  }
+}
+
+Table comments {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  post_id integer [not null]
+  parent_id integer [note: "Dùng lại chính bảng này để Reply Comment (Self-referencing)"]
+  content varchar(500) [not null, note: "Giới hạn 500 ký tự"]
+  created_at timestamp [default: `now()` ]
+}
+
+Table bookmarks {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  post_id integer [not null, note: "Quay lại lưu liên kết trực tiếp với bảng posts theo yêu cầu"]
+  created_at timestamp [default: `now()` ]
+
+  Indexes {
+    (user_id, post_id) [unique]
+  }
+}
+
+Table tags {
+  id integer [primary key, increment]
+  post_id integer [not null]
+  comment_id integer
+  tag_type varchar(20) [note: "enum: hashtag, mention"]
+  target_user_id integer [note: "Nếu là mention thì trỏ tới user được tag"]
+  name varchar(100) [note: "Nếu là hashtag thì lưu tên hashtag (ví dụ: #congnghe)"]
+}
+
+
+// ==========================================
+// 3. MODULE: RELATIONSHIPS & COMMUNITIES
+// ==========================================
+
+Table follows {
+  id integer [primary key, increment]
+  follower_id integer [not null]
+  following_id integer [not null]
+  created_at timestamp [default: `now()` ]
+  
+  note: "Số lượng follower/following được xác định bằng lệnh COUNT dựa trên follower_id hoặc following_id"
+
+  Indexes {
+    (follower_id, following_id) [unique]
+  }
+}
+
+Table blocks {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  blocked_user_id integer [not null]
+  created_at timestamp [default: `now()` ]
+
+  Indexes {
+    (user_id, blocked_user_id) [unique]
+  }
+}
+
+Table friends {
+  id integer [primary key, increment]
+  sender_id integer [not null, note: "Người chủ động gửi lời mời"]
+  receiver_id integer [not null, note: "Người nhận lời mời"]
+  status varchar(20) [note: "pending (đang chờ), accepted (đã là bạn bè), rejected (từ chối)"]
+  created_at timestamp [default: `now()` ]
+
+  Indexes {
+    (sender_id, receiver_id) [unique]
+  }
+}
+
+Table communities {
+  id integer [primary key, increment]
+  creator_id integer [not null]
+  name varchar(100) [not null]
+  description varchar(1000) [note: "Giới hạn 1000 ký tự giới thiệu cộng đồng"]
+  avatar_uri varchar(500)
+  created_at timestamp [default: `now()` ]
+}
+
+Table group_members {
+  id integer [primary key, increment]
+  community_id integer [not null]
+  user_id integer [not null]
+  role varchar(20) [note: "admin, mod, member", default: "member"]
+  points integer [default: 0, note: "Tích lũy từ đóng góp bài viết/comment, dùng để xét nâng hạng lên mod"]
+  joined_at timestamp [default: `now()` ]
+
+  Indexes {
+    (community_id, user_id) [unique]
+  }
+}
+
+
+// ==========================================
+// 4. MODULE: MESSAGING & CALLS
+// ==========================================
+
+Table chats {
+  id integer [primary key, increment]
+  type varchar(20) [note: "direct, group", default: "direct"]
+  name varchar(100)
+  avatar_uri varchar(500)
+  created_at timestamp [default: `now()` ]
+}
+
+Table chat_participants {
+  id integer [primary key, increment]
+  chat_id integer [not null]
+  user_id integer [not null]
+  role varchar(20) [note: "admin, member", default: "member"]
+  joined_at timestamp [default: `now()` ]
+
+  Indexes {
+    (chat_id, user_id) [unique]
+  }
+}
+
+Table messages {
+  id integer [primary key, increment]
+  chat_id integer [not null]
+  sender_id integer [not null]
+  content varchar(2000) [note: "Giới hạn 2000 ký tự cho một tin nhắn"]
+  media_id integer [note: "Liên kết tới file phương tiện đính kèm nếu có"]
+  emoji_id integer [note: "Kết nối trực tiếp tới bảng emoji khi người dùng thả biểu cảm vào tin nhắn hoặc gửi nhanh icon"]
+  created_at timestamp [default: `now()` ]
+}
+
+Table calls {
+  id integer [primary key, increment]
+  chat_id integer
+  caller_id integer [not null]
+  call_type varchar(20) [note: "voice, video"]
+  is_group boolean [default: false]
+  status varchar(20) [note: "missed, completed, declined"]
+  started_at timestamp [default: `now()` ]
+  ended_at timestamp
+}
+
+
+// ==========================================
+// 5. MODULE: ADVERTISEMENTS (HỆ THỐNG QUẢNG CÁO)
+// ==========================================
+
+Table ads {
+  id integer [primary key, increment]
+  admin_id integer [not null, note: "Admin phụ trách hoặc người duyệt chiến dịch"]
+  title varchar(255) [not null]
+  content text [note: "Nội dung chữ của bài quảng cáo"]
+  media_id integer [note: "Liên kết đến hình ảnh/video tài nguyên của quảng cáo"]
+  target_url varchar(500) [not null, note: "Đường dẫn liên kết khi người dùng nhấn vào quảng cáo"]
+  status varchar(20) [note: "active, paused, completed", default: "active"]
+  budget float [default: 0.0, note: "Ngân sách chiến dịch"]
+  started_at timestamp
+  expires_at timestamp [note: "Thời gian kết thúc chạy quảng cáo"]
+  created_at timestamp [default: `now()` ]
+}
+
+Table ad_analytics {
+  id integer [primary key, increment]
+  ad_id integer [not null]
+  user_id integer [note: "Có thể null nếu khách chưa đăng nhập hệ thống vẫn xem được quảng cáo"]
+  action_type varchar(20) [note: "view (lượt hiển thị), click (lượt nhấn)"]
+  ip_address varchar(45) [note: "Lưu IP để lọc và chống click tặc / gian lận quảng cáo"]
+  created_at timestamp [default: `now()` ]
+}
+
+
+// ==========================================
+// 6. MODULE: NOTIFICATIONS, REPORTS & AUDIT LOGS
+// ==========================================
+
+Table notifications {
+  id integer [primary key, increment]
+  receiver_id integer [not null]
+  sender_id integer [note: "User kích hoạt thông báo"]
+  type varchar(30) [note: "Chuyển thành ENUM: 'like', 'comment', 'follow', 'message', 'friend_request'"]
+  redirect_post_id integer [note: "Dẫn tới bài post (Nếu thông báo liên quan đến post/like/comment)"]
+  redirect_user_id integer [note: "Dẫn tới trang profile user (Nếu thông báo liên quan đến follow/friend_request)"]
+  redirect_comment_id integer [note: "Dẫn trực tiếp tới bình luận cụ thể (Nếu cần cuộn trang đến đúng bình luận đó)"]
+  content varchar(500) [note: "Nội dung ngắn hiển thị trên thanh thông báo"]
+  is_read boolean [default: false]
+  created_at timestamp [default: `now()` ]
+}
+
+Table violation_rules {
+  id integer [primary key, increment]
+  title varchar(150) [note: "Ví dụ: Spam, Nội dung độc hại, Vi phạm bản quyền"]
+  description varchar(1000) [note: "Mô tả chi tiết về quy tắc vi phạm"]
+}
+
+Table reports {
+  id integer [primary key, increment]
+  reporter_id integer [not null]
+  report_type varchar(20) [note: "user, post, comment"]
+  target_user_id integer
+  target_post_id integer
+  target_comment_id integer
+  violation_rule_id integer [note: "Liên kết tới bảng quy tắc vi phạm"]
+  reason_detail text [note: "Dùng TEXT vì chi tiết bổ sung từ người báo cáo có thể rất dài"]
+  status varchar(20) [note: "pending, reviewed, resolved", default: "pending"]
+  created_at timestamp [default: `now()` ]
+}
+
+Table bans {
+  id integer [primary key, increment]
+  user_id integer [not null]
+  admin_id integer [not null]
+  reason varchar(1000) [note: "Lý do ban tài khoản"]
+  expires_at timestamp
+  created_at timestamp [default: `now()` ]
+}
+
+// Bảng lưu lịch sử kiểm duyệt của các cấp quản trị viên
+Table moderation_logs {
+  id integer [primary key, increment]
+  moderator_id integer [not null, note: "Admin/Mod thực hiện hành động kiểm duyệt"]
+  action varchar(50) [not null, note: "Ví dụ: BAN_USER, UNBAN_USER, HIDE_POST, DELETE_COMMENT, APPROVE_AD, REJECT_REPORT"]
+  target_type varchar(30) [not null, note: "Loại thực thể bị xử lý: users, posts, comments, ads, reports"]
+  target_id integer [not null, note: "Id của thực thể tương ứng trong bảng chỉ định ở target_type"]
+  reason varchar(1000) [note: "Lý do thực hiện hành động này"]
+  created_at timestamp [default: `now()` ]
+}
+
+
+// ==========================================
+// DEFINING RELATIONSHIPS (FOREIGN KEYS)
+// ==========================================
+
+Ref: profiles.user_id > users.id [delete: cascade]
+
+// RBAC Roles Relations
+Ref: user_roles.user_id > users.id [delete: cascade]
+Ref: user_roles.role_id > roles.id [delete: cascade]
+
+// Posts, Stories, Media & Reactions
+Ref: posts.user_id > users.id
+Ref: stories.user_id > users.id [delete: cascade]
+Ref: media.user_id > users.id
+Ref: media.post_id > posts.id [delete: cascade]
+Ref: post_reactions.user_id > users.id
+Ref: post_reactions.post_id > posts.id [delete: cascade]
+Ref: post_reactions.emoji_id > emojis.id
+
+// Comments, Bookmarks & Tags
+Ref: comments.user_id > users.id
+Ref: comments.post_id > posts.id [delete: cascade]
+Ref: comments.parent_id > comments.id [delete: cascade]
+Ref: bookmarks.user_id > users.id [delete: cascade]
+Ref: bookmarks.post_id > posts.id [delete: cascade] 
+Ref: tags.post_id > posts.id [delete: cascade]
+Ref: tags.comment_id > comments.id
+Ref: tags.target_user_id > users.id
+
+// Relations & Communities
+Ref: follows.follower_id > users.id
+Ref: follows.following_id > users.id
+Ref: blocks.user_id > users.id
+Ref: blocks.blocked_user_id > users.id
+Ref: friends.sender_id > users.id
+Ref: friends.receiver_id > users.id
+Ref: communities.creator_id > users.id
+Ref: group_members.community_id > communities.id [delete: cascade] 
+Ref: group_members.user_id > users.id [delete: cascade]
+
+// Chat & Messages & Calls
+Ref: chat_participants.chat_id > chats.id [delete: cascade]
+Ref: chat_participants.user_id > users.id
+Ref: messages.chat_id > chats.id [delete: cascade]
+Ref: messages.sender_id > users.id
+Ref: messages.media_id > media.id
+Ref: messages.emoji_id > emojis.id 
+Ref: calls.chat_id > chats.id
+Ref: calls.caller_id > users.id
+
+// Advertisements External Relations
+Ref: ads.admin_id > users.id
+Ref: ads.media_id > media.id
+Ref: ad_analytics.ad_id > ads.id [delete: cascade]
+Ref: ad_analytics.user_id > users.id
+
+// Notifications, Reports & Moderation Relations
+Ref: notifications.receiver_id > users.id [delete: cascade]
+Ref: notifications.sender_id > users.id
+Ref: notifications.redirect_post_id > posts.id [delete: cascade]
+Ref: notifications.redirect_user_id > users.id [delete: cascade]
+Ref: notifications.redirect_comment_id > comments.id [delete: cascade]
+Ref: reports.reporter_id > users.id
+Ref: reports.target_user_id > users.id
+Ref: reports.target_post_id > posts.id
+Ref: reports.target_comment_id > comments.id
+Ref: reports.violation_rule_id > violation_rules.id
+Ref: bans.user_id > users.id
+Ref: bans.admin_id > users.id
+Ref: moderation_logs.moderator_id > users.id
