@@ -1,7 +1,5 @@
 package models
 
-import "time"
-
 type RoleName string
 
 const (
@@ -13,10 +11,9 @@ const (
 )
 
 type Role struct {
-	ID          int64     `json:"id" db:"id"`
-	Name        RoleName  `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	ID          int64    `json:"id" db:"id"`
+	Name        RoleName `json:"name" db:"name"`
+	Description string   `json:"description" db:"description"`
 }
 
 func NewRole(name RoleName, description string) Role {
