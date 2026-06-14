@@ -86,6 +86,10 @@ func main() {
 		log.Fatalf("ensure phase3 tables failed: %v", err)
 	}
 
+	if err := clearPhase3Data(conn); err != nil {
+		log.Fatalf("clear old phase3 data failed: %v", err)
+	}
+
 	users, err := fetchUsers(conn)
 	if err != nil {
 		log.Fatalf("fetch users failed: %v", err)
@@ -248,6 +252,30 @@ func ensurePhase3Tables(conn *sql.DB) error {
 	return nil
 }
 
+func clearPhase3Data(conn *sql.DB) error {
+	queries := []string{
+		"DELETE FROM notifications WHERE redirect_post_id IS NOT NULL OR redirect_comment_id IS NOT NULL",
+		"DELETE FROM reports WHERE target_post_id IS NOT NULL OR target_comment_id IS NOT NULL",
+		"DELETE FROM ad_analytics",
+		"DELETE FROM ads WHERE media_id IS NOT NULL",
+		"DELETE FROM tags",
+		"DELETE FROM bookmarks",
+		"DELETE FROM post_reactions",
+		"DELETE FROM comments",
+		"DELETE FROM media",
+		"DELETE FROM stories",
+		"DELETE FROM posts",
+	}
+
+	for _, q := range queries {
+		if _, err := conn.Exec(q); err != nil {
+			return fmt.Errorf("clear phase3 data: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func fetchUsers(conn *sql.DB) ([]userRow, error) {
 	rows, err := conn.Query("SELECT id, email FROM users ORDER BY id ASC")
 	if err != nil {
@@ -333,9 +361,14 @@ func buildStories(users []userRow) []storySeed {
 			mediaType = "video"
 		}
 
+		mediaURI := fmt.Sprintf("https://picsum.photos/seed/story-%03d/640/480", index+1)
+		if mediaType == "video" {
+			mediaURI = fmt.Sprintf("https://picsum.photos/seed/story-video-%03d/640/480", index+1)
+		}
+
 		stories = append(stories, storySeed{
 			UserID:    user.ID,
-			MediaURI:  fmt.Sprintf("/seeds/stories/story-%03d.%s", index+1, map[string]string{"image": "jpg", "video": "mp4"}[mediaType]),
+			MediaURI:  mediaURI,
 			MediaType: mediaType,
 			Caption:   fmt.Sprintf("Story của %s cho ngày seed thứ %d.", user.Email, index+1),
 			ExpiresAt: "", // use NULL date by leaving empty
@@ -352,10 +385,16 @@ func buildMedia(users []userRow, postIDs []int) []mediaSeed {
 		if index%4 == 0 {
 			fileType = "video"
 		}
+
+		fileURI := fmt.Sprintf("https://picsum.photos/seed/media-%03d/800/600", index+1)
+		if fileType == "video" {
+			fileURI = fmt.Sprintf("https://picsum.photos/seed/media-video-%03d/800/600", index+1)
+		}
+
 		items = append(items, mediaSeed{
 			UserID:   owner.ID,
 			PostID:   sql.NullInt64{Int64: int64(postID), Valid: true},
-			FileURI:  fmt.Sprintf("/seeds/media/media-%03d.%s", index+1, map[string]string{"image": "jpg", "video": "mp4"}[fileType]),
+			FileURI:  fileURI,
 			FileType: fileType,
 			FileSize: 1.2 + float64(index%7)*0.3,
 			Status:   "approved",
@@ -366,7 +405,7 @@ func buildMedia(users []userRow, postIDs []int) []mediaSeed {
 		items = append(items, mediaSeed{
 			UserID:   user.ID,
 			PostID:   sql.NullInt64{Valid: false},
-			FileURI:  fmt.Sprintf("/seeds/media/avatar-%03d.jpg", index+1),
+			FileURI:  fmt.Sprintf("https://picsum.photos/seed/avatar-%03d/320/320", index+1),
 			FileType: "image",
 			FileSize: 0.8 + float64(index%5)*0.2,
 			Status:   "approved",
