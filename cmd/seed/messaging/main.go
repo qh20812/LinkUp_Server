@@ -1,319 +1,163 @@
-package main
+package messaging
 
 import (
-	"database/sql"
 	"fmt"
-	"log"
-	"strings"
+	"math/rand"
+	"time"
 
+	"linkup/cmd/seed/internal"
 	"linkup/config"
-	"linkup/db"
 )
 
-type userRow struct {
-	ID    int
-	Email string
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+func pick[T any](items []T) T {
+	return items[rng.Intn(len(items))]
 }
 
-type chatRow struct {
-	ID   int
-	Type string
-}
-
-type participantSeed struct {
-	ChatID int
-	UserID int
-	Role   string
-}
-
-type messageSeed struct {
-	ChatID   int
-	SenderID int
-	Content  string
-	MediaID  sql.NullInt64
-	EmojiID  sql.NullInt64
-}
-
-type callSeed struct {
-	ChatID   sql.NullInt64
-	CallerID int
-	CallType string
-	IsGroup  bool
-	Status   string
-}
-
-func main() {
-	if err := config.LoadEnv(); err != nil {
-		log.Fatalf("failed to load env: %v", err)
-	}
-
-	conn, err := db.ConnectDb(config.GetEnv())
+func Run(env config.Env, state *internal.SeedState) error {
+	database, err := internal.Connect(env)
 	if err != nil {
-		log.Fatalf("DB connection: failed (%v)", err)
+		return fmt.Errorf("messaging: connect: %w", err)
 	}
-	defer conn.Close()
+	defer database.Close()
 
-	if err := ensurePhase5Tables(conn); err != nil {
-		log.Fatalf("ensure phase5 tables failed: %v", err)
-	}
+	now := time.Now().UTC()
 
-	users, err := fetchUsers(conn)
-	if err != nil {
-		log.Fatalf("fetch users failed: %v", err)
-	}
-	if len(users) < 5 {
-		log.Fatalf("need at least 5 users for phase5 seeding, found %d", len(users))
-	}
+	superAdminID := state.UserIDs[0]
+	chatAdminRoleID := state.RoleIDs[3]
+	chatMemberRoleID := state.RoleIDs[4]
 
-	chats, err := fetchChats(conn)
-	if err != nil {
-		log.Fatalf("fetch chats failed: %v", err)
-	}
-	if len(chats) == 0 {
-		log.Fatalf("no chats found for phase5 seeding")
-	}
+	userRoleAssigned := map[string]bool{}
 
-	participants := buildParticipants(users, chats)
-	participantsInserted, err := seedChatParticipants(conn, participants)
-	if err != nil {
-		log.Fatalf("seed chat participants failed: %v", err)
+	addUserRole := func(userID, roleID string) error {
+		key := userID + "|" + roleID
+		if userRoleAssigned[key] {
+			return nil
+		}
+		userRoleAssigned[key] = true
+		return internal.Exec(database,
+			`INSERT INTO user_roles (id, user_id, role_id, assigned_at) VALUES (?, ?, ?, ?)`,
+			internal.UUID(), userID, roleID, now,
+		)
 	}
 
-	messages := buildMessages(users, chats)
-	messagesInserted, err := seedMessages(conn, messages)
-	if err != nil {
-		log.Fatalf("seed messages failed: %v", err)
+	type chatData struct {
+		id   string
+		typ  string
+		name string
 	}
 
-	calls := buildCalls(users, chats)
-	callsInserted, err := seedCalls(conn, calls)
-	if err != nil {
-		log.Fatalf("seed calls failed: %v", err)
+	chats := []chatData{
+		{internal.UUID(), "direct", ""},
+		{internal.UUID(), "direct", ""},
+		{internal.UUID(), "direct", ""},
+		{internal.UUID(), "group", "Go Dev Team"},
+		{internal.UUID(), "group", "Project Alpha"},
+		{internal.UUID(), "group", "Coffee Chat"},
+		{internal.UUID(), "direct", ""},
+		{internal.UUID(), "group", "Weekend Hikers"},
 	}
 
-	fmt.Printf("Seed phase5: success (chat_participants=%d, messages=%d, calls=%d)\n",
-		participantsInserted,
-		messagesInserted,
-		callsInserted,
-	)
-}
-
-func ensurePhase5Tables(conn *sql.DB) error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS chat_participants (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			chat_id INT NOT NULL,
-			user_id INT NOT NULL,
-			role VARCHAR(20) NOT NULL DEFAULT 'member',
-			joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE KEY chat_participant_unique (chat_id, user_id),
-			CONSTRAINT fk_chat_participants_chat FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-			CONSTRAINT fk_chat_participants_user FOREIGN KEY (user_id) REFERENCES users(id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS messages (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			chat_id INT NOT NULL,
-			sender_id INT NOT NULL,
-			content VARCHAR(2000),
-			media_id INT NULL,
-			emoji_id INT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			CONSTRAINT fk_messages_chat FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
-			CONSTRAINT fk_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id),
-			CONSTRAINT fk_messages_media FOREIGN KEY (media_id) REFERENCES media(id),
-			CONSTRAINT fk_messages_emoji FOREIGN KEY (emoji_id) REFERENCES emojis(id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS calls (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			chat_id INT NULL,
-			caller_id INT NOT NULL,
-			call_type VARCHAR(20) NOT NULL DEFAULT 'voice',
-			is_group BOOLEAN NOT NULL DEFAULT FALSE,
-			status VARCHAR(20) NOT NULL DEFAULT 'completed',
-			started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			ended_at TIMESTAMP NULL,
-			CONSTRAINT fk_calls_chat FOREIGN KEY (chat_id) REFERENCES chats(id),
-			CONSTRAINT fk_calls_caller FOREIGN KEY (caller_id) REFERENCES users(id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+	for _, c := range chats {
+		avatarURI := fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=chat%s", c.id[:8])
+		if err := internal.Exec(database,
+			"INSERT INTO chats (id, `type`, name, avatar_uri, created_at) VALUES (?, ?, ?, ?, ?)",
+			c.id, c.typ, c.name, avatarURI, now,
+		); err != nil {
+			return fmt.Errorf("messaging: insert chat %s: %w", c.id[:8], err)
+		}
+		state.ChatIDs = append(state.ChatIDs, c.id)
 	}
 
-	for _, q := range queries {
-		if _, err := conn.Exec(q); err != nil {
-			return fmt.Errorf("create phase5 table: %w", err)
+	type participantData struct {
+		chatIdx int
+		userIdx int
+		role    string
+	}
+
+	participants := []participantData{
+		{0, 2, "CHAT_ADMIN"}, {0, 3, "CHAT_MEMBER"},
+		{1, 4, "CHAT_ADMIN"}, {1, 5, "CHAT_MEMBER"},
+		{2, 6, "CHAT_ADMIN"}, {2, 7, "CHAT_MEMBER"},
+		{3, 2, "CHAT_ADMIN"}, {3, 3, "CHAT_MEMBER"}, {3, 4, "CHAT_MEMBER"}, {3, 5, "CHAT_MEMBER"},
+		{4, 6, "CHAT_ADMIN"}, {4, 7, "CHAT_MEMBER"}, {4, 8, "CHAT_MEMBER"},
+		{5, 9, "CHAT_ADMIN"}, {5, 10, "CHAT_MEMBER"}, {5, 11, "CHAT_MEMBER"}, {5, 12, "CHAT_MEMBER"},
+		{6, 13, "CHAT_ADMIN"}, {6, 14, "CHAT_MEMBER"},
+		{7, 15, "CHAT_ADMIN"}, {7, 16, "CHAT_MEMBER"}, {7, 17, "CHAT_MEMBER"}, {7, 18, "CHAT_MEMBER"},
+	}
+
+	for _, p := range participants {
+		userID := state.UserIDs[p.userIdx]
+		if userID == superAdminID {
+			continue
+		}
+
+		if err := internal.Exec(database,
+			`INSERT INTO chat_participants (id, chat_id, user_id, role, joined_at) VALUES (?, ?, ?, ?, ?)`,
+			internal.UUID(), state.ChatIDs[p.chatIdx], userID, p.role, now,
+		); err != nil {
+			return fmt.Errorf("messaging: insert participant chat %d user %d: %w", p.chatIdx, p.userIdx, err)
+		}
+
+		var roleID string
+		if p.role == "CHAT_ADMIN" {
+			roleID = chatAdminRoleID
+		} else {
+			roleID = chatMemberRoleID
+		}
+		if err := addUserRole(userID, roleID); err != nil {
+			return fmt.Errorf("messaging: user_role %s for %s: %w", p.role, userID, err)
+		}
+	}
+
+	messages := []string{
+		"Hey, how are you?",
+		"Did you see the latest update?",
+		"We need to discuss the project timeline.",
+		"Can you review my pull request?",
+		"The deployment went smoothly.",
+		"Meeting at 3 PM today?",
+		"I pushed some changes to the repo.",
+		"Great work on the last sprint!",
+		"Anyone free for a quick call?",
+		"Let's schedule a code review session.",
+		"The CI pipeline is failing on main.",
+		"I fixed the bug you reported.",
+		"Can someone help me with this issue?",
+		"Documentation has been updated.",
+		"We should refactor the auth module.",
+		"New feature request: dark mode.",
+		"Performance improved by 40%!",
+		"Who wants to grab lunch?",
+		"The API rate limit is too low.",
+		"I'll handle the database migration.",
+		"Check out this cool library I found.",
+		"We need more test coverage.",
+		"Deploying to staging now.",
+		"The UI looks much better now.",
+		"Any updates on the security audit?",
+	}
+
+	for i := 0; i < 50; i++ {
+		chatIdx := i % len(state.ChatIDs)
+		var senderIdx int
+		for _, p := range participants {
+			if p.chatIdx == chatIdx {
+				senderIdx = p.userIdx
+				break
+			}
+		}
+		senderID := state.UserIDs[senderIdx%len(state.UserIDs)]
+		content := pick(messages)
+
+		if err := internal.Exec(database,
+			`INSERT INTO messages (id, chat_id, sender_id, content, media_id, emoji_id, created_at) VALUES (?, ?, ?, ?, NULL, NULL, ?)`,
+			internal.UUID(), state.ChatIDs[chatIdx], senderID, content, now.Add(-time.Duration(50-i)*time.Minute),
+		); err != nil {
+			return fmt.Errorf("messaging: insert message %d: %w", i, err)
 		}
 	}
 
 	return nil
-}
-
-func fetchUsers(conn *sql.DB) ([]userRow, error) {
-	rows, err := conn.Query("SELECT id, email FROM users ORDER BY id ASC")
-	if err != nil {
-		return nil, fmt.Errorf("query users: %w", err)
-	}
-	defer rows.Close()
-
-	users := make([]userRow, 0)
-	for rows.Next() {
-		var u userRow
-		if err := rows.Scan(&u.ID, &u.Email); err != nil {
-			return nil, fmt.Errorf("scan user: %w", err)
-		}
-		users = append(users, u)
-	}
-
-	return users, rows.Err()
-}
-
-func fetchChats(conn *sql.DB) ([]chatRow, error) {
-	rows, err := conn.Query("SELECT id, type FROM chats ORDER BY id ASC")
-	if err != nil {
-		return nil, fmt.Errorf("query chats: %w", err)
-	}
-	defer rows.Close()
-
-	chats := make([]chatRow, 0)
-	for rows.Next() {
-		var c chatRow
-		if err := rows.Scan(&c.ID, &c.Type); err != nil {
-			return nil, fmt.Errorf("scan chat: %w", err)
-		}
-		chats = append(chats, c)
-	}
-
-	return chats, rows.Err()
-}
-
-func buildParticipants(users []userRow, chats []chatRow) []participantSeed {
-	items := make([]participantSeed, 0)
-	for i, chat := range chats {
-		if strings.EqualFold(chat.Type, "group") {
-			for j := 0; j < 5; j++ {
-				items = append(items, participantSeed{ChatID: chat.ID, UserID: users[(i+j)%len(users)].ID, Role: "member"})
-			}
-			items = append(items, participantSeed{ChatID: chat.ID, UserID: users[(i+5)%len(users)].ID, Role: "admin"})
-		} else {
-			first := users[i%len(users)].ID
-			second := users[(i+1)%len(users)].ID
-			if first == second {
-				second = users[(i+2)%len(users)].ID
-			}
-			items = append(items, participantSeed{ChatID: chat.ID, UserID: first, Role: "member"})
-			items = append(items, participantSeed{ChatID: chat.ID, UserID: second, Role: "member"})
-		}
-	}
-	return items
-}
-
-func buildMessages(users []userRow, chats []chatRow) []messageSeed {
-	texts := []string{
-		"Xin chào, bạn có rảnh không?",
-		"Hôm nay mình check lại thông tin seed data.",
-		"Bài đăng mới đã được tạo thành công.",
-		"Đừng quên review tài liệu kỹ thuật.",
-		"Ảnh và video seed đã sẵn sàng.",
-	}
-	items := make([]messageSeed, 0)
-	for i, chat := range chats {
-		for j := 0; j < 4; j++ {
-			sender := users[(i+j)%len(users)]
-			items = append(items, messageSeed{
-				ChatID:   chat.ID,
-				SenderID: sender.ID,
-				Content:  texts[(i+j)%len(texts)],
-				MediaID:  sql.NullInt64{Valid: false},
-				EmojiID:  sql.NullInt64{Valid: false},
-			})
-		}
-	}
-	return items
-}
-
-func buildCalls(users []userRow, chats []chatRow) []callSeed {
-	statuses := []string{"completed", "missed", "declined"}
-	items := make([]callSeed, 0)
-	for i, chat := range chats {
-		caller := users[i%len(users)]
-		items = append(items, callSeed{
-			ChatID:   sql.NullInt64{Int64: int64(chat.ID), Valid: true},
-			CallerID: caller.ID,
-			CallType: "voice",
-			IsGroup:  strings.EqualFold(chat.Type, "group"),
-			Status:   statuses[i%len(statuses)],
-		})
-		if strings.EqualFold(chat.Type, "group") {
-			items = append(items, callSeed{
-				ChatID:   sql.NullInt64{Int64: int64(chat.ID), Valid: true},
-				CallerID: users[(i+1)%len(users)].ID,
-				CallType: "video",
-				IsGroup:  true,
-				Status:   statuses[(i+1)%len(statuses)],
-			})
-		}
-	}
-	return items
-}
-
-func seedChatParticipants(conn *sql.DB, items []participantSeed) (int64, error) {
-	values := make([][]any, 0, len(items))
-	for _, item := range items {
-		values = append(values, []any{item.ChatID, item.UserID, item.Role})
-	}
-	return bulkInsertIgnore(conn, "chat_participants", []string{"chat_id", "user_id", "role"}, values)
-}
-
-func seedMessages(conn *sql.DB, items []messageSeed) (int64, error) {
-	values := make([][]any, 0, len(items))
-	for _, item := range items {
-		values = append(values, []any{item.ChatID, item.SenderID, item.Content, item.MediaID, item.EmojiID})
-	}
-	return bulkInsertIgnore(conn, "messages", []string{"chat_id", "sender_id", "content", "media_id", "emoji_id"}, values)
-}
-
-func seedCalls(conn *sql.DB, items []callSeed) (int64, error) {
-	values := make([][]any, 0, len(items))
-	for _, item := range items {
-		values = append(values, []any{item.ChatID, item.CallerID, item.CallType, item.IsGroup, item.Status})
-	}
-	return bulkInsertIgnore(conn, "calls", []string{"chat_id", "caller_id", "call_type", "is_group", "status"}, values)
-}
-
-func bulkInsertIgnore(conn *sql.DB, table string, columns []string, rows [][]any) (int64, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-
-	var builder strings.Builder
-	builder.WriteString("INSERT IGNORE INTO ")
-	builder.WriteString(table)
-	builder.WriteString(" (")
-	builder.WriteString(strings.Join(columns, ", "))
-	builder.WriteString(") VALUES ")
-
-	args := make([]any, 0, len(rows)*len(columns))
-	for i, row := range rows {
-		if i > 0 {
-			builder.WriteString(", ")
-		}
-		builder.WriteString("(")
-		for j := range columns {
-			if j > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString("?")
-		}
-		builder.WriteString(")")
-		args = append(args, row...)
-	}
-
-	result, err := conn.Exec(builder.String(), args...)
-	if err != nil {
-		return 0, fmt.Errorf("insert seed rows into %s: %w", table, err)
-	}
-
-	inserted, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("rows affected for %s: %w", table, err)
-	}
-	return inserted, nil
 }

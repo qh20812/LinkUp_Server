@@ -13,8 +13,8 @@ const (
 )
 
 type Story struct {
-	ID         int64          `json:"id" db:"id"`
-	UserID     int64          `json:"user_id" db:"user_id"`
+	ID         string         `json:"id" db:"id"`
+	UserID     string         `json:"user_id" db:"user_id"`
 	MediaURI   string         `json:"media_uri" db:"media_uri"`
 	MediaType  StoryMediaType `json:"media_type" db:"media_type"`
 	Caption    string         `json:"caption" db:"caption"`
@@ -22,7 +22,7 @@ type Story struct {
 	ExpiresAt  *time.Time     `json:"expires_at,omitempty" db:"expires_at"`
 }
 
-func NewStory(userID int64, mediaURI string, mediaType StoryMediaType, caption string) Story {
+func NewStory(userID, mediaURI string, mediaType StoryMediaType, caption string) Story {
 	return Story{
 		UserID:    userID,
 		MediaURI:  mediaURI,
@@ -42,6 +42,6 @@ func ParseStoryMediaType(value string) StoryMediaType {
 	case string(StoryMediaTypeVideo):
 		return StoryMediaTypeVideo
 	default:
-		return StoryMediaTypeVideo
+		return StoryMediaTypeImage
 	}
 }

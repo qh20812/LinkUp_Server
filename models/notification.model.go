@@ -1,23 +1,34 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type NotificationType string
 
+const (
+	NotificationTypeLike          NotificationType = "like"
+	NotificationTypeComment       NotificationType = "comment"
+	NotificationTypeFollow        NotificationType = "follow"
+	NotificationTypeMessage       NotificationType = "message"
+	NotificationTypeFriendRequest NotificationType = "friend_request"
+)
+
 type Notification struct {
-	ID                int64            `json:"id" db:"id"`
-	ReceiverID        int64            `json:"receiver_id" db:"receiver_id"`
-	SenderID          *int64           `json:"sender_id,omitempty" db:"sender_id"`
+	ID                string           `json:"id" db:"id"`
+	ReceiverID        string           `json:"receiver_id" db:"receiver_id"`
+	SenderID          *string          `json:"sender_id,omitempty" db:"sender_id"`
 	Type              NotificationType `json:"type" db:"type"`
-	RedirectPostID    *int64           `json:"redirect_post_id,omitempty" db:"redirect_post_id"`
-	RedirectUserID    *int64           `json:"redirect_user_id,omitempty" db:"redirect_user_id"`
-	RedirectCommentID *int64           `json:"redirect_comment_id,omitempty" db:"redirect_comment_id"`
+	RedirectPostID    *string          `json:"redirect_post_id,omitempty" db:"redirect_post_id"`
+	RedirectUserID    *string          `json:"redirect_user_id,omitempty" db:"redirect_user_id"`
+	RedirectCommentID *string          `json:"redirect_comment_id,omitempty" db:"redirect_comment_id"`
 	Content           string           `json:"content" db:"content"`
 	IsRead            bool             `json:"is_read" db:"is_read"`
 	CreatedAt         time.Time        `json:"created_at" db:"created_at"`
 }
 
-func NewNotification(receiverID int64, senderID *int64, notifType NotificationType, content string) Notification {
+func NewNotification(receiverID string, senderID *string, notifType NotificationType, content string) Notification {
 	return Notification{
 		ReceiverID: receiverID,
 		SenderID:   senderID,
@@ -28,4 +39,21 @@ func NewNotification(receiverID int64, senderID *int64, notifType NotificationTy
 
 func (n NotificationType) String() string {
 	return string(n)
+}
+
+func ParseNotificationType(value string) NotificationType {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(NotificationTypeLike):
+		return NotificationTypeLike
+	case string(NotificationTypeComment):
+		return NotificationTypeComment
+	case string(NotificationTypeFollow):
+		return NotificationTypeFollow
+	case string(NotificationTypeMessage):
+		return NotificationTypeMessage
+	case string(NotificationTypeFriendRequest):
+		return NotificationTypeFriendRequest
+	default:
+		return NotificationTypeLike
+	}
 }

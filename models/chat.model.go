@@ -13,7 +13,7 @@ const (
 )
 
 type Chat struct {
-	ID        int64    `json:"id" db:"id"`
+	ID        string   `json:"id" db:"id"`
 	Type      ChatType `json:"type" db:"type"`
 	Name      string   `json:"name" db:"name"`
 	AvatarURI string   `json:"avatar_uri" db:"avatar_uri"`

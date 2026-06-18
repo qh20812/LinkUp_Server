@@ -14,11 +14,10 @@ const (
 )
 
 type Ad struct {
-	ID        int64     `json:"id" db:"id"`
-	AdminID   int64     `json:"admin_id" db:"admin_id"`
+	ID        string     `json:"id" db:"id"`
 	Title     string    `json:"title" db:"title"`
 	Content   string    `json:"content" db:"content"`
-	MediaID   *int64    `json:"media_id,omitempty" db:"media_id"`
+	MediaID   *string `json:"media_id,omitempty" db:"media_id"`
 	TargetURL string    `json:"target_url" db:"target_url"`
 	Status    AdStatus  `json:"status" db:"status"`
 	Budget    float64   `json:"budget" db:"budget"`
@@ -27,9 +26,8 @@ type Ad struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
-func NewAd(adminID int64, title, content string, targetURL string, budget float64) Ad {
+func NewAd(title, content string, targetURL string, budget float64) Ad {
 	return Ad{
-		AdminID:   adminID,
 		Title:     title,
 		Content:   content,
 		TargetURL: targetURL,

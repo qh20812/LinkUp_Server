@@ -1,587 +1,281 @@
-package main
+package social
 
 import (
-	"database/sql"
 	"fmt"
-	"log"
-	"strings"
+	"math/rand"
+	"time"
 
+	"linkup/cmd/seed/internal"
 	"linkup/config"
-	"linkup/db"
 )
 
-type userRow struct {
-	ID    int
-	Email string
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+func randRange(min, max int) int {
+	return rng.Intn(max-min+1) + min
 }
 
-type emojiRow struct {
-	ID   int
-	Code string
+func pick[T any](items []T) T {
+	return items[rng.Intn(len(items))]
 }
 
-type postSeed struct {
-	UserID int
-	Title  string
-	Body   string
-	Views  int
-	Status string
-}
-
-type storySeed struct {
-	UserID    int
-	MediaURI  string
-	MediaType string
-	Caption   string
-	ExpiresAt string
-}
-
-type mediaSeed struct {
-	UserID   int
-	PostID   sql.NullInt64
-	FileURI  string
-	FileType string
-	FileSize float64
-	Status   string
-}
-
-type postReactionSeed struct {
-	UserID  int
-	PostID  int
-	EmojiID int
-}
-
-type commentSeed struct {
-	UserID   int
-	PostID   int
-	ParentID sql.NullInt64
-	Content  string
-}
-
-type bookmarkSeed struct {
-	UserID int
-	PostID int
-}
-
-type tagSeed struct {
-	PostID       int
-	CommentID    sql.NullInt64
-	TagType      string
-	TargetUserID sql.NullInt64
-	Name         string
-}
-
-func main() {
-	if err := config.LoadEnv(); err != nil {
-		log.Fatalf("failed to load env: %v", err)
-	}
-
-	conn, err := db.ConnectDb(config.GetEnv())
+func Run(env config.Env, state *internal.SeedState) error {
+	database, err := internal.Connect(env)
 	if err != nil {
-		log.Fatalf("DB connection: failed (%v)", err)
+		return fmt.Errorf("social: connect: %w", err)
 	}
-	defer conn.Close()
+	defer database.Close()
 
-	if err := ensurePhase3Tables(conn); err != nil {
-		log.Fatalf("ensure phase3 tables failed: %v", err)
-	}
+	now := time.Now().UTC()
 
-	if err := clearPhase3Data(conn); err != nil {
-		log.Fatalf("clear old phase3 data failed: %v", err)
-	}
-
-	users, err := fetchUsers(conn)
-	if err != nil {
-		log.Fatalf("fetch users failed: %v", err)
-	}
-	if len(users) == 0 {
-		log.Fatalf("no users found for phase3 seeding")
-	}
-
-	emojis, err := fetchEmojis(conn)
-	if err != nil {
-		log.Fatalf("fetch emojis failed: %v", err)
-	}
-	if len(emojis) == 0 {
-		log.Fatalf("no emojis found for phase3 seeding")
-	}
-
-	posts := buildPosts(users, 100)
-	postsInserted, err := seedPosts(conn, posts)
-	if err != nil {
-		log.Fatalf("seed posts failed: %v", err)
-	}
-
-	postsIDs, err := fetchPostIDs(conn, 100)
-	if err != nil {
-		log.Fatalf("fetch post ids failed: %v", err)
-	}
-
-	stories := buildStories(users)
-	storiesInserted, err := seedStories(conn, stories)
-	if err != nil {
-		log.Fatalf("seed stories failed: %v", err)
+	postTitles := []string{
+		"My journey into open source",
+		"Building scalable APIs with Go",
+		"Top 10 VS Code extensions for 2026",
+		"How I learned to stop worrying and love the cloud",
+		"Understanding distributed systems",
+		"The future of AI in everyday apps",
+		"Clean code principles that matter",
+		"From monolith to microservices",
+		"Why recursive algorithms still matter",
+		"DevOps culture: more than just tools",
+		"Designing user-friendly interfaces",
+		"The art of code review",
+		"Database optimization techniques",
+		"Securing your web application",
+		"Containerization best practices",
+		"REST vs GraphQL: choosing the right API",
+		"Introduction to event-driven architecture",
+		"Performance tuning for high-traffic sites",
+		"Testing strategies for modern web apps",
+		"What I wish I knew as a junior dev",
+		"Building real-time features with WebSockets",
+		"CI/CD pipelines that actually work",
+		"Managing technical debt effectively",
+		"Data structures for interviews",
+		"Why documentation matters",
+		"Accessibility in web development",
+		"Edge computing and the IoT revolution",
+		"Blockchain beyond cryptocurrency",
+		"Serverless architecture trade-offs",
+		"Zero-trust security model explained",
 	}
 
-	media := buildMedia(users, postsIDs)
-	mediaInserted, err := seedMedia(conn, media)
-	if err != nil {
-		log.Fatalf("seed media failed: %v", err)
+	postContents := []string{
+		"After years of working with proprietary software, I finally made the leap to open source. The community has been incredibly welcoming and I've learned more in the past month than in the entire last year. Here are my key takeaways...",
+		"In this post I'll walk through the architecture of a high-performance API built with Go. We'll cover routing, middleware, database optimization, and deployment strategies that have worked well for our team.",
+		"I've curated a list of extensions that have significantly boosted my productivity. From intelligent code completion to advanced debugging tools, these plugins transform VS Code into a powerhouse.",
+		"Cloud computing doesn't have to be scary. Once you understand the fundamental concepts of scalability, redundancy, and cost optimization, you'll wonder why you didn't make the switch sooner.",
+		"Distributed systems are everywhere, but understanding them can be daunting. Let's break down the core concepts: consistency, partitioning, replication, and fault tolerance.",
+		"AI is no longer a futuristic concept — it's here and transforming how we build applications. From recommendation engines to natural language processing, the possibilities are endless.",
+		"Good code writes itself when you follow solid principles. Let's explore SRP, OCP, LSP, ISP, DIP with real-world examples that you can apply to your projects today.",
+		"Our journey from a monolithic Rails app to microservices taught us valuable lessons. Not everything needs to be a microservice, but when you get it right, the benefits are enormous.",
+		"Recursion isn't just an academic concept. From tree traversals to divide-and-conquer algorithms, understanding recursion will make you a better problem solver.",
+		"DevOps is a cultural shift, not a toolbox. The most successful transformations happen when teams embrace collaboration, automation, and continuous improvement.",
 	}
 
-	postReactions := buildPostReactions(users, postsIDs, emojis)
-	reactionsInserted, err := seedPostReactions(conn, postReactions)
-	if err != nil {
-		log.Fatalf("seed post reactions failed: %v", err)
+	postBodies := []string{
+		"\n\nI'll cover specific examples from my own experience and provide actionable advice for anyone considering the switch. The open source ecosystem has matured enormously and there's never been a better time to get involved.",
+		"\n\nWe'll start with the basics of routing and middleware setup, then dive into more advanced topics like connection pooling, query optimization, and caching strategies.",
+		"\n\nEach extension on this list has been thoroughly tested and vetted. I'll include configuration tips and potential gotchas to watch out for.",
+		"\n\nThis guide covers the major cloud providers and their strengths, cost optimization strategies, security best practices, and how to choose the right services for your needs.",
+		"\n\nUnderstanding the CAP theorem, consensus algorithms like Raft and Paxos, and when to use synchronous vs asynchronous replication are all crucial skills.",
+		"\n\nWe'll look at practical applications of AI in everyday software: smart search, personalized recommendations, automated moderation, and predictive analytics.",
+		"\n\nEach principle comes with code examples showing both violations and correct implementations. You'll walk away with practical patterns you can use immediately.",
+		"\n\nKey lessons: start with a well-defined bounded context, invest in observability early, and never underestimate the complexity of data consistency across services.",
+		"\n\nWe'll implement several classic recursive algorithms and analyze their space/time complexity. You'll see how recursion maps naturally to certain problem domains.",
+		"\n\nPractical steps to build a DevOps culture: automate everything, blameless retrospectives, shared ownership of production, and continuous learning.",
 	}
 
-	comments := buildComments(users, postsIDs)
-	commentsInserted, err := seedComments(conn, comments)
-	if err != nil {
-		log.Fatalf("seed comments failed: %v", err)
-	}
+	for i := 0; i < 30; i++ {
+		postID := internal.UUID()
+		userID := state.UserIDs[i%len(state.UserIDs)]
+		title := postTitles[i%len(postTitles)]
+		body := postContents[i%len(postContents)]
+		extra := postBodies[i%len(postBodies)]
+		views := randRange(10, 5000)
 
-	bookmarks := buildBookmarks(users, postsIDs)
-	bookmarksInserted, err := seedBookmarks(conn, bookmarks)
-	if err != nil {
-		log.Fatalf("seed bookmarks failed: %v", err)
-	}
-
-	tags := buildTags(users, postsIDs)
-	tagsInserted, err := seedTags(conn, tags)
-	if err != nil {
-		log.Fatalf("seed tags failed: %v", err)
-	}
-
-	fmt.Printf("Seed phase3: success (posts=%d, stories=%d, media=%d, reactions=%d, comments=%d, bookmarks=%d, tags=%d)\n",
-		postsInserted,
-		storiesInserted,
-		mediaInserted,
-		reactionsInserted,
-		commentsInserted,
-		bookmarksInserted,
-		tagsInserted,
-	)
-}
-
-func ensurePhase3Tables(conn *sql.DB) error {
-	queries := []string{
-		`CREATE TABLE IF NOT EXISTS posts (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			user_id INT NOT NULL,
-			title VARCHAR(255) NOT NULL,
-			content VARCHAR(3000),
-			views_count INT NOT NULL DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'active',
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS stories (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			user_id INT NOT NULL,
-			media_uri VARCHAR(500) NOT NULL,
-			media_type VARCHAR(20) NOT NULL DEFAULT 'video',
-			caption VARCHAR(500),
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP NULL,
-			CONSTRAINT fk_stories_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS media (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			user_id INT NOT NULL,
-			post_id INT NULL,
-			file_uri VARCHAR(500) NOT NULL,
-			file_type VARCHAR(50) NOT NULL,
-			file_size FLOAT,
-			status VARCHAR(20) NOT NULL DEFAULT 'approved',
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			CONSTRAINT fk_media_user FOREIGN KEY (user_id) REFERENCES users(id),
-			CONSTRAINT fk_media_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS post_reactions (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			user_id INT NOT NULL,
-			post_id INT NOT NULL,
-			emoji_id INT NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE KEY user_post_unique (user_id, post_id),
-			CONSTRAINT fk_post_reactions_user FOREIGN KEY (user_id) REFERENCES users(id),
-			CONSTRAINT fk_post_reactions_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-			CONSTRAINT fk_post_reactions_emoji FOREIGN KEY (emoji_id) REFERENCES emojis(id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS comments (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			user_id INT NOT NULL,
-			post_id INT NOT NULL,
-			parent_id INT NULL,
-			content VARCHAR(500) NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			CONSTRAINT fk_comments_user FOREIGN KEY (user_id) REFERENCES users(id),
-			CONSTRAINT fk_comments_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-			CONSTRAINT fk_comments_parent FOREIGN KEY (parent_id) REFERENCES comments(id) ON DELETE CASCADE
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS bookmarks (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			user_id INT NOT NULL,
-			post_id INT NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE KEY bookmark_user_post_unique (user_id, post_id),
-			CONSTRAINT fk_bookmarks_user FOREIGN KEY (user_id) REFERENCES users(id),
-			CONSTRAINT fk_bookmarks_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-		`CREATE TABLE IF NOT EXISTS tags (
-			id INT AUTO_INCREMENT PRIMARY KEY,
-			post_id INT NOT NULL,
-			comment_id INT NULL,
-			tag_type VARCHAR(20),
-			target_user_id INT NULL,
-			name VARCHAR(100),
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			CONSTRAINT fk_tags_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-			CONSTRAINT fk_tags_comment FOREIGN KEY (comment_id) REFERENCES comments(id),
-			CONSTRAINT fk_tags_target_user FOREIGN KEY (target_user_id) REFERENCES users(id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-	}
-
-	for _, q := range queries {
-		if _, err := conn.Exec(q); err != nil {
-			return fmt.Errorf("create phase3 table: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func clearPhase3Data(conn *sql.DB) error {
-	queries := []string{
-		"DELETE FROM notifications WHERE redirect_post_id IS NOT NULL OR redirect_comment_id IS NOT NULL",
-		"DELETE FROM reports WHERE target_post_id IS NOT NULL OR target_comment_id IS NOT NULL",
-		"DELETE FROM ad_analytics",
-		"DELETE FROM ads WHERE media_id IS NOT NULL",
-		"DELETE FROM tags",
-		"DELETE FROM bookmarks",
-		"DELETE FROM post_reactions",
-		"DELETE FROM comments",
-		"DELETE FROM media",
-		"DELETE FROM stories",
-		"DELETE FROM posts",
-	}
-
-	for _, q := range queries {
-		if _, err := conn.Exec(q); err != nil {
-			return fmt.Errorf("clear phase3 data: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func fetchUsers(conn *sql.DB) ([]userRow, error) {
-	rows, err := conn.Query("SELECT id, email FROM users ORDER BY id ASC")
-	if err != nil {
-		return nil, fmt.Errorf("query users: %w", err)
-	}
-	defer rows.Close()
-
-	users := make([]userRow, 0)
-	for rows.Next() {
-		var u userRow
-		if err := rows.Scan(&u.ID, &u.Email); err != nil {
-			return nil, fmt.Errorf("scan user: %w", err)
-		}
-		users = append(users, u)
-	}
-
-	return users, rows.Err()
-}
-
-func fetchEmojis(conn *sql.DB) ([]emojiRow, error) {
-	rows, err := conn.Query("SELECT id, code FROM emojis ORDER BY id ASC")
-	if err != nil {
-		return nil, fmt.Errorf("query emojis: %w", err)
-	}
-	defer rows.Close()
-
-	emojis := make([]emojiRow, 0)
-	for rows.Next() {
-		var e emojiRow
-		if err := rows.Scan(&e.ID, &e.Code); err != nil {
-			return nil, fmt.Errorf("scan emoji: %w", err)
-		}
-		emojis = append(emojis, e)
-	}
-
-	return emojis, rows.Err()
-}
-
-func fetchPostIDs(conn *sql.DB, limit int) ([]int, error) {
-	rows, err := conn.Query("SELECT id FROM posts ORDER BY id DESC LIMIT ?", limit)
-	if err != nil {
-		return nil, fmt.Errorf("query post ids: %w", err)
-	}
-	defer rows.Close()
-
-	ids := make([]int, 0)
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan post id: %w", err)
-		}
-		ids = append(ids, id)
-	}
-
-	return ids, rows.Err()
-}
-
-func buildPosts(users []userRow, total int) []postSeed {
-	posts := make([]postSeed, 0, total)
-	for index := 1; index <= total; index++ {
-		user := users[(index-1)%len(users)]
 		status := "active"
-		if index%12 == 0 {
+		if i%15 == 7 {
 			status = "hidden"
 		}
 
-		posts = append(posts, postSeed{
-			UserID: user.ID,
-			Title:  fmt.Sprintf("Seed bài viết #%03d", index),
-			Body:   fmt.Sprintf("Nội dung mẫu cho bài viết số %d của user %s. Đây là dữ liệu seed để kiểm tra hiển thị và tương tác.", index, user.Email),
-			Views:  index * 7,
-			Status: status,
-		})
-	}
-	return posts
-}
+		createdAt := now.Add(-time.Duration(randRange(1, 720)) * time.Hour)
 
-func buildStories(users []userRow) []storySeed {
-	stories := make([]storySeed, 0, len(users))
-	for index, user := range users {
-		mediaType := "image"
-		if index%3 == 0 {
-			mediaType = "video"
+		if err := internal.Exec(database,
+			`INSERT INTO posts (id, user_id, title, content, views_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+			postID, userID, title, body+extra, views, status, createdAt,
+		); err != nil {
+			return fmt.Errorf("social: insert post %d: %w", i, err)
 		}
-
-		mediaURI := fmt.Sprintf("https://picsum.photos/seed/story-%03d/640/480", index+1)
-		if mediaType == "video" {
-			mediaURI = fmt.Sprintf("https://picsum.photos/seed/story-video-%03d/640/480", index+1)
-		}
-
-		stories = append(stories, storySeed{
-			UserID:    user.ID,
-			MediaURI:  mediaURI,
-			MediaType: mediaType,
-			Caption:   fmt.Sprintf("Story của %s cho ngày seed thứ %d.", user.Email, index+1),
-			ExpiresAt: "", // use NULL date by leaving empty
-		})
-	}
-	return stories
-}
-
-func buildMedia(users []userRow, postIDs []int) []mediaSeed {
-	items := make([]mediaSeed, 0, len(postIDs)+len(users))
-	for index, postID := range postIDs {
-		owner := users[index%len(users)]
-		fileType := "image"
-		if index%4 == 0 {
-			fileType = "video"
-		}
-
-		fileURI := fmt.Sprintf("https://picsum.photos/seed/media-%03d/800/600", index+1)
-		if fileType == "video" {
-			fileURI = fmt.Sprintf("https://picsum.photos/seed/media-video-%03d/800/600", index+1)
-		}
-
-		items = append(items, mediaSeed{
-			UserID:   owner.ID,
-			PostID:   sql.NullInt64{Int64: int64(postID), Valid: true},
-			FileURI:  fileURI,
-			FileType: fileType,
-			FileSize: 1.2 + float64(index%7)*0.3,
-			Status:   "approved",
-		})
+		state.PostIDs = append(state.PostIDs, postID)
 	}
 
-	for index, user := range users {
-		items = append(items, mediaSeed{
-			UserID:   user.ID,
-			PostID:   sql.NullInt64{Valid: false},
-			FileURI:  fmt.Sprintf("https://picsum.photos/seed/avatar-%03d/320/320", index+1),
-			FileType: "image",
-			FileSize: 0.8 + float64(index%5)*0.2,
-			Status:   "approved",
-		})
+	commentTexts := []string{
+		"Great post! Really insightful.",
+		"I completely agree with your points.",
+		"Thanks for sharing this, very helpful.",
+		"Have you considered the alternative approach?",
+		"This changed my perspective, thank you!",
+		"Can you elaborate more on this topic?",
+		"Saved for later reading. Excellent content!",
+		"I've been using this technique and it works great.",
+		"Bookmarked! This is exactly what I needed.",
+		"Interesting take, but I have a different opinion.",
+		"Could you share some code examples?",
+		"This is underrated, should have more visibility.",
+		"Well written and easy to follow.",
+		"I ran into this issue last week, perfect timing!",
+		"Adding this to my learning roadmap.",
 	}
 
-	return items
-}
+	for i := 0; i < 60; i++ {
+		commentID := internal.UUID()
+		userID := state.UserIDs[i%len(state.UserIDs)]
+		postID := state.PostIDs[i%len(state.PostIDs)]
+		var parentID *string
+		if i >= 30 && i%3 == 0 {
+			parentID = internal.Ptr(state.CommentIDs[i%len(state.CommentIDs)])
+		}
 
-func buildPostReactions(users []userRow, postIDs []int, emojis []emojiRow) []postReactionSeed {
-	items := make([]postReactionSeed, 0)
-	for i, user := range users {
-		for j := 0; j < 3 && j < len(postIDs); j++ {
-			postID := postIDs[(i+j)%len(postIDs)]
-			emoji := emojis[(i+j)%len(emojis)]
-			items = append(items, postReactionSeed{UserID: user.ID, PostID: postID, EmojiID: emoji.ID})
+		createdAt := now.Add(-time.Duration(randRange(1, 360)) * time.Hour)
+		content := pick(commentTexts)
+		if parentID != nil {
+			content = "Reply: " + content
+		}
+
+		if err := internal.Exec(database,
+			`INSERT INTO comments (id, user_id, post_id, parent_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			commentID, userID, postID, parentID, content, createdAt,
+		); err != nil {
+			return fmt.Errorf("social: insert comment %d: %w", i, err)
+		}
+		state.CommentIDs = append(state.CommentIDs, commentID)
+	}
+
+	for i := 0; i < 50; i++ {
+		postID := state.PostIDs[i%len(state.PostIDs)]
+		hashTags := []string{"golang", "programming", "devops", "cloud", "ai", "webdev", "security", "database", "microservices", "career"}
+		tagType := "hashtag"
+		var commentID *string
+		targetUserID := (*string)(nil)
+		name := pick(hashTags)
+
+		if i >= 25 {
+			tagType = "mention"
+			commentID = internal.Ptr(state.CommentIDs[i%len(state.CommentIDs)])
+			targetUserID = internal.Ptr(state.UserIDs[i%len(state.UserIDs)])
+			name = "@" + pick([]string{"john_doe", "jane_smith", "alice_wonder", "bob_builder", "charlie_dev"})
+		}
+
+		if err := internal.Exec(database,
+			`INSERT INTO tags (id, post_id, comment_id, tag_type, target_user_id, name) VALUES (?, ?, ?, ?, ?, ?)`,
+			internal.UUID(), postID, commentID, tagType, targetUserID, name,
+		); err != nil {
+			return fmt.Errorf("social: insert tag %d: %w", i, err)
 		}
 	}
-	return items
-}
 
-func buildComments(users []userRow, postIDs []int) []commentSeed {
-	items := make([]commentSeed, 0, len(postIDs)*2)
-	for i, postID := range postIDs {
-		user := users[i%len(users)]
-		items = append(items, commentSeed{
-			UserID:   user.ID,
-			PostID:   postID,
-			ParentID: sql.NullInt64{Valid: false},
-			Content:  fmt.Sprintf("Bình luận thử nghiệm cho bài viết %d của user %s.", postID, user.Email),
-		})
-		if i%5 == 0 {
-			items = append(items, commentSeed{
-				UserID:   users[(i+1)%len(users)].ID,
-				PostID:   postID,
-				ParentID: sql.NullInt64{Valid: false},
-				Content:  fmt.Sprintf("Phản hồi phụ cho bài viết %d.", postID),
-			})
-		}
-	}
-	return items
-}
-
-func buildBookmarks(users []userRow, postIDs []int) []bookmarkSeed {
-	items := make([]bookmarkSeed, 0)
-	for i, user := range users {
-		if i >= 15 {
-			break
-		}
-		for j := 0; j < 5 && j < len(postIDs); j++ {
-			items = append(items, bookmarkSeed{UserID: user.ID, PostID: postIDs[(i+j)%len(postIDs)]})
-		}
-	}
-	return items
-}
-
-func buildTags(users []userRow, postIDs []int) []tagSeed {
-	items := make([]tagSeed, 0)
-	for i, postID := range postIDs {
-		if i%8 != 0 {
+	reactionSeen := map[string]bool{}
+	for i := 0; i < 80; i++ {
+		userID := state.UserIDs[randRange(0, len(state.UserIDs)-1)]
+		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
+		emojiID := state.EmojiIDs[randRange(0, len(state.EmojiIDs)-1)]
+		key := userID + "|" + postID + "|" + emojiID
+		if reactionSeen[key] {
 			continue
 		}
-		items = append(items, tagSeed{
-			PostID:       postID,
-			CommentID:    sql.NullInt64{Valid: false},
-			TagType:      "hashtag",
-			TargetUserID: sql.NullInt64{Valid: false},
-			Name:         fmt.Sprintf("#seedpost%d", postID),
-		})
-		items = append(items, tagSeed{
-			PostID:       postID,
-			CommentID:    sql.NullInt64{Valid: false},
-			TagType:      "mention",
-			TargetUserID: sql.NullInt64{Int64: int64(users[i%len(users)].ID), Valid: true},
-			Name:         fmt.Sprintf("@%s", strings.SplitN(users[i%len(users)].Email, "@", 2)[0]),
-		})
-	}
-	return items
-}
+		reactionSeen[key] = true
 
-func seedPosts(conn *sql.DB, posts []postSeed) (int64, error) {
-	values := make([][]any, 0, len(posts))
-	for _, item := range posts {
-		values = append(values, []any{item.UserID, item.Title, item.Body, item.Views, item.Status})
-	}
-	return bulkInsertIgnore(conn, "posts", []string{"user_id", "title", "content", "views_count", "status"}, values)
-}
-
-func seedStories(conn *sql.DB, stories []storySeed) (int64, error) {
-	values := make([][]any, 0, len(stories))
-	for _, item := range stories {
-		expiresAt := sql.NullString{Valid: false}
-		if item.ExpiresAt != "" {
-			expiresAt = sql.NullString{String: item.ExpiresAt, Valid: true}
+		if err := internal.Exec(database,
+			`INSERT INTO post_reactions (id, user_id, post_id, emoji_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+			internal.UUID(), userID, postID, emojiID, now.Add(-time.Duration(randRange(1, 168))*time.Hour),
+		); err != nil {
+			return fmt.Errorf("social: insert reaction %d: %w", i, err)
 		}
-		values = append(values, []any{item.UserID, item.MediaURI, item.MediaType, item.Caption, expiresAt})
-	}
-	return bulkInsertIgnore(conn, "stories", []string{"user_id", "media_uri", "media_type", "caption", "expires_at"}, values)
-}
-
-func seedMedia(conn *sql.DB, mediaItems []mediaSeed) (int64, error) {
-	values := make([][]any, 0, len(mediaItems))
-	for _, item := range mediaItems {
-		values = append(values, []any{item.UserID, item.PostID, item.FileURI, item.FileType, item.FileSize, item.Status})
-	}
-	return bulkInsertIgnore(conn, "media", []string{"user_id", "post_id", "file_uri", "file_type", "file_size", "status"}, values)
-}
-
-func seedPostReactions(conn *sql.DB, reactions []postReactionSeed) (int64, error) {
-	values := make([][]any, 0, len(reactions))
-	for _, item := range reactions {
-		values = append(values, []any{item.UserID, item.PostID, item.EmojiID})
-	}
-	return bulkInsertIgnore(conn, "post_reactions", []string{"user_id", "post_id", "emoji_id"}, values)
-}
-
-func seedComments(conn *sql.DB, comments []commentSeed) (int64, error) {
-	values := make([][]any, 0, len(comments))
-	for _, item := range comments {
-		values = append(values, []any{item.UserID, item.PostID, item.ParentID, item.Content})
-	}
-	return bulkInsertIgnore(conn, "comments", []string{"user_id", "post_id", "parent_id", "content"}, values)
-}
-
-func seedBookmarks(conn *sql.DB, bookmarks []bookmarkSeed) (int64, error) {
-	values := make([][]any, 0, len(bookmarks))
-	for _, item := range bookmarks {
-		values = append(values, []any{item.UserID, item.PostID})
-	}
-	return bulkInsertIgnore(conn, "bookmarks", []string{"user_id", "post_id"}, values)
-}
-
-func seedTags(conn *sql.DB, tags []tagSeed) (int64, error) {
-	values := make([][]any, 0, len(tags))
-	for _, item := range tags {
-		values = append(values, []any{item.PostID, item.CommentID, item.TagType, item.TargetUserID, item.Name})
-	}
-	return bulkInsertIgnore(conn, "tags", []string{"post_id", "comment_id", "tag_type", "target_user_id", "name"}, values)
-}
-
-func bulkInsertIgnore(conn *sql.DB, table string, columns []string, rows [][]any) (int64, error) {
-	if len(rows) == 0 {
-		return 0, nil
 	}
 
-	var builder strings.Builder
-	builder.WriteString("INSERT IGNORE INTO ")
-	builder.WriteString(table)
-	builder.WriteString(" (")
-	builder.WriteString(strings.Join(columns, ", "))
-	builder.WriteString(") VALUES ")
-
-	args := make([]any, 0, len(rows)*len(columns))
-	for rowIndex, row := range rows {
-		if rowIndex > 0 {
-			builder.WriteString(", ")
+	followSeen := map[string]bool{}
+	for i := 0; i < 40; i++ {
+		followerIdx := randRange(0, len(state.UserIDs)-1)
+		followingIdx := randRange(0, len(state.UserIDs)-1)
+		if followerIdx == followingIdx {
+			continue
 		}
-		builder.WriteString("(")
-		for colIndex := range columns {
-			if colIndex > 0 {
-				builder.WriteString(", ")
-			}
-			builder.WriteString("?")
+		key := state.UserIDs[followerIdx] + "|" + state.UserIDs[followingIdx]
+		if followSeen[key] {
+			continue
 		}
-		builder.WriteString(")")
-		args = append(args, row...)
+		followSeen[key] = true
+
+		if err := internal.Exec(database,
+			`INSERT INTO follows (id, follower_id, following_id, created_at) VALUES (?, ?, ?, ?)`,
+			internal.UUID(), state.UserIDs[followerIdx], state.UserIDs[followingIdx], now.Add(-time.Duration(randRange(1, 720))*time.Hour),
+		); err != nil {
+			return fmt.Errorf("social: insert follow %d: %w", i, err)
+		}
 	}
 
-	result, err := conn.Exec(builder.String(), args...)
-	if err != nil {
-		return 0, fmt.Errorf("insert seed rows into %s: %w", table, err)
+	friendStatuses := []string{"pending", "accepted", "accepted", "accepted", "rejected"}
+	friendSeen := map[string]bool{}
+	for i := 0; i < 15; i++ {
+		senderIdx := randRange(0, len(state.UserIDs)-1)
+		receiverIdx := randRange(0, len(state.UserIDs)-1)
+		if senderIdx == receiverIdx {
+			continue
+		}
+		key := state.UserIDs[senderIdx] + "|" + state.UserIDs[receiverIdx]
+		if friendSeen[key] {
+			continue
+		}
+		friendSeen[key] = true
+
+		if err := internal.Exec(database,
+			`INSERT INTO friends (id, sender_id, receiver_id, status, created_at) VALUES (?, ?, ?, ?, ?)`,
+			internal.UUID(), state.UserIDs[senderIdx], state.UserIDs[receiverIdx], pick(friendStatuses), now.Add(-time.Duration(randRange(1, 720))*time.Hour),
+		); err != nil {
+			return fmt.Errorf("social: insert friend %d: %w", i, err)
+		}
 	}
 
-	inserted, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("rows affected for %s: %w", table, err)
+	blockSeen := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		userIdx := randRange(0, len(state.UserIDs)-1)
+		blockedIdx := randRange(0, len(state.UserIDs)-1)
+		if userIdx == blockedIdx {
+			continue
+		}
+		key := state.UserIDs[userIdx] + "|" + state.UserIDs[blockedIdx]
+		if blockSeen[key] {
+			continue
+		}
+		blockSeen[key] = true
+
+		if err := internal.Exec(database,
+			`INSERT INTO blocks (id, user_id, blocked_user_id, created_at) VALUES (?, ?, ?, ?)`,
+			internal.UUID(), state.UserIDs[userIdx], state.UserIDs[blockedIdx], now.Add(-time.Duration(randRange(1, 720))*time.Hour),
+		); err != nil {
+			return fmt.Errorf("social: insert block %d: %w", i, err)
+		}
 	}
-	return inserted, nil
+
+	bookmarkSeen := map[string]bool{}
+	for i := 0; i < 20; i++ {
+		userID := state.UserIDs[randRange(0, len(state.UserIDs)-1)]
+		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
+		key := userID + "|" + postID
+		if bookmarkSeen[key] {
+			continue
+		}
+		bookmarkSeen[key] = true
+
+		if err := internal.Exec(database,
+			`INSERT INTO bookmarks (id, user_id, post_id, created_at) VALUES (?, ?, ?, ?)`,
+			internal.UUID(), userID, postID, now.Add(-time.Duration(randRange(1, 168))*time.Hour),
+		); err != nil {
+			return fmt.Errorf("social: insert bookmark %d: %w", i, err)
+		}
+	}
+
+	return nil
 }

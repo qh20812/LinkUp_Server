@@ -1,110 +1,69 @@
-package main
+package users
 
 import (
-	"crypto/sha256"
-	"database/sql"
-	"encoding/hex"
 	"fmt"
-	"log"
-	"strings"
+	"time"
 
+	"linkup/cmd/seed/internal"
 	"linkup/config"
-	"linkup/db"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
-type seedUser struct {
-	Email        string
-	PasswordHash string
-	Status       string
-	Username     string
-}
-
-func main() {
-	if err := config.LoadEnv(); err != nil {
-		log.Fatalf("failed to load env: %v", err)
-	}
-
-	conn, err := db.ConnectDb(config.GetEnv())
+func Run(env config.Env, state *internal.SeedState) error {
+	database, err := internal.Connect(env)
 	if err != nil {
-		log.Fatalf("DB connection: failed (%v)", err)
+		return fmt.Errorf("users: connect: %w", err)
 	}
-	defer conn.Close()
+	defer database.Close()
 
-	if err := ensureUsersTable(conn); err != nil {
-		log.Fatalf("ensure users table failed: %v", err)
-	}
-
-	seedUsers := buildSeedUsers(50)
-	inserted, err := seedUsersToDatabase(conn, seedUsers)
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("seed users failed: %v", err)
+		return fmt.Errorf("users: hash: %w", err)
+	}
+	passwordHash := string(hash)
+	now := time.Now().UTC()
+
+	type user struct {
+		id       string
+		username string
+		email    string
+		status   string
 	}
 
-	fmt.Printf("Seed users: success (%d inserted, %d total)\n", inserted, len(seedUsers))
-}
-
-func buildSeedUsers(total int) []seedUser {
-	users := make([]seedUser, 0, total)
-	for index := 1; index <= total; index++ {
-		email := fmt.Sprintf("seed.user%02d@example.com", index)
-		username := fmt.Sprintf("seed_user_%02d", index)
-		users = append(users, seedUser{
-			Email:        email,
-			PasswordHash: hashPassword(fmt.Sprintf("SeedPass@%02d", index)),
-			Status:       "active",
-			Username:     username,
-		})
+	users := []user{
+		{internal.UUID(), "john_doe", "john@example.com", "active"},
+		{internal.UUID(), "jane_smith", "jane@example.com", "active"},
+		{internal.UUID(), "alice_wonder", "alice@example.com", "active"},
+		{internal.UUID(), "bob_builder", "bob@example.com", "active"},
+		{internal.UUID(), "charlie_dev", "charlie@example.com", "active"},
+		{internal.UUID(), "diana_prince", "diana@example.com", "active"},
+		{internal.UUID(), "eve_artist", "eve@example.com", "banned"},
+		{internal.UUID(), "frank_castle", "frank@example.com", "active"},
+		{internal.UUID(), "grace_hopper", "grace@example.com", "active"},
+		{internal.UUID(), "hank_pym", "hank@example.com", "active"},
+		{internal.UUID(), "ivy_poison", "ivy@example.com", "suspended"},
+		{internal.UUID(), "jack_sparrow", "jack@example.com", "active"},
+		{internal.UUID(), "kate_bishop", "kate@example.com", "active"},
+		{internal.UUID(), "leo_da_vinci", "leo@example.com", "active"},
+		{internal.UUID(), "mila_kunis", "mila@example.com", "active"},
+		{internal.UUID(), "neo_matrix", "neo@example.com", "active"},
+		{internal.UUID(), "olivia_dunham", "olivia@example.com", "active"},
+		{internal.UUID(), "peter_parker", "peter@example.com", "banned"},
+		{internal.UUID(), "quincy_adams", "quincy@example.com", "active"},
+		{internal.UUID(), "rachel_green", "rachel@example.com", "active"},
 	}
-	return users
-}
 
-func hashPassword(password string) string {
-	sum := sha256.Sum256([]byte(password))
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func ensureUsersTable(conn *sql.DB) error {
-	query := `CREATE TABLE IF NOT EXISTS users (
-		id INT AUTO_INCREMENT PRIMARY KEY,
-		email VARCHAR(255) NOT NULL UNIQUE,
-		password_hash VARCHAR(255) NOT NULL,
-		status VARCHAR(20) NOT NULL DEFAULT 'active',
-		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-
-	if _, err := conn.Exec(query); err != nil {
-		return fmt.Errorf("create users table: %w", err)
+	for _, u := range users {
+		if err := internal.Exec(database,
+			`INSERT INTO users (id, username, email, password_hash, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+			u.id, u.username, u.email, passwordHash, u.status, now,
+		); err != nil {
+			return fmt.Errorf("users: insert %s: %w", u.username, err)
+		}
+		state.UserIDs = append(state.UserIDs, u.id)
 	}
 
 	return nil
 }
 
-func seedUsersToDatabase(conn *sql.DB, users []seedUser) (int64, error) {
-	if len(users) == 0 {
-		return 0, nil
-	}
-
-	query := strings.Builder{}
-	query.WriteString("INSERT IGNORE INTO users (email, password_hash, status) VALUES ")
-
-	args := make([]any, 0, len(users)*3)
-	for index, user := range users {
-		if index > 0 {
-			query.WriteString(", ")
-		}
-		query.WriteString("(?, ?, ?)")
-		args = append(args, user.Email, user.PasswordHash, user.Status)
-	}
-
-	result, err := conn.Exec(query.String(), args...)
-	if err != nil {
-		return 0, fmt.Errorf("insert seed users: %w", err)
-	}
-
-	inserted, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("rows affected: %w", err)
-	}
-
-	return inserted, nil
-}

@@ -14,14 +14,14 @@ const (
 )
 
 type Friend struct {
-	ID         int64        `json:"id" db:"id"`
-	SenderID   int64        `json:"sender_id" db:"sender_id"`
-	ReceiverID int64        `json:"receiver_id" db:"receiver_id"`
+	ID         string        `json:"id" db:"id"`
+	SenderID   string `json:"sender_id" db:"sender_id"`
+	ReceiverID string `json:"receiver_id" db:"receiver_id"`
 	Status     FriendStatus `json:"status" db:"status"`
 	CreatedAt  time.Time    `json:"created_at" db:"created_at"`
 }
 
-func NewFriend(senderID, receiverID int64, status FriendStatus) Friend {
+func NewFriend(senderID, receiverID string, status FriendStatus) Friend {
 	if status == "" {
 		status = FriendStatusPending
 	}

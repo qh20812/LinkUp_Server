@@ -1,7 +1,7 @@
 package models
 
 type ViolationRule struct {
-	ID          int64  `json:"id" db:"id"`
+	ID          string `json:"id" db:"id"`
 	Title       string `json:"title" db:"title"`
 	Description string `json:"description" db:"description"`
 }

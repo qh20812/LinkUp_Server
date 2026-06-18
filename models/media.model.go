@@ -14,9 +14,9 @@ const (
 )
 
 type Media struct {
-	ID        int64       `json:"id" db:"id"`
-	UserID    int64       `json:"user_id" db:"user_id"`
-	PostID    *int64      `json:"post_id,omitempty" db:"post_id"`
+	ID        string      `json:"id" db:"id"`
+	UserID    string      `json:"user_id" db:"user_id"`
+	PostID    *string     `json:"post_id,omitempty" db:"post_id"`
 	FileURI   string      `json:"file_uri" db:"file_uri"`
 	FileType  string      `json:"file_type" db:"file_type"`
 	FileSize  float64     `json:"file_size" db:"file_size"`
@@ -24,7 +24,7 @@ type Media struct {
 	CreatedAt time.Time   `json:"created_at" db:"created_at"`
 }
 
-func NewMedia(userID int64, postID *int64, fileURI, fileType string, fileSize float64) Media {
+func NewMedia(userID string, postID *string, fileURI, fileType string, fileSize float64) Media {
 	return Media{
 		UserID:   userID,
 		PostID:   postID,

@@ -21,9 +21,9 @@ const (
 )
 
 type Call struct {
-	ID        int64      `json:"id" db:"id"`
-	ChatID    *int64     `json:"chat_id,omitempty" db:"chat_id"`
-	CallerID  int64      `json:"caller_id" db:"caller_id"`
+	ID        string     `json:"id" db:"id"`
+	ChatID    *string    `json:"chat_id,omitempty" db:"chat_id"`
+	CallerID  string     `json:"caller_id" db:"caller_id"`
 	CallType  CallType   `json:"call_type" db:"call_type"`
 	IsGroup   bool       `json:"is_group" db:"is_group"`
 	Status    CallStatus `json:"status" db:"status"`
@@ -31,7 +31,7 @@ type Call struct {
 	EndedAt   *time.Time `json:"ended_at,omitempty" db:"ended_at"`
 }
 
-func NewCall(callerID int64, callType CallType, isGroup bool) Call {
+func NewCall(callerID string, callType CallType, isGroup bool) Call {
 	if callType == "" {
 		callType = CallTypeVoice
 	}

@@ -1,7 +1,7 @@
 package models
 
 type Emoji struct {
-	ID       int64  `json:"id" db:"id"`
+	ID       string `json:"id" db:"id"`
 	Code     string `json:"code" db:"code"`
 	ImageURI string `json:"image_uri" db:"image_uri"`
 }

@@ -14,14 +14,16 @@ const (
 )
 
 type User struct {
-	ID           int64      `json:"id" db:"id"`
+	ID           string     `json:"id" db:"id"`
+	Username     string     `json:"username" db:"username"`
 	Email        string     `json:"email" db:"email"`
 	PasswordHash string     `json:"password_hash" db:"password_hash"`
 	Status       UserStatus `json:"status" db:"status"`
 	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty" db:"updated_at"`
 }
 
-func NewUser(email, passwordHash string) User {
+func NewUser(username, email, passwordHash string) User {
 	return User{
 		Email:        email,
 		PasswordHash: passwordHash,
