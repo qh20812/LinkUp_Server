@@ -48,6 +48,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	}
 
 	createdUser, err := s.authRepo.Create(ctx, &models.User{
+		ID:           utils.GenerateUUID(),
 		Username:     username,
 		Email:        email,
 		PasswordHash: hashedPassword,
