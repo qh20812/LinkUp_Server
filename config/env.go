@@ -117,6 +117,7 @@ func loadDotEnv() error {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 		value = strings.Trim(value, `"`)
+		value = strings.TrimRight(value, "\r")
 
 		if key == "" {
 			return fmt.Errorf("invalid .env line %d: empty key", lineNo)
