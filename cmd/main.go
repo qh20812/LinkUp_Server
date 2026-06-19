@@ -53,6 +53,11 @@ func main() {
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
 		routes.RegisterAuthRoutes(router, authController)
+
+		postRepository := repository.NewPostRepository(gormDB)
+		postService := services.NewPostService(postRepository)
+		postController := controllers.NewPostController(postService)
+		routes.RegisterPostRoutes(router, postController, env)
 	}
 
 	addr := ":" + port
