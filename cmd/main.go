@@ -58,6 +58,11 @@ func main() {
 		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)
 		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
 		routes.RegisterPasswordResetRoutes(router, passwordResetController)
+
+		postRepository := repository.NewPostRepository(gormDB)
+		postService := services.NewPostService(postRepository)
+		postController := controllers.NewPostController(postService)
+		routes.RegisterPostRoutes(router, postController, env)
 	}
 
 	addr := ":" + port
