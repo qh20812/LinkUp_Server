@@ -1,4 +1,3 @@
-// services/password_reset.service.go
 package services
 
 import (
@@ -36,11 +35,9 @@ func NewPasswordResetService(resetRepo *repository.PasswordResetRepository, auth
 
 // Gửi email quên mật khẩu
 func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.ForgotPasswordInput) (dto.ForgotPasswordResponse, error) {
-	// Tìm user theo email
 	user, err := s.authRepo.FindByEmail(ctx, input.Email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
-			// Return generic message để không leak email existence
 			return dto.ForgotPasswordResponse{
 				Message: "Nếu email tồn tại, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu",
 			}, nil
@@ -48,7 +45,6 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 		return dto.ForgotPasswordResponse{}, err
 	}
 
-	// Tạo reset token
 	token := s.generateResetToken()
 	resetToken := models.NewPasswordResetToken(user.ID, token, 10*time.Minute)
 
@@ -56,22 +52,19 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 		return dto.ForgotPasswordResponse{}, err
 	}
 
-	// Tạo reset link
 	frontendURL := os.Getenv("FRONTEND_RESET_URL")
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
 	resetLink := fmt.Sprintf("%s?token=%s", frontendURL, token)
 
-	// Gửi email
 	if err := utils.SendResetPasswordEmail(user.Email, user.Username, resetLink); err != nil {
 		fmt.Printf("Warning: Failed to send email: %v\n", err)
-		// Không fail request, vì có thể dev mode
 	}
 
 	return dto.ForgotPasswordResponse{
 		Message: "Nếu email tồn tại, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu",
-		Token:   token, // ⚠️ CHỈ FOR TESTING - BỎ ĐI TRONG PRODUCTION
+		Token:   token, // ⚠️ CHỈ FOR TESTING
 	}, nil
 }
 
@@ -110,7 +103,6 @@ func (s *PasswordResetService) VerifyResetToken(ctx context.Context, input dto.V
 
 // Đặt lại mật khẩu
 func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.ResetPasswordInput) (dto.ResetPasswordResponse, error) {
-	// Xác minh token
 	resetToken, err := s.resetRepo.FindByToken(ctx, input.Token)
 	if err != nil {
 		if errors.Is(err, repository.ErrResetTokenNotFound) {
@@ -127,23 +119,19 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 		return dto.ResetPasswordResponse{}, errors.New("token đã được sử dụng")
 	}
 
-	// ✅ Sử dụng s.validation thay vì newAuthValidation()
 	if err := s.validation.ValidatePassword(input.NewPassword); err != nil {
 		return dto.ResetPasswordResponse{}, err
 	}
 
-	// Hash mật khẩu mới
 	hashedPassword, err := utils.HashPassword(input.NewPassword)
 	if err != nil {
 		return dto.ResetPasswordResponse{}, err
 	}
 
-	// Cập nhật mật khẩu
 	if err := s.authRepo.UpdatePassword(ctx, resetToken.UserID, hashedPassword); err != nil {
 		return dto.ResetPasswordResponse{}, err
 	}
 
-	// Đánh dấu token đã sử dụng
 	if err := s.resetRepo.MarkAsUsed(ctx, resetToken.ID); err != nil {
 		return dto.ResetPasswordResponse{}, err
 	}
