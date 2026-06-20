@@ -52,7 +52,7 @@ func main() {
 		authService := services.NewAuthService(authRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController)
+		routes.RegisterAuthRoutes(router, authController, env)
 	}
 
 	addr := ":" + port
