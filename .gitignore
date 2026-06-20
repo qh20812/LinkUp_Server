@@ -52,3 +52,8 @@ coverage.out
 coverage/
 *.coverprofile
 
+
+.env*
+.flaskenv*
+!.env.project
+!.env.vault

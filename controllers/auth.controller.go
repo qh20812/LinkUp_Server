@@ -26,7 +26,7 @@ func (h *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	if err := h.validation.ValidateRegisterInput(input.Email, input.Password); err != nil {
+	if err := h.validation.ValidateRegisterInput(input.DisplayName, input.Email, input.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

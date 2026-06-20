@@ -49,7 +49,7 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
         <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
         
         <p style="color: #999; font-size: 12px;">
-            Nếu bạn có thắc mắc, vui lòng liên hệ: support@linkup.com
+            Nếu bạn có thắc mắc, vui lòng liên hệ: linkup.support.qtn@gmail.com
         </p>
     </div>
 </body>
