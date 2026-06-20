@@ -52,7 +52,12 @@ func main() {
 		authService := services.NewAuthService(authRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController)
+		routes.RegisterAuthRoutes(router, authController, env)
+
+		resetRepository := repository.NewPasswordResetRepository(gormDB)
+		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)
+		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
+		routes.RegisterPasswordResetRoutes(router, passwordResetController)
 
 		postRepository := repository.NewPostRepository(gormDB)
 		postService := services.NewPostService(postRepository)

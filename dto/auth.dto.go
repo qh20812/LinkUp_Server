@@ -32,3 +32,12 @@ type AuthResponse struct {
 	User   AuthUserResponse `json:"user"`
 	Tokens TokenResponse    `json:"tokens"`
 }
+
+type ChangePasswordInput struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+type ChangePasswordResponse struct {
+	Message string `json:"message"`
+}

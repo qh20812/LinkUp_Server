@@ -12,6 +12,7 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 )
 
 type AuthService struct {
@@ -128,4 +129,29 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 			RefreshTTLIn: int64(refreshTTL.Seconds()),
 		},
 	}
+}
+
+func (s *AuthService) ChangePassword(ctx context.Context, userID string, input dto.ChangePasswordInput) error {
+	if err := validations.NewAuthValidation().ValidatePassword(input.NewPassword); err != nil {
+		return err
+	}
+
+	user, err := s.authRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return errors.New("user not found")
+		}
+		return err
+	}
+
+	if err := utils.ComparePassword(user.PasswordHash, input.OldPassword); err != nil {
+		return errors.New("invalid current password")
+	}
+
+	hashedPassword, err := utils.HashPassword(input.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	return s.authRepo.UpdatePassword(ctx, userID, hashedPassword)
 }

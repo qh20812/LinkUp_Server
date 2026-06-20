@@ -20,6 +20,10 @@ type Env struct {
 	DBName       string
 	JWTSecret    string
 	JWTExpiresIn int
+
+	GmailUser        string
+	GmailPass        string
+	FrontendResetURL string
 }
 
 var (
@@ -61,16 +65,20 @@ func LoadEnv() error {
 	}
 
 	env = Env{
-		Port:         getString("PORT", "8080"),
-		DBHost:       getRequiredString("DB_HOST"),
-		DBPort:       dbPort,
-		DBUser:       getRequiredString("DB_USER"),
-		DBPassword:   getRequiredString("DB_PASSWORD"),
-		DBSSL:        dbSSL,
+		Port:       getString("PORT", "8080"),
+		DBHost:     getRequiredString("DB_HOST"),
+		DBPort:     dbPort,
+		DBUser:     getRequiredString("DB_USER"),
+		DBPassword: getRequiredString("DB_PASSWORD"),
+		DBSSL:      dbSSL,
 		// DBCACertPath: getString("DB_CA_CERT_PATH", ""),
 		DBName:       getRequiredString("DB_NAME"),
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
+
+		GmailUser:        getString("GMAIL_USER", ""),
+		GmailPass:        getString("GMAIL_PASSWORD", ""),
+		FrontendResetURL: getString("FRONTEND_RESET_URL", "http://localhost:3000"),
 	}
 
 	missing := validateRequired(env)
