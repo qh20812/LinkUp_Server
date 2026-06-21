@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"linkup/utils"
+	"time"
+)
 
 type PasswordResetToken struct {
 	ID        string     `json:"id" db:"id"`
@@ -13,6 +16,7 @@ type PasswordResetToken struct {
 
 func NewPasswordResetToken(userID, token string, expiryDuration time.Duration) PasswordResetToken {
 	return PasswordResetToken{
+		ID:        utils.GenerateUUID(),
 		UserID:    userID,
 		Token:     token,
 		ExpiresAt: time.Now().UTC().Add(expiryDuration),

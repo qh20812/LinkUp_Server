@@ -64,6 +64,10 @@ func main() {
 		postService := services.NewPostService(postRepository)
 		postController := controllers.NewPostController(postService)
 		routes.RegisterPostRoutes(router, postController, env)
+
+		profileService := services.NewProfileService(profileRepository)
+		profileController := controllers.NewProfileController(profileService)
+		routes.RegisterProfileRoutes(router, profileController, env)
 	}
 
 	addr := ":" + port
