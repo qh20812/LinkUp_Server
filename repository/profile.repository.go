@@ -24,3 +24,15 @@ func (r *ProfileRepository) Create(ctx context.Context, profile *models.Profile)
 	}
 	return profile, nil
 }
+
+func (r *ProfileRepository) FindByUserID(ctx context.Context, userID string) (*models.Profile, error) {
+	var profile models.Profile
+	tx := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&profile)
+	if tx.Error != nil {
+		if tx.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("profile not found")
+		}
+		return nil, fmt.Errorf("find profile: %w", tx.Error)
+	}
+	return &profile, nil
+}
