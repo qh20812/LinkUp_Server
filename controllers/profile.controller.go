@@ -46,6 +46,43 @@ func (h *ProfileController) ViewProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *ProfileController) ViewProfileByID(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+
+	viewerID := ""
+	if val, exists := c.Get("userID"); exists {
+		viewerID = val.(string)
+	}
+
+	profile, err := h.profileService.ViewProfileByID(c.Request.Context(), viewerID, targetUserID)
+	if err != nil {
+		if err.Error() == "this profile is private" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "this profile is private"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	response := dto.ViewProfileResponse{
+		DisplayName:                profile.DisplayName,
+		PhoneNumber:                profile.PhoneNumber,
+		DateOfBirth:                profile.DateOfBirth,
+		AvatarURI:                  profile.AvatarURI,
+		Bio:                        profile.Bio,
+		IsPrivateProfile:           profile.IsPrivateProfile,
+		IsPrivatePosts:             profile.IsPrivatePosts,
+		AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
+		UpdatedAt:                  profile.UpdatedAt,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
 func (h *ProfileController) EditProfile(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
