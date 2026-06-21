@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
+	"time"
 )
 
 type ProfileService struct {
@@ -23,4 +25,34 @@ func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*model
 		return nil, fmt.Errorf("view profile: %w", err)
 	}
 	return profile, nil
+}
+
+func (s *ProfileService) EditProfile(ctx context.Context, userID string, input dto.EditProfileInput) (*models.Profile, error) {
+	existingProfile, err := s.profileRepository.FindByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("edit profile: %w", err)
+	}
+
+	now := time.Now().Truncate(0)
+
+	updateProfile := models.Profile{
+		ID:                         existingProfile.ID,
+		UserID:                     existingProfile.UserID,
+		DisplayName:                input.DisplayName,
+		PhoneNumber:                input.PhoneNumber,
+		DateOfBirth:                input.DateOfBirth,
+		AvatarURI:                  input.AvatarURI,
+		Bio:                        input.Bio,
+		IsPrivateProfile:           input.IsPrivateProfile,
+		IsPrivatePosts:             input.IsPrivatePosts,
+		AllowStrangerFriendRequest: input.AllowStrangerFriendRequest,
+		UpdatedAt:                  &now,
+	}
+
+	result, err := s.profileRepository.Update(ctx, userID, &updateProfile)
+	if err != nil {
+		return nil, fmt.Errorf("edit profile: %w", err)
+	}
+
+	return result, nil
 }

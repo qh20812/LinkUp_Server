@@ -12,5 +12,6 @@ func RegisterProfileRoutes(router *gin.Engine, profileController *controllers.Pr
 	profile := router.Group("/api/profile")
 	{
 		profile.GET("", middlewares.AuthMiddleware(env), profileController.ViewProfile)
+		profile.PUT("", middlewares.AuthMiddleware(env), profileController.EditProfile)
 	}
 }

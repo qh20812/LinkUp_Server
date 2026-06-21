@@ -36,3 +36,14 @@ func (r *ProfileRepository) FindByUserID(ctx context.Context, userID string) (*m
 	}
 	return &profile, nil
 }
+
+func (r *ProfileRepository) Update(ctx context.Context, userID string, profile *models.Profile) (*models.Profile, error) {
+	tx := r.db.WithContext(ctx).Where("user_id = ?", userID).Updates(profile)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("update profile: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return nil, fmt.Errorf("profile not found")
+	}
+	return profile, nil
+}
