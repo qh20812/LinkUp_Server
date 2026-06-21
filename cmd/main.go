@@ -49,10 +49,25 @@ func main() {
 			log.Fatalf("failed to init gorm: %v", err)
 		}
 		authRepository := repository.NewAuthRepository(gormDB)
-		authService := services.NewAuthService(authRepository, env)
+		profileRepository := repository.NewProfileRepository(gormDB)
+		authService := services.NewAuthService(authRepository, profileRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController)
+		routes.RegisterAuthRoutes(router, authController, env)
+
+		resetRepository := repository.NewPasswordResetRepository(gormDB)
+		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)
+		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
+		routes.RegisterPasswordResetRoutes(router, passwordResetController)
+
+		postRepository := repository.NewPostRepository(gormDB)
+		postService := services.NewPostService(postRepository)
+		postController := controllers.NewPostController(postService)
+		routes.RegisterPostRoutes(router, postController, env)
+
+		profileService := services.NewProfileService(profileRepository)
+		profileController := controllers.NewProfileController(profileService)
+		routes.RegisterProfileRoutes(router, profileController, env)
 	}
 
 	addr := ":" + port

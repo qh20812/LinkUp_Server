@@ -4,7 +4,7 @@
 
 ```bash
 go build -o ./tmp/main.exe ./cmd   # or `air` for hot reload
-go build ./cmd/seed && ./seed.exe  # full seed run (WIP — see Seed section)
+go build ./cmd/seed && ./seed.exe  # full seed run (resets DB!)
 go build ./...                      # verify all packages compile
 ```
 
@@ -13,29 +13,83 @@ No `_test.go` files exist anywhere.
 ## Architecture
 
 ```
-cmd/main.go          → controller → service → repository (GORM)
-cmd/seed/main.go     → raw database/sql (9 ordered steps)
-cmd/cloudinary-check → standalone Cloudinary connectivity test
+cmd/main.go → controller → service → repository (GORM)
+cmd/seed/   → raw database/sql (10 ordered steps, resets DB)
+cmd/cloudinary-check/ → standalone Cloudinary connectivity test
 ```
 
-- **Framework**: Gin (`gin.New()` — no default middleware, `.Use(gin.Logger(), gin.Recovery())` at `cmd/main.go:36-37`)
-- **DB**: `db.ConnectDb(env)` returns `*sql.DB`; `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)` for GORM repos. **`DB_SSL=true` but `registerTLSConfig` is a stub that returns an error** — TLS config not wired into the DSN (`db/mysql.go`).
-- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have both `json` and `db` tags; `db` tags are unused relics.
-- **DTOs have no `binding` tags** — validation is via `validations.AuthValidation` methods in the controller layer.
-- **JWT**: `utils.GenerateTokenPair(secret, userID, email, accessTTL, refreshTTL)` — accepts `string` userID. Refresh TTL hardcoded to 7 days (`auth.service.go:106`). Uses `golang-jwt/jwt/v5` HS256.
-- **`user.controller.go`** is an empty stub; **`user.repository.go`** has basic CRUD (Create, FindByEmail) but **not wired** in `main.go`. Only auth routes (`/api/auth/register`, `/api/auth/login`) are connected.
-- `config/cloundinary.go` is misnamed (should be `cloudinary`).
+- **Framework**: Gin (`gin.New()`; `.Use(gin.Logger(), gin.Recovery())` in `cmd/main.go:36-37`)
+- **DB**: `db.ConnectDb(env)` returns `*sql.DB`; `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)` for GORM repos. DSN has **no TLS params** — `DB_SSL` is parsed in config but never used in DSN. `registerTLSConfig` in `db/mysql.go` is a dead stub.
+- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have `json` and `db` tags; `db` tags are unused relics.
+- **DTOs have no `binding` tags** (except `post.controller.go:CreatePostInput`) — validation is via `validations.AuthValidation` methods in the controller.
+- **29 model files** (28 seed tables + `password_reset_token.model.go` — not in seed schema).
 
 ## Config
 
 - `.env` loaded by `config.LoadEnv()` (custom line parser — **not** godotenv). Singleton guard prevents reloads.
-- Required env vars (fail at load time if empty): `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`
-  - `DB_SSL` is parsed with `strconv.ParseBool` — `"true"`/`"false"` string required; not in `validateRequired` list but will fail at parse time.
-  - `PORT` defaults to `"8080"` if unset.
-  - `DB_PORT` is parsed via `strconv.Atoi` — integer required.
-  - `JWT_EXPIRES_IN` parsed via `strconv.Atoi` — integer minutes required.
-- Cloudinary: `CLOUDINARY_URL` (format `cloudinary://key:secret@cloudname`) is primary; fallback to `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. Loaded via separate `config.LoadCloudinaryEnv()`.
-- `config.GetEnv()` returns a value copy of the singleton `Env` struct.
+- Required env vars (fail if empty): `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`
+  - `DB_SSL` parsed via `strconv.ParseBool` — **not in `validateRequired`** but will fail at parse time if unset.
+  - `PORT` defaults to `"8080"`.
+- Optional Gmail: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`)
+- Cloudinary: `CLOUDINARY_URL` (`cloudinary://key:secret@cloudname`) primary; fallback `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. Loaded via `config.LoadCloudinaryEnv()`.
+- `config.GetEnv()` returns a **value copy** of the singleton `Env` struct.
+- `config/cloundinary.go` is misnamed (should be `cloudinary`).
+
+## Routes
+
+All routes wired in `cmd/main.go` (all protected by a `nil` DB guard):
+
+| Path | Method | Auth | Handler file |
+|---|---|---|---|
+| `/health` | GET | No | inline in `main.go` |
+| `/` | GET | No | inline in `main.go` |
+| `/api/auth/register` | POST | No | `routes/auth.routes.go` |
+| `/api/auth/login` | POST | No | `routes/auth.routes.go` |
+| `/api/auth/change-password` | POST | `middlewares.AuthMiddleware` | `routes/auth.routes.go` |
+| `/api/auth/forgot-password` | POST | No | `routes/password_reset.routes.go` |
+| `/api/auth/verify-reset-token` | POST | No | `routes/password_reset.routes.go` |
+| `/api/auth/reset-password` | POST | No | `routes/password_reset.routes.go` |
+| `/posts` | POST | inline in `post.routes.go` | `routes/post.routes.go` |
+| `/posts` | GET | No | `routes/post.routes.go` |
+
+Two separate auth middleware implementations exist:
+- `middlewares/auth.middleware.go` — uses `utils.ParseToken`, sets `userID` and `email`
+- `routes/post.routes.go` inline — uses `jwt.Parse` directly, sets `userId`
+
+Note: `cmd/main.go:61` has a duplicate `routes.RegisterAuthRoutes(router, authController)` call (missing `env` arg vs line 55) — will not compile as-is.
+
+## JWT
+
+- `utils.GenerateTokenPair(secret, userID, email, accessTTL, refreshTTL)` — `golang-jwt/jwt/v5` HS256.
+- Access TTL from `JWTExpiresIn` env var (minutes); falls back to 15 min.
+- Refresh TTL hardcoded to `7 * 24 * time.Hour` (`auth.service.go:108`).
+- `utils.ParseToken` parses into `*utils.TokenClaims` (fields: `UserID`, `Email`, `TokenType`).
+- `utils.GenerateToken` for single-token cases (used by password reset).
+
+## Password reset flow
+
+1. `POST /api/auth/forgot-password` — generates 32-byte hex token, stores in `password_reset_tokens` table, sends email via Gmail SMTP (`smtp.gmail.com:587`)
+2. `POST /api/auth/verify-reset-token` — checks token validity & expiry
+3. `POST /api/auth/reset-password` — updates password, marks token used
+
+Token expiry: 10 minutes. Email template is in Vietnamese, uses `GMAIL_USER`/`GMAIL_PASSWORD` env vars.
+
+## Key packages
+
+| Package | Role |
+|---|---|
+| `config/` | Env loading (custom parser), Cloudinary creds |
+| `controllers/` | HTTP handlers (Gin context) — 4 files |
+| `services/` | Business logic — 3 files (auth, password_reset, post) |
+| `repository/` | GORM data access — 4 files |
+| `dto/` | Request/response structs — 2 files (auth, password_reset) |
+| `validations/` | Explicit validation (not struct tags) — `AuthValidation` |
+| `utils/` | JWT, bcrypt hashing, username generation, UUID, Gmail SMTP |
+| `db/` | MySQL connection via `database/sql` + `go-sql-driver/mysql` |
+| `models/` | GORM model structs (29 files) |
+| `cmd/seed/` | Seed scripts (raw SQL, 10 modules + `internal/` helpers) |
+| `routes/` | Route registration — 3 files |
+| `middlewares/` | `auth.middleware.go` (Gin JWT middleware) |
 
 ## Seed system
 
@@ -43,22 +97,22 @@ cmd/cloudinary-check → standalone Cloudinary connectivity test
 go build ./cmd/seed && ./seed.exe
 ```
 
-10 ordered steps, each opens its own `*sql.DB` and uses raw SQL (not GORM):
+10 ordered steps, raw SQL (not GORM), **drops all tables on run**:
 
-1. **reset** — DROP TABLE all 28 tables (`FOREIGN_KEY_CHECKS=0`)
-2. **schema** — CREATE TABLE all 28 tables with FKs, indexes, utf8mb4
+1. **reset** — DROP TABLE 28 tables (`FOREIGN_KEY_CHECKS=0`)
+2. **schema** — CREATE TABLE 28 tables with FKs, indexes, utf8mb4
 3. **users** — 20 users (bcrypt `Password123!`), 2 banned, 1 suspended
-3. **core** — 3 roles, 10 emojis, 8 violation rules + `user_roles` assignments
-4. **profiles** — 20 profiles with avatars and bios, 5 private
-5. **social** — 30 posts, 60 comments (nested), 50 tags, 80 reactions, 40 follows, 15 friends, 5 blocks, 20 bookmarks
-6. **relationships** — 5 communities, 25 group members with roles and points
-7. **messaging** — 8 chats (direct + group), ~24 participants, 50 messages
-8. **moderation** — 8 reports, 5 bans, 8 moderation logs
-9. **extended** — 5 ads + analytics, 15 media, 10 stories, 20 notifications, 5 calls
+4. **core** — 3 roles, 10 emojis, 8 violation rules + `user_roles`
+5. **profiles** — 20 profiles with avatars and bios, 5 private
+6. **social** — 30 posts, 60 comments (nested), 50 tags, 80 reactions, 40 follows, 15 friends, 5 blocks, 20 bookmarks
+7. **relationships** — 5 communities, 25 group members
+8. **messaging** — 8 chats, ~24 participants, 50 messages
+9. **moderation** — 8 reports, 5 bans, 8 moderation logs
+10. **extended** — 5 ads + analytics, 15 media, 10 stories, 20 notifications, 5 calls
 
-Steps share data through `internal.SeedState` passed via the orchestrator (`cmd/seed/main.go`). Each module opens a fresh DB connection.
+Steps share data through `internal.SeedState` (`cmd/seed/internal/state.go`). UUIDs generated via `internal.UUID()` (crypto/rand, RFC 9562 variant).
 
-Table list for manual DROP (if skipping reset):
+Table list for manual DROP:
 ```
 ad_analytics, moderation_logs, bans, reports, notifications, calls, messages,
 chat_participants, chats, group_members, communities, tags, post_reactions,
@@ -66,26 +120,15 @@ bookmarks, blocks, friends, follows, comments, posts, media, stories, ads,
 user_roles, profiles, violation_rules, emojis, roles, users
 ```
 
-## Key packages
+## Stubs / not wired
 
-| Package | Role |
-|---|---|
-| `config/` | Env loading (custom parser), Cloudinary creds |
-| `controllers/` | HTTP handlers (Gin context) |
-| `services/` | Business logic |
-| `repository/` | GORM data access |
-| `dto/` | Request/response structs |
-| `validations/` | Explicit validation (not struct tags) |
-| `utils/` | JWT (golang-jwt/jwt/v5), bcrypt hashing, username generation |
-| `db/` | MySQL connection via `database/sql` + `go-sql-driver/mysql` |
-| `models/` | GORM model structs (28 files) |
-| `cmd/seed/` | Seed scripts (raw SQL, 9 modules + `internal/` helpers) |
-| `routes/` | Route registration |
+- `controllers/user.controller.go` — empty file (just `package controllers`)
+- `repository/user.repository.go` — has `Create`, `FindByEmail` but **not wired** in `cmd/main.go`
+- `config.LoadCloudinaryEnv()`, `config/cloundinary.go` — loaded but never called from `main.go`
+- `cmd/cloudinary-check/` — standalone binary, not part of server
 
-## Notes
+## Validation & errors
 
-- `validations.AuthValidation` exported error vars (`ErrUserNotFound`, `ErrPasswordTooShort`, etc.) are meant for `errors.Is()` checks.
-- `repository.ErrUserNotFound` — checked by `auth.service.go` with `errors.Is()`.
-- No `middlewares/` directory exists yet (no auth middleware).
-- `air` config at `.air.toml` — builds `./tmp/main.exe`, watches `.go` files.
-- `go 1.26.3` in `go.mod`.
+- `validations.AuthValidation` exports sentinel errors (`ErrUserNotFound`, `ErrPasswordTooShort`, etc.) for `errors.Is()` checks.
+- `repository.ErrUserNotFound` (`auth.repository.go:13`) — checked by `auth.service.go` with `errors.Is()`.
+- Password rules: ≥8 chars, ≤128, must have upper, lower, digit, special.

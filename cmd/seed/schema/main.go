@@ -50,6 +50,9 @@ func Run(env config.Env) error {
 		`CREATE TABLE IF NOT EXISTS profiles (
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL UNIQUE,
+			display_name VARCHAR(55) NOT NULL DEFAULT '',
+			phone_number VARCHAR(20) NOT NULL DEFAULT '',
+			date_of_birth DATE NULL,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
 			bio TEXT,
 			is_private_profile TINYINT(1) NOT NULL DEFAULT 0,

@@ -12,17 +12,20 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 )
 
 type AuthService struct {
-	authRepo *repository.AuthRepository
-	env      config.Env
+	authRepo    *repository.AuthRepository
+	profileRepo *repository.ProfileRepository
+	env         config.Env
 }
 
-func NewAuthService(authRepo *repository.AuthRepository, env config.Env) *AuthService {
+func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, env config.Env) *AuthService {
 	return &AuthService{
-		authRepo: authRepo,
-		env:      env,
+		authRepo:    authRepo,
+		profileRepo: profileRepo,
+		env:         env,
 	}
 }
 
@@ -48,12 +51,21 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	}
 
 	createdUser, err := s.authRepo.Create(ctx, &models.User{
+		ID:           utils.GenerateUUID(),
 		Username:     username,
 		Email:        email,
 		PasswordHash: hashedPassword,
 		Status:       models.UserStatusActive,
 	})
 	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	if _, err := s.profileRepo.Create(ctx, &models.Profile{
+		ID:           utils.GenerateUUID(),
+		UserID:       createdUser.ID,
+		DisplayName:  input.DisplayName,
+	}); err != nil {
 		return dto.AuthResponse{}, err
 	}
 
@@ -127,4 +139,33 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 			RefreshTTLIn: int64(refreshTTL.Seconds()),
 		},
 	}
+}
+
+func (s *AuthService) ChangePassword(ctx context.Context, userID string, input dto.ChangePasswordInput) error {
+	if err := validations.NewAuthValidation().ValidatePassword(input.NewPassword); err != nil {
+		return err
+	}
+
+	user, err := s.authRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return errors.New("user not found")
+		}
+		return err
+	}
+
+	if err := utils.ComparePassword(user.PasswordHash, input.OldPassword); err != nil {
+		return errors.New("invalid current password")
+	}
+
+	if input.OldPassword == input.NewPassword {
+		return validations.ErrPasswordSameAsOld
+	}
+
+	hashedPassword, err := utils.HashPassword(input.NewPassword)
+	if err != nil {
+		return err
+	}
+
+	return s.authRepo.UpdatePassword(ctx, userID, hashedPassword)
 }

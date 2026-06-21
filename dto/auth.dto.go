@@ -3,8 +3,9 @@ package dto
 import "time"
 
 type RegisterInput struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
 }
 
 type LoginInput struct {
@@ -31,4 +32,13 @@ type TokenResponse struct {
 type AuthResponse struct {
 	User   AuthUserResponse `json:"user"`
 	Tokens TokenResponse    `json:"tokens"`
+}
+
+type ChangePasswordInput struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+type ChangePasswordResponse struct {
+	Message string `json:"message"`
 }

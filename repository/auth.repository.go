@@ -48,3 +48,23 @@ func (r *AuthRepository) IsUsernameTaken(ctx context.Context, username string) (
 	}
 	return count > 0, nil
 }
+
+func (r *AuthRepository) UpdatePassword(ctx context.Context, userID string, hashedPassword string) error {
+	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Update("password_hash", hashedPassword)
+	if tx.Error != nil {
+		return fmt.Errorf("update password: %w", tx.Error)
+	}
+	return nil
+}
+
+func (r *AuthRepository) FindByID(ctx context.Context, userID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by id: %w", err)
+	}
+	return &user, nil
+}
