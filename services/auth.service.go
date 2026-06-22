@@ -61,10 +61,14 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
+	if err := s.authRepo.SavePasswordHistory(ctx, createdUser.ID, hashedPassword); err != nil {
+		return dto.AuthResponse{}, err
+	}
+
 	if _, err := s.profileRepo.Create(ctx, &models.Profile{
-		ID:           utils.GenerateUUID(),
-		UserID:       createdUser.ID,
-		DisplayName:  input.DisplayName,
+		ID:          utils.GenerateUUID(),
+		UserID:      createdUser.ID,
+		DisplayName: input.DisplayName,
 	}); err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -162,8 +166,23 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 		return validations.ErrPasswordSameAsOld
 	}
 
+	histories, err := s.authRepo.GetPasswordHistoryByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	for _, history := range histories {
+		if err := utils.ComparePassword(history.PasswordHash, input.NewPassword); err != nil {
+			return errors.New("cannot reuse a previous password")
+		}
+	}
+
 	hashedPassword, err := utils.HashPassword(input.NewPassword)
 	if err != nil {
+		return err
+	}
+
+	if err := s.authRepo.SavePasswordHistory(ctx, userID, user.PasswordHash); err != nil {
 		return err
 	}
 

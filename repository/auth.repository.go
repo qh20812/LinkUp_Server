@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"linkup/models"
+	"linkup/utils"
 
 	"gorm.io/gorm"
 )
@@ -67,4 +69,27 @@ func (r *AuthRepository) FindByID(ctx context.Context, userID string) (*models.U
 		return nil, fmt.Errorf("find user by id: %w", err)
 	}
 	return &user, nil
+}
+
+func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string, hashedPassword string) error {
+	history := &models.PasswordHistory{
+		ID:           utils.GenerateUUID(),
+		UserID:       userID,
+		PasswordHash: hashedPassword,
+		CreatedAt:    time.Now(),
+	}
+	tx := r.db.WithContext(ctx).Create(history)
+	if tx.Error != nil {
+		return fmt.Errorf("save password history: %w", tx.Error)
+	}
+	return nil
+}
+
+func (r *AuthRepository) GetPasswordHistoryByUserID(ctx context.Context, userID string) ([]models.PasswordHistory, error) {
+	var histories []models.PasswordHistory
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&histories).Error
+	if err != nil {
+		return nil, fmt.Errorf("get password history: %w", err)
+	}
+	return histories, nil
 }
