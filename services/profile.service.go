@@ -27,7 +27,6 @@ func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*model
     return profile, nil
 }
 
-// ViewProfileByID - Người khác xem profile (kiểm tra private)
 func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, targetUserID string) (*models.Profile, error) {
     profile, err := s.profileRepository.FindByUserID(ctx, targetUserID)
     if err != nil {
@@ -51,23 +50,45 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
         return nil, fmt.Errorf("edit profile: %w", err)
     }
 
-    now := time.Now().Truncate(0)
-
-    updateProfile := models.Profile{
-        ID:                         existingProfile.ID,
-        UserID:                     existingProfile.UserID,
-        DisplayName:                input.DisplayName,
-        PhoneNumber:                input.PhoneNumber,
-        DateOfBirth:                input.DateOfBirth,
-        AvatarURI:                  input.AvatarURI,
-        Bio:                        input.Bio,
-        IsPrivateProfile:           input.IsPrivateProfile,
-        IsPrivatePosts:             input.IsPrivatePosts,
-        AllowStrangerFriendRequest: input.AllowStrangerFriendRequest,
-        UpdatedAt:                  &now,
+    if input.PhoneNumber != nil && *input.PhoneNumber != "" {
+        existingPhone, err := s.profileRepository.FindByPhoneNumber(ctx, *input.PhoneNumber, userID)
+        if err != nil {
+            return nil, fmt.Errorf("edit profile: %w", err)
+        }
+        if existingPhone != nil {
+            return nil, fmt.Errorf("phone number already exists")
+        }
     }
 
-    result, err := s.profileRepository.Update(ctx, userID, &updateProfile)
+    if input.DisplayName != nil && *input.DisplayName != "" {
+        existingProfile.DisplayName = *input.DisplayName
+    }
+    if input.PhoneNumber != nil {
+        existingProfile.PhoneNumber = *input.PhoneNumber
+    }
+    if input.DateOfBirth != nil {
+        existingProfile.DateOfBirth = input.DateOfBirth
+    }
+    if input.AvatarURI != nil {
+        existingProfile.AvatarURI = *input.AvatarURI
+    }
+    if input.Bio != nil {
+        existingProfile.Bio = *input.Bio
+    }
+    if input.IsPrivateProfile != nil {
+        existingProfile.IsPrivateProfile = *input.IsPrivateProfile
+    }
+    if input.IsPrivatePosts != nil {
+        existingProfile.IsPrivatePosts = *input.IsPrivatePosts
+    }
+    if input.AllowStrangerFriendRequest != nil {
+        existingProfile.AllowStrangerFriendRequest = *input.AllowStrangerFriendRequest
+    }
+
+    now := time.Now().Truncate(0)
+    existingProfile.UpdatedAt = &now
+
+    result, err := s.profileRepository.Update(ctx, userID, existingProfile)
     if err != nil {
         return nil, fmt.Errorf("edit profile: %w", err)
     }

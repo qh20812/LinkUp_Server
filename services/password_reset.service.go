@@ -64,7 +64,7 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 
 	return dto.ForgotPasswordResponse{
 		Message: "Nếu email tồn tại, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu",
-		Token:   token, // ⚠️ CHỈ FOR TESTING
+		Token:   token, // ⚠️ ONLY FOR TESTING
 	}, nil
 }
 
