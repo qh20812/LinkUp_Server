@@ -80,6 +80,18 @@ func main() {
 		reportService := services.NewReportService(reportRepository, reportValidation)
 		reportController := controllers.NewReportController(reportService)
 		routes.RegisterReportRoutes(router, reportController, env)
+
+		blockRepository := repository.NewBlockRepository(gormDB)
+		blockValidation := validations.NewBlockValidation()
+		blockService := services.NewBlockService(blockRepository, blockValidation)
+		blockController := controllers.NewBlockController(blockService)
+		routes.RegisterBlockRoutes(router, blockController, env)
+
+		searchRepository := repository.NewSearchRepository(gormDB)
+		searchValidation := validations.NewSearchValidation()
+		searchService := services.NewSearchService(searchRepository, searchValidation)
+		searchController := controllers.NewSearchController(searchService)
+		routes.RegisterSearchRoutes(router, searchController)
 	}
 
 	addr := ":" + port
