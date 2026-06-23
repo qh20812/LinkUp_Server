@@ -39,9 +39,6 @@ func main() {
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
-	router.GET("/", func(c *gin.Context) {
-		c.String(200, "LinkUp server is running")
-	})
 
 	if database != nil {
 		gormDB, err := gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{})
@@ -78,6 +75,11 @@ func main() {
 		mediaService := services.NewMediaService(mediaRepository, env.CloudinaryEnv)
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
+		reportRepository := repository.NewReportRepository(gormDB)
+		reportValidation := validations.NewReportValidation()
+		reportService := services.NewReportService(reportRepository, reportValidation)
+		reportController := controllers.NewReportController(reportService)
+		routes.RegisterReportRoutes(router, reportController, env)
 	}
 
 	addr := ":" + port
