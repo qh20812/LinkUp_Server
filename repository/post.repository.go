@@ -17,8 +17,7 @@ type PostRepository interface {
 	DeleteReaction(ctx context.Context, id string) error
 	// --- Hàm xử lý Share ---
 	CreateShare(ctx context.Context, share models.PostShare) error
-
-	// 🌟 Thêm các hàm xử lý Comment vào Interface chung của Post
+	// --- Hàm xử lý Comment ---
 	CreateComment(ctx context.Context, comment *models.Comment) error
 	FindCommentByID(ctx context.Context, id string) (*models.Comment, error)
 }
@@ -97,12 +96,10 @@ func (r *postRepository) CreateShare(ctx context.Context, share models.PostShare
 	return r.db.WithContext(ctx).Create(&share).Error
 }
 
-// 🌟 Triển khai hàm CreateComment
 func (r *postRepository) CreateComment(ctx context.Context, comment *models.Comment) error {
 	return r.db.WithContext(ctx).Create(comment).Error
 }
 
-// 🌟 Triển khai hàm FindCommentByID
 func (r *postRepository) FindCommentByID(ctx context.Context, id string) (*models.Comment, error) {
 	var comment models.Comment
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&comment).Error

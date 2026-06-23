@@ -15,8 +15,6 @@ type PostService interface {
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (string, error)
-
-	// 🌟 Gộp thêm định nghĩa hàm xử lý Comment vào đây
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) (*models.Comment, error)
 }
 
@@ -97,7 +95,6 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 	return "reacted", nil
 }
 
-// 🌟 Triển khai logic đăng bình luận/phản hồi bình luận
 func (s *postService) CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) (*models.Comment, error) {
 	if content == "" {
 		return nil, errors.New("nội dung bình luận không được trống")

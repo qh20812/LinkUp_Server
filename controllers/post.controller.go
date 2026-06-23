@@ -26,7 +26,6 @@ type ReactPostInput struct {
 	EmojiID string `json:"emoji_id" binding:"required"`
 }
 
-// 🌟 Thêm input struct cho Comment/Reply
 type CreateCommentInput struct {
 	Content  string  `json:"content" binding:"required"`
 	ParentID *string `json:"parent_id,omitempty"`
@@ -145,7 +144,6 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 	}
 }
 
-// 🌟 Hàm CreateComment mới được gộp vào PostController
 func (ctrl *PostController) CreateComment(c *gin.Context) {
 	postID := c.Param("id")
 	if postID == "" {
