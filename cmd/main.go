@@ -74,6 +74,10 @@ func main() {
 		followController := controllers.NewFollowController(followService)
 		routes.RegisterFollowRoutes(router, followController, env)
 
+		mediaRepository := repository.NewMediaRepository(gormDB)
+		mediaService := services.NewMediaService(mediaRepository, env.CloudinaryEnv)
+		mediaController := controllers.NewMediaController(mediaService)
+		routes.RegisterMediaRoutes(router, mediaController, env)
 	}
 
 	addr := ":" + port
