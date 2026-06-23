@@ -39,9 +39,6 @@ func main() {
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
-	router.GET("/", func(c *gin.Context) {
-		c.String(200, "LinkUp server is running")
-	})
 
 	if database != nil {
 		gormDB, err := gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{})
@@ -68,6 +65,12 @@ func main() {
 		profileService := services.NewProfileService(profileRepository)
 		profileController := controllers.NewProfileController(profileService)
 		routes.RegisterProfileRoutes(router, profileController, env)
+
+		reportRepository := repository.NewReportRepository(gormDB)
+		reportValidation := validations.NewReportValidation()
+		reportService := services.NewReportService(reportRepository, reportValidation)
+		reportController := controllers.NewReportController(reportService)
+		routes.RegisterReportRoutes(router, reportController, env)
 	}
 
 	addr := ":" + port
