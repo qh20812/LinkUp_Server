@@ -13,6 +13,8 @@ const (
 	UserStatusSuspended UserStatus = "suspended"
 )
 
+const DefaultStorageQuotaBytes float64 = 2147483648
+
 type User struct {
 	ID                string     `json:"id" db:"id"`
 	Username          string     `json:"username" db:"username"`
@@ -30,6 +32,8 @@ func NewUser(username, email, passwordHash string) User {
 		Email:        email,
 		PasswordHash: passwordHash,
 		Status:       UserStatusActive,
+		StorageQuotaBytes: DefaultStorageQuotaBytes,
+		StorageUsedBytes: 0,
 	}
 }
 

@@ -56,6 +56,8 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		Email:        email,
 		PasswordHash: hashedPassword,
 		Status:       models.UserStatusActive,
+		StorageQuotaBytes: models.DefaultStorageQuotaBytes,
+		StorageUsedBytes: 0,
 	})
 	if err != nil {
 		return dto.AuthResponse{}, err
@@ -141,6 +143,11 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 			TokenType:    "Bearer",
 			ExpiresIn:    int64(accessTTL.Seconds()),
 			RefreshTTLIn: int64(refreshTTL.Seconds()),
+		},
+		Storage: dto.StorageInfo{
+			QuotaBytes: user.StorageQuotaBytes,
+			UsedBytes: user.StorageUsedBytes,
+			AvailBytes: user.AvailableStorageBytes(),
 		},
 	}
 }

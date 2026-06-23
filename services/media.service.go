@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"io"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/validations"
@@ -63,12 +62,7 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
     }
     defer src.Close()
 
-    fileData, err := io.ReadAll(src)
-    if err != nil {
-        return nil, fmt.Errorf("read file: %w", err)
-    }
-
-    uploadResult, err := s.cloudinary.Upload.Upload(ctx, fileData, uploader.UploadParams{
+    uploadResult, err := s.cloudinary.Upload.Upload(ctx, src, uploader.UploadParams{
         Folder:       fmt.Sprintf("linkup/users/%s", userID),
         PublicID:     uuid.New().String(),
         ResourceType: "auto",
