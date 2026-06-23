@@ -15,6 +15,9 @@ type PostService interface {
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (string, error)
+
+	// 🌟 Gộp thêm định nghĩa hàm xử lý Comment vào đây
+	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) (*models.Comment, error)
 }
 
 type postService struct {
@@ -92,4 +95,35 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 	}
 
 	return "reacted", nil
+}
+
+// 🌟 Triển khai logic đăng bình luận/phản hồi bình luận
+func (s *postService) CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) (*models.Comment, error) {
+	if content == "" {
+		return nil, errors.New("nội dung bình luận không được trống")
+	}
+
+	// Nếu là Reply (có parentID), tiến hành kiểm tra tính toàn vẹn
+	if parentID != nil && *parentID != "" {
+		parentComment, err := s.repo.FindCommentByID(ctx, *parentID)
+		if err != nil || parentComment == nil {
+			return nil, errors.New("bình luận cấp trên không tồn tại hoặc đã bị xóa")
+		}
+
+		if parentComment.PostID != postID {
+			return nil, errors.New("bình luận gốc không thuộc bài viết này")
+		}
+	} else {
+		parentID = nil // Đưa chuỗi rỗng về nil để DB lưu thành NULL
+	}
+
+	comment := models.NewComment(userID, postID, parentID, content)
+	comment.ID = uuid.New().String()
+	comment.CreatedAt = time.Now()
+
+	if err := s.repo.CreateComment(ctx, &comment); err != nil {
+		return nil, err
+	}
+
+	return &comment, nil
 }

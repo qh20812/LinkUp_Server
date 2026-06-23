@@ -26,6 +26,12 @@ type ReactPostInput struct {
 	EmojiID string `json:"emoji_id" binding:"required"`
 }
 
+// 🌟 Thêm input struct cho Comment/Reply
+type CreateCommentInput struct {
+	Content  string  `json:"content" binding:"required"`
+	ParentID *string `json:"parent_id,omitempty"`
+}
+
 func (ctrl *PostController) CreatePost(c *gin.Context) {
 	var input CreatePostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -102,14 +108,12 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	// Gọi service xử lý logic DB
 	action, err := ctrl.service.ReactPost(c.Request.Context(), userID, postID, input.EmojiID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi xử lý hệ thống: " + err.Error()})
 		return
 	}
 
-	// Bản đồ tra cứu từ UUID sang Tên hiển thị sinh động
 	emojiMap := map[string]string{
 		"2de88c4e-c8e7-4547-a1f7-dffee3ee65f2": ":rocket:",
 		"5cc37cf0-0689-44a2-bfd0-a46bf2c667fe": ":heart:",
@@ -123,13 +127,11 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 		"ed740b65-d22b-4536-9278-2d0ef72df739": ":like:",
 	}
 
-	// Lấy tên emoji tương ứng, nếu không tìm thấy thì để mặc định là "cảm xúc"
 	emojiName, found := emojiMap[input.EmojiID]
 	if !found {
 		emojiName = "cảm xúc"
 	}
 
-	// Phản hồi kết quả rõ ràng lên Postman dựa trên hành động
 	if action == "removed" {
 		c.JSON(http.StatusOK, gin.H{
 			"action":  action,
@@ -141,4 +143,37 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 			"message": fmt.Sprintf("Đã thả cảm xúc %s vào bài viết thành công!", emojiName),
 		})
 	}
+}
+
+// 🌟 Hàm CreateComment mới được gộp vào PostController
+func (ctrl *PostController) CreateComment(c *gin.Context) {
+	postID := c.Param("id")
+	if postID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID bài viết không hợp lệ"})
+		return
+	}
+
+	var input CreateCommentInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu nội dung bình luận"})
+		return
+	}
+
+	val, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để bình luận"})
+		return
+	}
+	userID := fmt.Sprintf("%v", val)
+
+	comment, err := ctrl.service.CreateComment(c.Request.Context(), userID, postID, input.ParentID, input.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Đăng bình luận thành công!",
+		"data":    comment,
+	})
 }
