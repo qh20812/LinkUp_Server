@@ -68,6 +68,12 @@ func main() {
 		profileService := services.NewProfileService(profileRepository)
 		profileController := controllers.NewProfileController(profileService)
 		routes.RegisterProfileRoutes(router, profileController, env)
+
+		followRepository := repository.NewFollowRepository(gormDB)
+		followService := services.NewFollowService(followRepository, authRepository)
+		followController := controllers.NewFollowController(followService)
+		routes.RegisterFollowRoutes(router, followController, env)
+
 	}
 
 	addr := ":" + port
