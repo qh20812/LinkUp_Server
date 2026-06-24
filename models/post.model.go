@@ -22,6 +22,10 @@ type Post struct {
 	Status     PostStatus `json:"status" db:"status"`
 	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt  *time.Time `json:"updated_at,omitempty" db:"updated_at"`
+
+	LikesCount    int `json:"likes_count" gorm:"->"`
+	CommentsCount int `json:"comments_count" gorm:"->"`
+	SharesCount   int `json:"shares_count" gorm:"->"`
 }
 
 func NewPost(userID, title, content string) Post {
