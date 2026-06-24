@@ -55,6 +55,7 @@ func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.
 		if err != nil {
 			return dto.SearchResponse{}, fmt.Errorf("search hashtags: %w", err)
 		}
+		setSearchMessage(&resp)
 		return resp, nil
 	}
 
@@ -62,5 +63,12 @@ func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.
 		return dto.SearchResponse{}, fmt.Errorf("search %s: %w", searchType, err)
 	}
 
+	setSearchMessage(&resp)
 	return resp, nil
+}
+
+func setSearchMessage(resp *dto.SearchResponse) {
+	if len(resp.Users) == 0 && len(resp.Posts) == 0 && len(resp.Hashtags) == 0 {
+		resp.Message = "Không tìm thấy kết quả phù hợp"
+	}
 }

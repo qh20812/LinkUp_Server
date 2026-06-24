@@ -3,6 +3,7 @@ package routes
 import (
 	"linkup/config"
 	"linkup/controllers"
+	"linkup/middlewares"
 
 	"github.com/gin-gonic/gin"
 )
@@ -10,7 +11,7 @@ import (
 func RegisterMediaRoutes(router *gin.Engine, ctrl *controllers.MediaController, env config.Env) {
 	mediaGroup := router.Group("/api/media")
 	{
-		mediaGroup.POST("/upload", AuthMiddleware(env), ctrl.UploadMedia)
-		mediaGroup.GET("/storage", AuthMiddleware(env), ctrl.GetStorageStatus)
+		mediaGroup.POST("/upload", middlewares.AuthMiddleware(env), ctrl.UploadMedia)
+		mediaGroup.GET("/storage", middlewares.AuthMiddleware(env), ctrl.GetStorageStatus)
 	}
 }

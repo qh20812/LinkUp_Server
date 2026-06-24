@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,16 +11,22 @@ import (
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
+
+	"gorm.io/gorm"
 )
 
 type ReportService struct {
 	reportRepo *repository.ReportRepository
+	authRepo   *repository.AuthRepository
+	postRepo   repository.PostRepository
 	validation *validations.ReportValidation
 }
 
-func NewReportService(reportRepo *repository.ReportRepository, validation *validations.ReportValidation) *ReportService {
+func NewReportService(reportRepo *repository.ReportRepository, authRepo *repository.AuthRepository, postRepo repository.PostRepository, validation *validations.ReportValidation) *ReportService {
 	return &ReportService{
 		reportRepo: reportRepo,
+		authRepo:   authRepo,
+		postRepo:   postRepo,
 		validation: validation,
 	}
 }
@@ -27,6 +34,29 @@ func NewReportService(reportRepo *repository.ReportRepository, validation *valid
 func (s *ReportService) CreateReport(ctx context.Context, reporterID string, input dto.CreateReportInput) (dto.CreateReportResponse, error) {
 	if err := s.validation.ValidateCreateReport(input.TargetType, input.TargetID, input.ReportType, input.ReasonDetail); err != nil {
 		return dto.CreateReportResponse{}, err
+	}
+
+	switch input.TargetType {
+	case "user":
+		isAdmin, err := s.authRepo.HasRole(ctx, input.TargetID, models.RoleAdmin)
+		if err != nil {
+			return dto.CreateReportResponse{}, fmt.Errorf("check target role: %w", err)
+		}
+		isSuperAdmin, err := s.authRepo.HasRole(ctx, input.TargetID, models.RoleSuperAdmin)
+		if err != nil {
+			return dto.CreateReportResponse{}, fmt.Errorf("check target role: %w", err)
+		}
+		if isAdmin || isSuperAdmin {
+			return dto.CreateReportResponse{}, errors.New("cannot report admin or super admin")
+		}
+	case "post":
+		_, err := s.postRepo.FindByID(ctx, input.TargetID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return dto.CreateReportResponse{}, errors.New("post not found or not active")
+			}
+			return dto.CreateReportResponse{}, fmt.Errorf("check post: %w", err)
+		}
 	}
 
 	now := time.Now().UTC()
