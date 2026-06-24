@@ -38,7 +38,7 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 		return
 	}
 
-	val, exists := c.Get("userId")
+	val, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập (Unauthorized)"})
 		return
@@ -100,7 +100,7 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 		return
 	}
 
-	val, exists := c.Get("userId")
+	val, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để thực hiện tính năng này"})
 		return
@@ -157,7 +157,7 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 		return
 	}
 
-	val, exists := c.Get("userId")
+	val, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để bình luận"})
 		return
