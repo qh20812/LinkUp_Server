@@ -14,14 +14,14 @@ const (
 )
 
 type Media struct {
-	ID        string      `json:"id" db:"id"`
-	UserID    string      `json:"user_id" db:"user_id"`
-	PostID    *string     `json:"post_id,omitempty" db:"post_id"`
-	FileURI   string      `json:"file_uri" db:"file_uri"`
-	FileType  string      `json:"file_type" db:"file_type"`
-	FileSize  float64     `json:"file_size" db:"file_size"`
-	Status    MediaStatus `json:"status" db:"status"`
-	CreatedAt time.Time   `json:"created_at" db:"created_at"`
+	ID        string      `json:"id"`
+	UserID    string      `json:"user_id"`
+	PostID    *string     `json:"post_id,omitempty"`
+	FileURI   string      `json:"file_uri"`
+	FileType  string      `json:"file_type"`
+	FileSize  float64     `json:"file_size"`
+	Status    MediaStatus `json:"status"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
 func NewMedia(userID string, postID *string, fileURI, fileType string, fileSize float64) Media {

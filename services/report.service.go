@@ -18,11 +18,11 @@ import (
 type ReportService struct {
 	reportRepo *repository.ReportRepository
 	authRepo   *repository.AuthRepository
-	postRepo   repository.PostRepository
+	postRepo   *repository.PostRepository
 	validation *validations.ReportValidation
 }
 
-func NewReportService(reportRepo *repository.ReportRepository, authRepo *repository.AuthRepository, postRepo repository.PostRepository, validation *validations.ReportValidation) *ReportService {
+func NewReportService(reportRepo *repository.ReportRepository, authRepo *repository.AuthRepository, postRepo *repository.PostRepository, validation *validations.ReportValidation) *ReportService {
 	return &ReportService{
 		reportRepo: reportRepo,
 		authRepo:   authRepo,

@@ -20,13 +20,13 @@ type MediaService interface {
 }
 
 type mediaService struct {
-    repo       repository.MediaRepository
+    repo       *repository.MediaRepository
     validation *validations.MediaValidation
     cloudinary *cloudinary.Cloudinary
 }
 
 func NewMediaService(
-    repo repository.MediaRepository,
+    repo *repository.MediaRepository,
     cloudinaryURL string,
 ) MediaService {
     cld, _ := cloudinary.NewFromURL(cloudinaryURL)

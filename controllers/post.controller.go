@@ -107,39 +107,21 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	action, err := ctrl.service.ReactPost(c.Request.Context(), userID, postID, input.EmojiID)
+	action, emojiCode, err := ctrl.service.ReactPost(c.Request.Context(), userID, postID, input.EmojiID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi xử lý hệ thống: " + err.Error()})
 		return
 	}
 
-	emojiMap := map[string]string{
-		"2de88c4e-c8e7-4547-a1f7-dffee3ee65f2": ":rocket:",
-		"5cc37cf0-0689-44a2-bfd0-a46bf2c667fe": ":heart:",
-		"73b0c7db-e304-4603-a18f-320bfc30b4d4": ":sad:",
-		"87f4024d-9903-445a-b087-e04a7dc1741d": ":haha:",
-		"9445f716-43c6-4d6e-89da-eb80c1cd5827": ":clap:",
-		"aab3f1e7-f6b6-430b-b09e-9230d0b42a57": ":wow:",
-		"ade30341-0678-42e7-82cf-1664bddf57ee": ":love:",
-		"b49ad59d-1364-40fa-b354-8e37946ca2fe": ":fire:",
-		"bd3d43db-7e48-4471-a548-da9884723124": ":angry:",
-		"ed740b65-d22b-4536-9278-2d0ef72df739": ":like:",
-	}
-
-	emojiName, found := emojiMap[input.EmojiID]
-	if !found {
-		emojiName = "cảm xúc"
-	}
-
 	if action == "removed" {
 		c.JSON(http.StatusOK, gin.H{
 			"action":  action,
-			"message": fmt.Sprintf("Đã gỡ bỏ cảm xúc %s khỏi bài viết thành công!", emojiName),
+			"message": fmt.Sprintf("Đã gỡ bỏ cảm xúc %s khỏi bài viết thành công!", emojiCode),
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{
 			"action":  action,
-			"message": fmt.Sprintf("Đã thả cảm xúc %s vào bài viết thành công!", emojiName),
+			"message": fmt.Sprintf("Đã thả cảm xúc %s vào bài viết thành công!", emojiCode),
 		})
 	}
 }

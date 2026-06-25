@@ -23,7 +23,7 @@ func NewMediaController(service services.MediaService) *MediaController {
 }
 
 func (ctrl *MediaController) UploadMedia(c *gin.Context) {
-	userIDVal, exists := c.Get("userId")
+	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
 		return
@@ -78,7 +78,7 @@ func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 }
 
 func (ctrl *MediaController) GetStorageStatus(c *gin.Context) {
-	userIDVal, exists := c.Get("userId")
+	userIDVal, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
 		return

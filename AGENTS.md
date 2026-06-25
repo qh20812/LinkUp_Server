@@ -18,21 +18,20 @@ cmd/seed/   → raw database/sql (10 ordered steps, resets DB)
 cmd/cloudinary-check/ → standalone Cloudinary connectivity test
 ```
 
-- **Framework**: Gin (`gin.New()`; `.Use(gin.Logger(), gin.Recovery())` in `cmd/main.go:36-37`)
-- **DB**: `db.ConnectDb(env)` returns `*sql.DB`; `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`. DSN has **no TLS params**. `registerTLSConfig` in `db/mysql.go` is a dead stub.
-- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have `json` and `db` tags; `db` tags are unused relics.
-- **29 model files** (28 seed tables + `password_reset_token.model.go` — not in seed schema).
+- **Framework**: Gin (`gin.New()` followed by `.Use(gin.Logger(), gin.Recovery())` in `cmd/main.go:40-41`).
+- **DB**: `db.ConnectDb(env)` returns `*sql.DB`; `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`. DSN uses **no TLS params**.
+- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have `json` tags; `db` and `gorm` tags are unused relics.
+- **31 model files** (28 seed tables + 3 not in seed schema: `password_history`, `password_reset_token`, `post_share`).
 
 ## Config
 
 - `.env` loaded by `config.LoadEnv()` (custom line parser — **not** godotenv). Singleton guard prevents reloads.
-- Required env vars: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`.
-  - `DB_SSL` parsed via `strconv.ParseBool` — will fail at parse time if unset, but **not** in `validateRequired`.
+- Required env vars: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
+  - `DB_SSL` parsed via `strconv.ParseBool`; checked in `validateRequired` (treated as required).
   - `PORT` defaults to `"8080"`.
 - Optional Gmail: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
-- Cloudinary: `CLOUDINARY_URL` primary; fallback `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. Loaded via `config.LoadCloudinaryEnv()` (never called from `main.go`).
+- `config.LoadCloudinaryEnv()` is called from `main.go` for **fallback** credentials (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`), but primary config comes via `CLOUDINARY_URL` in `LoadEnv`.
 - `config.GetEnv()` returns a **value copy**.
-- `config/cloundinary.go` is misnamed (should be `cloudinary`).
 
 ## Routes
 
@@ -48,9 +47,10 @@ All routes wired in `cmd/main.go` (inside `if database != nil { ... }` guard):
 | `/api/auth/verify-reset-token` | POST | No | `routes/password_reset.routes.go` |
 | `/api/auth/reset-password` | POST | No | `routes/password_reset.routes.go` |
 | `/posts` | GET | No | `routes/post.routes.go` |
-| `/posts` | POST | inline in `post.routes.go` | `routes/post.routes.go` |
+| `/posts` | POST | `middlewares.AuthMiddleware` | `routes/post.routes.go` |
 | `/posts/:id` | GET | No | `routes/post.routes.go` |
-| `/posts/:id/react` | POST | inline in `post.routes.go` | `routes/post.routes.go` |
+| `/posts/:id/react` | POST | `middlewares.AuthMiddleware` | `routes/post.routes.go` |
+| `/posts/:id/comments` | POST | `middlewares.AuthMiddleware` | `routes/post.routes.go` |
 | `/api/profile` | GET | `middlewares.AuthMiddleware` | `routes/profile.routes.go` |
 | `/api/profile` | PUT | `middlewares.AuthMiddleware` | `routes/profile.routes.go` |
 | `/api/profile/:userID` | GET | No | `routes/profile.routes.go` |
@@ -63,15 +63,13 @@ All routes wired in `cmd/main.go` (inside `if database != nil { ... }` guard):
 | `/api/blocks` | GET | `middlewares.AuthMiddleware` | `routes/block.routes.go` |
 | `/api/search` | GET | No | `routes/search.routes.go` |
 
-Two separate auth middleware implementations exist:
-- `middlewares/auth.middleware.go` — uses `utils.ParseToken`, sets `userID` and `email`
-- `routes/post.routes.go` inline (package-local `AuthMiddleware`) — uses `jwt.Parse` directly, sets `userId`
+Auth middleware is `middlewares/auth.middleware.go` (uses `utils.ParseToken`, sets `userID` and `email`).
 
 ## DTOs & validation
 
 - `validations` package uses explicit validation (sentinel errors + struct methods), **not** Gin binding tags.
-- DTOs with `binding` tags are the exception: `profile.dto.go:EditProfileInput`, `post.controller.go:CreatePostInput`/`ReactPostInput`.
-- **Query params**: `search.dto.go:SearchInput` uses `form:"keyword" form:"type"` for `c.ShouldBindQuery(&input)`.
+- `binding` tags are used only in controller-level input structs: `post.controller.go:CreatePostInput`, `ReactPostInput`, `CreateCommentInput`.
+- **Query params**: `dto/search.dto.go:SearchInput` uses `form:"keyword" form:"type"` for `c.ShouldBindQuery(&input)`.
 - Password rules: ≥8 chars, ≤128, must have upper, lower, digit, special.
 
 ## Business logic constraints
@@ -84,8 +82,6 @@ Two separate auth middleware implementations exist:
 **Post status** — `ReportService.CreateReport` validates post exists and is active via `postRepo.FindByID` (only returns active posts). Hidden/deleted posts cannot be reported.
 
 **Toggle pattern** — `BlockService.ToggleBlock` and `FollowService.FollowToggle` use the same pattern: check existing record, if found → delete (unblock/unfollow), if not → create (block/follow).
-
-**Password reset token exposed** — `password_reset.service.go:67` includes the raw token in the API response under `Token` field (flagged `// ⚠️ CHỈ FOR TESTING`).
 
 ## JWT
 
@@ -124,15 +120,13 @@ Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/r
 
 - `controllers/user.controller.go` — empty file
 - `repository/user.repository.go` — has `Create`, `FindByEmail` but **not wired** in `cmd/main.go`
-- `config.LoadCloudinaryEnv()` — never called from `main.go`
 - `cmd/cloudinary-check/` — standalone binary
 
-## Inconsistencies to know
+## Notable quirks
 
-- **Repository patterns differ**: most repos use concrete structs; `post.repository.go` uses an interface (`PostRepository`).
-- **UUID generation diverges**: `utils.GenerateUUID()` (crypto/rand) vs `github.com/google/uuid.New().String()` in `post.service.go`.
-- **ReactPost hardcodes emoji UUIDs**: `post.controller.go:113-124` maps 10 UUIDs to emoji names — fragile if seed data changes.
-- **Two auth middlewares**: `middlewares/auth.middleware.go` (English errors, `userID` claim) vs `routes/post.routes.go:25` (Vietnamese errors, `userId` claim).
+- **UUID generation diverges**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
+- **`PostService` is an interface** (`services/post.service.go`), whereas all other services use concrete structs. Its underlying repo is a concrete struct, not an interface.
+- **`CLOUDINARY_URL` loaded in `LoadEnv`** (required), with `LoadCloudinaryEnv()` providing fallback for individual `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET` vars.
 
 ## Key packages
 
@@ -145,8 +139,8 @@ Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/r
 | `dto/` | 8 | Request/response structs |
 | `validations/` | 5 | Explicit validation |
 | `utils/` | 5 | JWT, bcrypt, UUID, username gen, email |
-| `models/` | 29 | GORM model structs |
+| `models/` | 31 | GORM model structs |
 | `routes/` | 9 | Route registration |
 | `middlewares/` | 1 | Gin JWT auth middleware |
-| `cmd/seed/` | ~12 | Seed scripts + internal helpers |
+| `cmd/seed/` | 13 | Seed scripts + internal helpers |
 | `db/` | 1 | MySQL connection |

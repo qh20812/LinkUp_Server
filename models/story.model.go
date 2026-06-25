@@ -13,13 +13,13 @@ const (
 )
 
 type Story struct {
-	ID         string         `json:"id" db:"id"`
-	UserID     string         `json:"user_id" db:"user_id"`
-	MediaURI   string         `json:"media_uri" db:"media_uri"`
-	MediaType  StoryMediaType `json:"media_type" db:"media_type"`
-	Caption    string         `json:"caption" db:"caption"`
-	CreatedAt  time.Time      `json:"created_at" db:"created_at"`
-	ExpiresAt  *time.Time     `json:"expires_at,omitempty" db:"expires_at"`
+	ID         string         `json:"id"`
+	UserID     string         `json:"user_id"`
+	MediaURI   string         `json:"media_uri"`
+	MediaType  StoryMediaType `json:"media_type"`
+	Caption    string         `json:"caption"`
+	CreatedAt  time.Time      `json:"created_at"`
+	ExpiresAt  *time.Time     `json:"expires_at,omitempty"`
 }
 
 func NewStory(userID, mediaURI string, mediaType StoryMediaType, caption string) Story {

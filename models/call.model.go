@@ -21,14 +21,14 @@ const (
 )
 
 type Call struct {
-	ID        string     `json:"id" db:"id"`
-	ChatID    *string    `json:"chat_id,omitempty" db:"chat_id"`
-	CallerID  string     `json:"caller_id" db:"caller_id"`
-	CallType  CallType   `json:"call_type" db:"call_type"`
-	IsGroup   bool       `json:"is_group" db:"is_group"`
-	Status    CallStatus `json:"status" db:"status"`
-	StartedAt time.Time  `json:"started_at" db:"started_at"`
-	EndedAt   *time.Time `json:"ended_at,omitempty" db:"ended_at"`
+	ID        string     `json:"id"`
+	ChatID    *string    `json:"chat_id,omitempty"`
+	CallerID  string     `json:"caller_id"`
+	CallType  CallType   `json:"call_type"`
+	IsGroup   bool       `json:"is_group"`
+	Status    CallStatus `json:"status"`
+	StartedAt time.Time  `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
 func NewCall(callerID string, callType CallType, isGroup bool) Call {

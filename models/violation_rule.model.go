@@ -1,9 +1,9 @@
 package models
 
 type ViolationRule struct {
-	ID          string `json:"id" db:"id"`
-	Title       string `json:"title" db:"title"`
-	Description string `json:"description" db:"description"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
 }
 
 func NewViolationRule(title, description string) ViolationRule {

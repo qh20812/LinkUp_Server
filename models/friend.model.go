@@ -14,11 +14,11 @@ const (
 )
 
 type Friend struct {
-	ID         string        `json:"id" db:"id"`
-	SenderID   string `json:"sender_id" db:"sender_id"`
-	ReceiverID string `json:"receiver_id" db:"receiver_id"`
-	Status     FriendStatus `json:"status" db:"status"`
-	CreatedAt  time.Time    `json:"created_at" db:"created_at"`
+	ID         string        `json:"id"`
+	SenderID   string `json:"sender_id"`
+	ReceiverID string `json:"receiver_id"`
+	Status     FriendStatus `json:"status"`
+	CreatedAt  time.Time    `json:"created_at"`
 }
 
 func NewFriend(senderID, receiverID string, status FriendStatus) Friend {

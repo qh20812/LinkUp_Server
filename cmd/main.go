@@ -22,6 +22,10 @@ func main() {
 		log.Fatalf("failed to load env: %v", err)
 	}
 
+	if _, err := config.LoadCloudinaryEnv(); err != nil {
+		log.Printf("warning: cloudinary config incomplete: %v", err)
+	}
+
 	env := config.GetEnv()
 	port := env.Port
 

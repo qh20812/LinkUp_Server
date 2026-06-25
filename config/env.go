@@ -169,6 +169,9 @@ func validateRequired(e Env) []string {
 	// if e.DBSSL && e.DBCACertPath == "" {
 	// 	missing = append(missing, "DB_CA_CERT_PATH")
 	// }
+	if !e.DBSSL {
+		missing = append(missing, "DB_SSL")
+	}
 	if e.DBPort == 0 {
 		missing = append(missing, "DB_PORT")
 	}

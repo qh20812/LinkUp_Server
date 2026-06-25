@@ -14,16 +14,16 @@ const (
 )
 
 type Ad struct {
-	ID        string     `json:"id" db:"id"`
-	Title     string    `json:"title" db:"title"`
-	Content   string    `json:"content" db:"content"`
-	MediaID   *string `json:"media_id,omitempty" db:"media_id"`
-	TargetURL string    `json:"target_url" db:"target_url"`
-	Status    AdStatus  `json:"status" db:"status"`
-	Budget    float64   `json:"budget" db:"budget"`
-	StartedAt *time.Time `json:"started_at,omitempty" db:"started_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty" db:"expires_at"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	ID        string     `json:"id"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	MediaID   *string `json:"media_id,omitempty"`
+	TargetURL string    `json:"target_url"`
+	Status    AdStatus  `json:"status"`
+	Budget    float64   `json:"budget"`
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewAd(title, content string, targetURL string, budget float64) Ad {

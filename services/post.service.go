@@ -5,24 +5,23 @@ import (
 	"errors"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type PostService interface {
 	CreatePost(ctx context.Context, userID, title, content string) (*models.Post, error)
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
-	ReactPost(ctx context.Context, userID, postID, emojiID string) (string, error)
+	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) (*models.Comment, error)
 }
 
 type postService struct {
-	repo repository.PostRepository
+	repo *repository.PostRepository
 }
 
-func NewPostService(repo repository.PostRepository) PostService {
+func NewPostService(repo *repository.PostRepository) PostService {
 	return &postService{repo: repo}
 }
 
@@ -32,7 +31,7 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content str
 	}
 
 	post := models.NewPost(userID, title, content)
-	post.ID = uuid.New().String()
+	post.ID = utils.GenerateUUID()
 	post.CreatedAt = time.Now()
 	post.ViewsCount = 0
 
@@ -66,22 +65,27 @@ func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models
 	return post, nil
 }
 
-func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID string) (string, error) {
+func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID string) (string, string, error) {
 	if emojiID == "" {
-		return "", errors.New("emoji_id không được rỗng")
+		return "", "", errors.New("emoji_id không được rỗng")
+	}
+
+	emoji, err := s.repo.FindEmojiByID(ctx, emojiID)
+	if err != nil {
+		return "", "", errors.New("emoji không tồn tại")
 	}
 
 	existingReaction, err := s.repo.FindReaction(ctx, userID, postID, emojiID)
 
 	if err == nil && existingReaction != nil {
 		if errDelete := s.repo.DeleteReaction(ctx, existingReaction.ID); errDelete != nil {
-			return "", errDelete
+			return "", "", errDelete
 		}
-		return "removed", nil
+		return "removed", emoji.Code, nil
 	}
 
 	reaction := models.PostReaction{
-		ID:        uuid.New().String(),
+		ID:        utils.GenerateUUID(),
 		UserID:    userID,
 		PostID:    postID,
 		EmojiID:   emojiID,
@@ -89,10 +93,10 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 	}
 
 	if errCreate := s.repo.CreateReaction(ctx, reaction); errCreate != nil {
-		return "", errCreate
+		return "", "", errCreate
 	}
 
-	return "reacted", nil
+	return "reacted", emoji.Code, nil
 }
 
 func (s *postService) CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) (*models.Comment, error) {
@@ -115,7 +119,7 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 	}
 
 	comment := models.NewComment(userID, postID, parentID, content)
-	comment.ID = uuid.New().String()
+	comment.ID = utils.GenerateUUID()
 	comment.CreatedAt = time.Now()
 
 	if err := s.repo.CreateComment(ctx, &comment); err != nil {
