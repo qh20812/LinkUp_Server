@@ -38,14 +38,13 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit, offset int) ([]
 
 func (r *PostRepository) FindByID(ctx context.Context, id string) (*models.Post, error) {
 	var post models.Post
-
 	err := r.db.WithContext(ctx).
 		Table("posts").
 		Select(`posts.*, 
             (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
             (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
             (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`).
-		Where("posts.id = ? AND posts.status = ?", id, models.PostStatusActive).
+		Where("posts.id = ?", id).
 		First(&post).Error
 
 	if err != nil {
@@ -100,4 +99,33 @@ func (r *PostRepository) FindCommentByID(ctx context.Context, id string) (*model
 		return nil, err
 	}
 	return &comment, nil
+}
+
+func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int) ([]models.Comment, error) {
+	var comments []models.Comment
+	err := r.db.WithContext(ctx).
+		Where("post_id = ?", postID).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&comments).Error
+	return comments, err
+}
+
+func (r *PostRepository) CreateSave(ctx context.Context, bookmark models.Bookmark) error {
+	return r.db.WithContext(ctx).Create(&bookmark).Error
+}
+
+func (r *PostRepository) CreateNotification(ctx context.Context, notification models.Notification) error {
+	return r.db.WithContext(ctx).Create(&notification).Error
+}
+
+// 🌟 Hàm bổ sung: Lấy toàn bộ danh sách bình luận không phân trang
+func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string) ([]models.Comment, error) {
+	var comments []models.Comment
+	err := r.db.WithContext(ctx).
+		Where("post_id = ?", postID).
+		Order("created_at DESC").
+		Find(&comments).Error
+	return comments, err
 }

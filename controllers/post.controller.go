@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"linkup/dto"
 	"linkup/services"
 	"net/http"
 	"strconv"
@@ -17,22 +18,8 @@ func NewPostController(service services.PostService) *PostController {
 	return &PostController{service: service}
 }
 
-type CreatePostInput struct {
-	Title   string `json:"title" binding:"required"`
-	Content string `json:"content" binding:"required"`
-}
-
-type ReactPostInput struct {
-	EmojiID string `json:"emoji_id" binding:"required"`
-}
-
-type CreateCommentInput struct {
-	Content  string  `json:"content" binding:"required"`
-	ParentID *string `json:"parent_id,omitempty"`
-}
-
 func (ctrl *PostController) CreatePost(c *gin.Context) {
-	var input CreatePostInput
+	var input dto.CreatePostInput 
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -80,7 +67,7 @@ func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 
 	post, err := ctrl.service.GetPostDetail(c.Request.Context(), postID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Không tìm thấy bài viết hoặc bài viết đã bị ẩn"})
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -94,7 +81,7 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 		return
 	}
 
-	var input ReactPostInput
+	var input dto.ReactPostInput 
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu hoặc sai định dạng emoji_id"})
 		return
@@ -133,9 +120,9 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 		return
 	}
 
-	var input CreateCommentInput
+	var input dto.CreateCommentInput 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu nội dung bình luận"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu hoặc sai định dạng nội dung bình luận"})
 		return
 	}
 
@@ -146,14 +133,61 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	comment, err := ctrl.service.CreateComment(c.Request.Context(), userID, postID, input.ParentID, input.Content)
+	// 🌟 Nhận danh sách []models.Comment từ Service trả về
+	comments, err := ctrl.service.CreateComment(c.Request.Context(), userID, postID, input.ParentID, input.Content)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Đăng bình luận thành công!",
-		"data":    comment,
+		"data":    comments, // Xuất toàn bộ danh sách ra JSON
 	})
+}
+
+func (ctrl *PostController) GetComments(c *gin.Context) {
+	postID := c.Param("id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	comments, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"page":      page,
+		"page_size": pageSize,
+		"data":      comments,
+	})
+}
+
+func (ctrl *PostController) SharePost(c *gin.Context) {
+	postID := c.Param("id")
+	val, _ := c.Get("userID")
+	userID := fmt.Sprintf("%v", val)
+
+	err := ctrl.service.SharePost(c.Request.Context(), userID, postID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chia sẻ bài viết thành công!"})
+}
+
+func (ctrl *PostController) SavePost(c *gin.Context) {
+	postID := c.Param("id")
+	val, _ := c.Get("userID")
+	userID := fmt.Sprintf("%v", val)
+
+	err := ctrl.service.SavePost(c.Request.Context(), userID, postID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã lưu bài viết!"})
 }

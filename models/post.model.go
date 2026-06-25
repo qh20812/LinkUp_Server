@@ -10,6 +10,7 @@ type PostStatus string
 const (
 	PostStatusActive  PostStatus = "active"
 	PostStatusHidden  PostStatus = "hidden"
+	PostStatusPrivate PostStatus = "private"
 	PostStatusDeleted PostStatus = "deleted"
 )
 
@@ -47,6 +48,8 @@ func ParsePostStatus(value string) PostStatus {
 		return PostStatusActive
 	case string(PostStatusHidden):
 		return PostStatusHidden
+	case string(PostStatusPrivate):
+		return PostStatusPrivate
 	case string(PostStatusDeleted):
 		return PostStatusDeleted
 	default:
