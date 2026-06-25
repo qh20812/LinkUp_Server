@@ -28,6 +28,7 @@ func (r *SearchRepository) SearchUsers(ctx context.Context, keyword string) ([]d
 		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
 		Where("users.status = ?", models.UserStatusActive).
 		Where("users.username LIKE ? OR users.email LIKE ? OR profiles.display_name LIKE ?", like, like, like).
+		Where("NOT EXISTS (SELECT 1 FROM user_roles JOIN roles ON roles.id = user_roles.role_id WHERE user_roles.user_id = users.id AND roles.name IN (?, ?))", models.RoleSuperAdmin, models.RoleAdmin).
 		Limit(10).
 		Scan(&results).Error
 	if err != nil {

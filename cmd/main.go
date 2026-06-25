@@ -77,13 +77,13 @@ func main() {
 		routes.RegisterMediaRoutes(router, mediaController, env)
 		reportRepository := repository.NewReportRepository(gormDB)
 		reportValidation := validations.NewReportValidation()
-		reportService := services.NewReportService(reportRepository, reportValidation)
+		reportService := services.NewReportService(reportRepository, authRepository, postRepository, reportValidation)
 		reportController := controllers.NewReportController(reportService)
 		routes.RegisterReportRoutes(router, reportController, env)
 
 		blockRepository := repository.NewBlockRepository(gormDB)
 		blockValidation := validations.NewBlockValidation()
-		blockService := services.NewBlockService(blockRepository, blockValidation)
+		blockService := services.NewBlockService(blockRepository, authRepository, blockValidation)
 		blockController := controllers.NewBlockController(blockService)
 		routes.RegisterBlockRoutes(router, blockController, env)
 

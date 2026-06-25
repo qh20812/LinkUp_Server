@@ -31,4 +31,5 @@ type SearchResponse struct {
 	Users    []UserSearchResult    `json:"users,omitempty"`
 	Posts    []PostSearchResult    `json:"posts,omitempty"`
 	Hashtags []HashtagSearchResult `json:"hashtags,omitempty"`
+	Message  string                `json:"message,omitempty"`
 }

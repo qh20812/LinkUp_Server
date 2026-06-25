@@ -85,6 +85,19 @@ func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string,
 	return nil
 }
 
+func (r *AuthRepository) HasRole(ctx context.Context, userID string, roleName models.RoleName) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND roles.name = ?", userID, roleName).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("check role: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *AuthRepository) GetPasswordHistoryByUserID(ctx context.Context, userID string) ([]models.PasswordHistory, error) {
 	var histories []models.PasswordHistory
 	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&histories).Error
