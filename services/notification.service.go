@@ -12,9 +12,9 @@ import (
 )
 
 type NotificationService struct {
-	notifRepo  *repository.NotificationRepository
-	prefRepo   *repository.NotificationPreferenceRepository
-	hub        *ws.Hub
+	notifRepo *repository.NotificationRepository
+	prefRepo  *repository.NotificationPreferenceRepository
+	hub       *ws.Hub
 }
 
 func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, hub *ws.Hub) *NotificationService {

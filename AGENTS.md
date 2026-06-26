@@ -62,25 +62,39 @@ All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS is outs
 | `/api/blocks` | POST/GET | Auth | `routes/block.routes.go` |
 | `/api/search` | GET | No | `routes/search.routes.go` |
 | `/api/notifications*` | all | Auth | `routes/notification.routes.go` |
-| `/api/friend-requests*` | all | Auth | `routes/friend.routes.go` |
+| `/api/friend-requests` | GET | Auth | `routes/friend.routes.go` |
+| `/api/friend-requests/:userID` | POST | Auth | |
+| `/api/friend-requests/:id/accept` | PUT | Auth | |
+| `/api/friend-requests/:id` | DELETE | Auth | |
+| `/api/chats/direct` | POST | Auth | `routes/chat.routes.go` |
+| `/api/chats/invite` | POST | Auth | |
+| `/api/chats/invite/respond` | POST | Auth | |
+| `/api/chats/ws` | GET | Auth (middleware) | |
 
 ## Business logic conventions
 
 - **Role protection**: `repository/auth.repository.go:HasRole` checks `user_roles` via JOIN. `ReportService` and `BlockService` reject targeting `SUPER_ADMIN` or `ADMIN`. `SearchRepository.SearchUsers` excludes them via `NOT EXISTS`.
-- **Toggle pattern**: `BlockService.ToggleBlock`, `FollowService.FollowToggle`, `postService.ReactPost`: check existing → delete if found, else create.
+- **Toggle pattern**: `BlockService.ToggleBlock`, `FollowService.FollowToggle`, `FriendService.ToggleFriendRequest`, `postService.ReactPost`: check existing → delete if found, else create.
 - **Post status**: `FindByID` only returns active posts. Used by `ReportService` to validate post exists.
-- **Vietnamese error messages**: post service (`post.service.go`) returns Vietnamese error strings (e.g., `"tên bài viết và nội dung không được bỏ trống"`). Auth service returns English.
+- **Vietnamese error messages**: post/friend/chat services return Vietnamese error strings. Auth service returns English.
 
 ## Service patterns
 
 - **`PostService` and `MediaService` are interfaces** (in `services/`). All other services use concrete structs.
-- **`notificationService.Create`** is called from follow/post services to push real-time via WebSocket Hub.
+- **`notificationService.Create`** is called from follow/friend/post services to push real-time via WebSocket Hub.
 
 ## WebSocket
 
-- Hub at `ws/hub.go`: `userID → []Client` map. `SendToUser` serializes `OutgoingMessage{Type, Data}` to JSON.
-- Auth via `?token=` query param (access JWT only — checks `claims.TokenType == "access"`).
-- Client is write-only (reads and discards incoming). WritePump + ReadPump goroutines per client.
+Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
+
+| Endpoint | Handler | Hub | Client type | Auth |
+|---|---|---|---|---|
+| `GET /ws` | `ws/handler.go:ServeWS` | `hub` (notification) | `Client` with `service=nil` → reads discarded | `?token=` access JWT |
+| `GET /api/chats/ws` | `controllers/chat.controller.go:HandleWebsocket` | `chatHub` | `Client` with `ChatService` → processes chat events | `AuthMiddleware` |
+
+- **`ws/hub.go`** unifies both patterns in one struct: `rooms map[string]map[*Client]bool` (chat broadcast) + `clients map[string]map[*Client]bool` (per-user notification). Has `SendToUser`, `JoinChat`, `RegisterClient`, and a `broadcast` channel.
+- **Import cycle avoided**: `services` imports `ws` (for `*ws.Hub`, `ws.OutgoingMessage`), but `ws` does NOT import `services`. Instead `ws/chat.service.go` defines a `ChatService interface` that `services/chat.service.go` implements implicitly.
+- **`ws/client.go`** handles chat events (`chat:join`, `message:send`, `typing:start/stop`) when `service != nil`; otherwise discards incoming (notification-only client).
 
 ## Seed system
 
