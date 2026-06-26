@@ -26,13 +26,13 @@ const (
 )
 
 type ModerationLog struct {
-	ID          string              `json:"id" db:"id"`
-	ModeratorID string              `json:"moderator_id" db:"moderator_id"`
-	Action      ModerationAction    `json:"action" db:"action"`
-	TargetType  ModerationTargetType `json:"target_type" db:"target_type"`
-	TargetID    string              `json:"target_id" db:"target_id"`
-	Reason      string              `json:"reason" db:"reason"`
-	CreatedAt   time.Time           `json:"created_at" db:"created_at"`
+	ID          string              `json:"id"`
+	ModeratorID string              `json:"moderator_id"`
+	Action      ModerationAction    `json:"action"`
+	TargetType  ModerationTargetType `json:"target_type"`
+	TargetID    string              `json:"target_id"`
+	Reason      string              `json:"reason"`
+	CreatedAt   time.Time           `json:"created_at"`
 }
 
 func NewModerationLog(moderatorID string, action ModerationAction, targetType ModerationTargetType, targetID string, reason string) ModerationLog {

@@ -12,12 +12,12 @@ const (
 )
 
 type Tag struct {
-	ID           string   `json:"id" db:"id"`
-	PostID       string `json:"post_id" db:"post_id"`
-	CommentID    *string `json:"comment_id,omitempty" db:"comment_id"`
-	TagType      TagType `json:"tag_type" db:"tag_type"`
-	TargetUserID *string `json:"target_user_id,omitempty" db:"target_user_id"`
-	Name         string  `json:"name" db:"name"`
+	ID           string   `json:"id"`
+	PostID       string `json:"post_id"`
+	CommentID    *string `json:"comment_id,omitempty"`
+	TagType      TagType `json:"tag_type"`
+	TargetUserID *string `json:"target_user_id,omitempty"`
+	Name         string  `json:"name"`
 }
 
 func NewTag(postID string, commentID *string, tagType TagType, targetUserID *string, name string) Tag {

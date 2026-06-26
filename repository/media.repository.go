@@ -7,27 +7,19 @@ import (
 	"gorm.io/gorm"
 )
 
-type MediaRepository interface {
-	Create(ctx context.Context, media *models.Media) error
-	GetByID(ctx context.Context, id string) (*models.Media, error)
-	GetByUserID(ctx context.Context, userID string) ([]models.Media, error)
-	UpdateStorageUsage(ctx context.Context, userID string, addedBytes float64) error
-	GetUserStorageInfo(ctx context.Context, userID string) (quota, used float64, err error)
-}
-
-type mediaRepository struct {
+type MediaRepository struct {
 	db *gorm.DB
 }
 
-func NewMediaRepository(db *gorm.DB) MediaRepository {
-	return &mediaRepository{db: db}
+func NewMediaRepository(db *gorm.DB) *MediaRepository {
+	return &MediaRepository{db: db}
 }
 
-func (r *mediaRepository) Create(ctx context.Context, media *models.Media) error {
+func (r *MediaRepository) Create(ctx context.Context, media *models.Media) error {
 	return r.db.WithContext(ctx).Create(media).Error
 }
 
-func (r *mediaRepository) GetByID(ctx context.Context, id string) (*models.Media, error) {
+func (r *MediaRepository) GetByID(ctx context.Context, id string) (*models.Media, error) {
 	var media models.Media
 	err := r.db.WithContext(ctx).Where("id = ?", id).First(&media).Error
 	if err != nil {
@@ -36,13 +28,13 @@ func (r *mediaRepository) GetByID(ctx context.Context, id string) (*models.Media
 	return &media, nil
 }
 
-func (r *mediaRepository) GetByUserID(ctx context.Context, userID string) ([]models.Media, error) {
+func (r *MediaRepository) GetByUserID(ctx context.Context, userID string) ([]models.Media, error) {
 	var medias []models.Media
 	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&medias).Error
 	return medias, err
 }
 
-func (r *mediaRepository) UpdateStorageUsage(ctx context.Context, userID string, addedBytes float64) error {
+func (r *MediaRepository) UpdateStorageUsage(ctx context.Context, userID string, addedBytes float64) error {
 	return r.db.WithContext(ctx).
 		Model(&models.User{}).
 		Where("id = ?", userID).
@@ -50,7 +42,7 @@ func (r *mediaRepository) UpdateStorageUsage(ctx context.Context, userID string,
 		Error
 }
 
-func (r *mediaRepository) GetUserStorageInfo(ctx context.Context, userID string) (quota, used float64, err error) {
+func (r *MediaRepository) GetUserStorageInfo(ctx context.Context, userID string) (quota, used float64, err error) {
 	var user models.User
 	err = r.db.WithContext(ctx).
 		Select("storage_quota_bytes", "storage_used_bytes").

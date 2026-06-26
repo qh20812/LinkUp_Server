@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"linkup/dto"
-	"linkup/services"
 
 	"github.com/gorilla/websocket"
 )
@@ -23,13 +22,13 @@ type Client struct {
 	ctx         context.Context
 	conn        *websocket.Conn
 	hub         *Hub
-	service     *services.ChatService
+	service     ChatService
 	userID      string
 	send        chan []byte
 	joinedChats map[string]struct{}
 }
 
-func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service *services.ChatService, userID string) *Client {
+func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, userID string) *Client {
 	return &Client{
 		ctx:         ctx,
 		conn:        conn,
@@ -60,6 +59,10 @@ func (c *Client) ReadPump() {
 				log.Printf("ws read error: %v", err)
 			}
 			return
+		}
+
+		if c.service == nil {
+			continue
 		}
 
 		var event dto.WsEvent
@@ -127,6 +130,10 @@ func (c *Client) ReadPump() {
 
 		default:
 			c.sendError("unknown event type")
+			_, _, err := c.conn.ReadMessage()
+			if err != nil {
+				break
+			}
 		}
 	}
 }
@@ -148,6 +155,23 @@ func (c *Client) WritePump() {
 			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
+
+			w, err := c.conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			w.Write(message)
+
+			n := len(c.send)
+			for i := 0; i < n; i++ {
+				w.Write([]byte("\n"))
+				w.Write(<-c.send)
+			}
+
+			if err := w.Close(); err != nil {
+				return
+			}
+
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {

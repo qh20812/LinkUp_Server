@@ -137,5 +137,14 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 	}
 
+	for _, uid := range state.UserIDs {
+		if err := internal.Exec(database,
+			`INSERT INTO notification_preferences (user_id, like_enabled, comment_enabled, follow_enabled, message_enabled, friend_request_enabled) VALUES (?, 1, 1, 1, 1, 1)`,
+			uid,
+		); err != nil {
+			return fmt.Errorf("core: insert notification_preference for %s: %w", uid, err)
+		}
+	}
+
 	return nil
 }

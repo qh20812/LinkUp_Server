@@ -14,16 +14,16 @@ const (
 )
 
 type Report struct {
-	ID              string        `json:"id" db:"id"`
-	ReporterID      string `json:"reporter_id" db:"reporter_id"`
-	ReportType      string       `json:"report_type" db:"report_type"`
-	TargetUserID    *string `json:"target_user_id,omitempty" db:"target_user_id"`
-	TargetPostID    *string `json:"target_post_id,omitempty" db:"target_post_id"`
-	TargetCommentID *string `json:"target_comment_id,omitempty" db:"target_comment_id"`
-	ViolationRuleID *string `json:"violation_rule_id,omitempty" db:"violation_rule_id"`
-	ReasonDetail    string       `json:"reason_detail" db:"reason_detail"`
-	Status          ReportStatus `json:"status" db:"status"`
-	CreatedAt       time.Time    `json:"created_at" db:"created_at"`
+	ID              string        `json:"id"`
+	ReporterID      string `json:"reporter_id"`
+	ReportType      string       `json:"report_type"`
+	TargetUserID    *string `json:"target_user_id,omitempty"`
+	TargetPostID    *string `json:"target_post_id,omitempty"`
+	TargetCommentID *string `json:"target_comment_id,omitempty"`
+	ViolationRuleID *string `json:"violation_rule_id,omitempty"`
+	ReasonDetail    string       `json:"reason_detail"`
+	Status          ReportStatus `json:"status"`
+	CreatedAt       time.Time    `json:"created_at"`
 }
 
 func NewReport(reporterID string, reportType, reasonDetail string, violationRuleID *string) Report {

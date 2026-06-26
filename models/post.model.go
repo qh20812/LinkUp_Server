@@ -14,14 +14,14 @@ const (
 )
 
 type Post struct {
-	ID         string     `json:"id" db:"id"`
-	UserID     string     `json:"user_id" db:"user_id"`
-	Title      string     `json:"title" db:"title"`
-	Content    string     `json:"content" db:"content"`
-	ViewsCount int        `json:"views_count" db:"views_count"`
-	Status     PostStatus `json:"status" db:"status"`
-	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt  *time.Time `json:"updated_at,omitempty" db:"updated_at"`
+	ID         string     `json:"id"`
+	UserID     string     `json:"user_id"`
+	Title      string     `json:"title"`
+	Content    string     `json:"content"`
+	ViewsCount int        `json:"views_count"`
+	Status     PostStatus `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 
 	LikesCount    int `json:"likes_count" gorm:"->"`
 	CommentsCount int `json:"comments_count" gorm:"->"`

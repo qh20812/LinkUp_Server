@@ -12,20 +12,21 @@ const (
 	NotificationTypeComment       NotificationType = "comment"
 	NotificationTypeFollow        NotificationType = "follow"
 	NotificationTypeMessage       NotificationType = "message"
-	NotificationTypeFriendRequest NotificationType = "friend_request"
+	NotificationTypeFriendRequest  NotificationType = "friend_request"
+	NotificationTypeFriendAccepted NotificationType = "friend_accepted"
 )
 
 type Notification struct {
-	ID                string           `json:"id" db:"id"`
-	ReceiverID        string           `json:"receiver_id" db:"receiver_id"`
-	SenderID          *string          `json:"sender_id,omitempty" db:"sender_id"`
-	Type              NotificationType `json:"type" db:"type"`
-	RedirectPostID    *string          `json:"redirect_post_id,omitempty" db:"redirect_post_id"`
-	RedirectUserID    *string          `json:"redirect_user_id,omitempty" db:"redirect_user_id"`
-	RedirectCommentID *string          `json:"redirect_comment_id,omitempty" db:"redirect_comment_id"`
-	Content           string           `json:"content" db:"content"`
-	IsRead            bool             `json:"is_read" db:"is_read"`
-	CreatedAt         time.Time        `json:"created_at" db:"created_at"`
+	ID                string           `json:"id"`
+	ReceiverID        string           `json:"receiver_id"`
+	SenderID          *string          `json:"sender_id,omitempty"`
+	Type              NotificationType `json:"type"`
+	RedirectPostID    *string          `json:"redirect_post_id,omitempty"`
+	RedirectUserID    *string          `json:"redirect_user_id,omitempty"`
+	RedirectCommentID *string          `json:"redirect_comment_id,omitempty"`
+	Content           string           `json:"content"`
+	IsRead            bool             `json:"is_read"`
+	CreatedAt         time.Time        `json:"created_at"`
 }
 
 func NewNotification(receiverID string, senderID *string, notifType NotificationType, content string) Notification {
@@ -53,6 +54,8 @@ func ParseNotificationType(value string) NotificationType {
 		return NotificationTypeMessage
 	case string(NotificationTypeFriendRequest):
 		return NotificationTypeFriendRequest
+	case string(NotificationTypeFriendAccepted):
+		return NotificationTypeFriendAccepted
 	default:
 		return NotificationTypeLike
 	}

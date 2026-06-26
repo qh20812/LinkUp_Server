@@ -13,9 +13,9 @@ const (
 )
 
 type Role struct {
-	ID          string   `json:"id" db:"id"`
-	Name        RoleName `json:"name" db:"name"`
-	Description string   `json:"description" db:"description"`
+	ID          string   `json:"id"`
+	Name        RoleName `json:"name"`
+	Description string   `json:"description"`
 }
 
 func NewRole(name RoleName, description string) Role {

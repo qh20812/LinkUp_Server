@@ -13,11 +13,11 @@ const (
 )
 
 type Chat struct {
-	ID        string   `json:"id" db:"id"`
-	Type      ChatType `json:"type" db:"type"`
-	Name      string   `json:"name" db:"name"`
-	AvatarURI string   `json:"avatar_uri" db:"avatar_uri"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	ID        string   `json:"id"`
+	Type      ChatType `json:"type"`
+	Name      string   `json:"name"`
+	AvatarURI string   `json:"avatar_uri"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewChat(chatType ChatType, name, avatarURI string) Chat {
