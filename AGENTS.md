@@ -4,11 +4,15 @@
 
 ```bash
 go build -o ./tmp/main.exe ./cmd   # or `air` for hot reload
-go build ./cmd/seed && ./seed.exe  # full seed run (resets DB!)
+go build ./cmd/seed && ./seed.exe  # full seed run (drops & recreates 32 tables, resets DB)
 go build ./...                      # verify all packages compile
 ```
 
-No `_test.go` files exist anywhere.
+Tests in `tests/`:
+```bash
+go test ./tests/... -v              # unit tests (no DB needed)
+go test ./tests/... -run TestRegisterHandler_Success   # requires TEST_DSN env var
+```
 
 ## Architecture
 
@@ -16,85 +20,87 @@ No `_test.go` files exist anywhere.
 cmd/main.go → controller → service → repository (GORM)
 cmd/seed/   → raw database/sql (10 ordered steps, resets DB)
 cmd/cloudinary-check/ → standalone Cloudinary connectivity test
+ws/          → gorilla/websocket Hub (per-user broadcast, token auth via `?token=`)
 ```
 
-- **Framework**: Gin (`gin.New()` followed by `.Use(gin.Logger(), gin.Recovery())` in `cmd/main.go:40-41`).
-- **DB**: `db.ConnectDb(env)` returns `*sql.DB`; `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`. DSN uses **no TLS params**.
-- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have `json` tags; `db` and `gorm` tags are unused relics.
-- **31 model files** (28 seed tables + 3 not in seed schema: `password_history`, `password_reset_token`, `post_share`).
+- **Framework**: Gin (`gin.New()` then `.Use(gin.Logger(), gin.Recovery())` in `cmd/main.go:44-45`).
+- **DB**: `db.ConnectDb(env)` returns `*sql.DB` (DSN has **no TLS params**); `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
+- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have `json` tags; `db` tags are unused. `gorm` tags appear only in 4 models: `post` (`->` read-only computed counts), `password_history` (`primaryKey`, `index`), `post_share` (`primaryKey`), `notification_preference` (`primaryKey`).
+- **32 model files** matching 32 schema tables (seed schema in `cmd/seed/schema/main.go`).
 
 ## Config
 
 - `.env` loaded by `config.LoadEnv()` (custom line parser — **not** godotenv). Singleton guard prevents reloads.
-- Required env vars: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
-  - `DB_SSL` parsed via `strconv.ParseBool`; checked in `validateRequired` (treated as required).
-  - `PORT` defaults to `"8080"`.
-- Optional Gmail: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
-- `config.LoadCloudinaryEnv()` is called from `main.go` for **fallback** credentials (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`), but primary config comes via `CLOUDINARY_URL` in `LoadEnv`.
+- Required env vars: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`. `DB_SSL` treated as required (validated as `false` → missing).
+- `PORT` defaults to `"8080"`. Optional Gmail: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
+- `config.LoadCloudinaryEnv()` provides fallback from `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET` but `CLOUDINARY_URL` is primary.
 - `config.GetEnv()` returns a **value copy**.
 
 ## Routes
 
-All routes wired in `cmd/main.go` (inside `if database != nil { ... }` guard):
+All routes wired in `cmd/main.go` (inside `if database != nil { ... }` guard). WebSocket is outside the guard.
 
 | Path | Method | Auth | Handler file |
 |---|---|---|---|
 | `/health` | GET | No | inline in `main.go` |
+| `/ws` | GET | token query | `ws/handler.go` |
 | `/api/auth/register` | POST | No | `routes/auth.routes.go` |
-| `/api/auth/login` | POST | No | `routes/auth.routes.go` |
-| `/api/auth/change-password` | POST | `middlewares.AuthMiddleware` | `routes/auth.routes.go` |
+| `/api/auth/login` | POST | No | |
+| `/api/auth/change-password` | POST | `AuthMiddleware` | |
 | `/api/auth/forgot-password` | POST | No | `routes/password_reset.routes.go` |
-| `/api/auth/verify-reset-token` | POST | No | `routes/password_reset.routes.go` |
-| `/api/auth/reset-password` | POST | No | `routes/password_reset.routes.go` |
+| `/api/auth/verify-reset-token` | POST | No | |
+| `/api/auth/reset-password` | POST | No | |
 | `/posts` | GET | No | `routes/post.routes.go` |
-| `/posts` | POST | `middlewares.AuthMiddleware` | `routes/post.routes.go` |
-| `/posts/:id` | GET | No | `routes/post.routes.go` |
-| `/posts/:id/react` | POST | `middlewares.AuthMiddleware` | `routes/post.routes.go` |
-| `/posts/:id/comments` | POST | `middlewares.AuthMiddleware` | `routes/post.routes.go` |
-| `/api/profile` | GET | `middlewares.AuthMiddleware` | `routes/profile.routes.go` |
-| `/api/profile` | PUT | `middlewares.AuthMiddleware` | `routes/profile.routes.go` |
-| `/api/profile/:userID` | GET | No | `routes/profile.routes.go` |
-| `/api/follow/:userID` | POST | `middlewares.AuthMiddleware` | `routes/follow.routes.go` |
-| `/api/follow/stats/:userID` | GET | No | `routes/follow.routes.go` |
-| `/api/media/upload` | POST | `middlewares.AuthMiddleware` | `routes/media.routes.go` |
-| `/api/media/storage` | GET | `middlewares.AuthMiddleware` | `routes/media.routes.go` |
-| `/api/reports` | POST | `middlewares.AuthMiddleware` | `routes/report.routes.go` |
-| `/api/blocks` | POST | `middlewares.AuthMiddleware` | `routes/block.routes.go` |
-| `/api/blocks` | GET | `middlewares.AuthMiddleware` | `routes/block.routes.go` |
+| `/posts` | POST | `AuthMiddleware` | |
+| `/posts/:id` | GET | No | |
+| `/posts/:id/react` | POST | `AuthMiddleware` | |
+| `/posts/:id/comments` | POST | `AuthMiddleware` | |
+| `/api/profile` | GET/PUT | `AuthMiddleware` | `routes/profile.routes.go` |
+| `/api/profile/:userID` | GET | No | |
+| `/api/follow/:userID` | POST | `AuthMiddleware` | `routes/follow.routes.go` |
+| `/api/follow/stats/:userID` | GET | No | |
+| `/api/media/upload` | POST | `AuthMiddleware` | `routes/media.routes.go` |
+| `/api/media/storage` | GET | `AuthMiddleware` | |
+| `/api/reports` | POST | `AuthMiddleware` | `routes/report.routes.go` |
+| `/api/blocks` | POST/GET | `AuthMiddleware` | `routes/block.routes.go` |
 | `/api/search` | GET | No | `routes/search.routes.go` |
+| `/api/notifications` | GET | `AuthMiddleware` | `routes/notification.routes.go` |
+| `/api/notifications/:id/read` | PUT | `AuthMiddleware` | |
+| `/api/notifications/read-all` | PUT | `AuthMiddleware` | |
+| `/api/notifications/unread-count` | GET | `AuthMiddleware` | |
+| `/api/notifications/preferences` | GET/PUT | `AuthMiddleware` | |
+| `/api/friend-requests` | GET | `AuthMiddleware` | `routes/friend.routes.go` |
+| `/api/friend-requests/:userID` | POST | `AuthMiddleware` | |
+| `/api/friend-requests/:id/accept` | PUT | `AuthMiddleware` | |
+| `/api/friend-requests/:id` | DELETE | `AuthMiddleware` | |
 
-Auth middleware is `middlewares/auth.middleware.go` (uses `utils.ParseToken`, sets `userID` and `email`).
+Auth middleware (`middlewares/auth.middleware.go`) uses `utils.ParseToken`, sets `userID` and `email` on context.
 
 ## DTOs & validation
 
 - `validations` package uses explicit validation (sentinel errors + struct methods), **not** Gin binding tags.
-- `binding` tags are used only in controller-level input structs: `post.controller.go:CreatePostInput`, `ReactPostInput`, `CreateCommentInput`.
-- **Query params**: `dto/search.dto.go:SearchInput` uses `form:"keyword" form:"type"` for `c.ShouldBindQuery(&input)`.
-- Password rules: ≥8 chars, ≤128, must have upper, lower, digit, special.
+- `binding` tags used only in controller-level input structs: `post.controller.go`.
+- Query params via `c.ShouldBindQuery(&input)` with `form:` tags (e.g. `dto/search.dto.go:SearchInput`).
+- Password: ≥8, ≤128, must have upper, lower, digit, special.
 
 ## Business logic constraints
 
-**Role protection** — `repository/auth.repository.go:HasRole(ctx, userID, roleName)` checks user_roles via JOIN. Used to protect admin/superadmin users:
-- `ReportService` rejects reporting users with `SUPER_ADMIN` or `ADMIN` role (`"cannot report admin or super admin"`).
-- `BlockService` rejects blocking users with `SUPER_ADMIN` or `ADMIN` role (`"cannot block admin or super admin"`).
-- `SearchRepository.SearchUsers` excludes users with `SUPER_ADMIN` or `ADMIN` role via `NOT EXISTS` subquery.
-
-**Post status** — `ReportService.CreateReport` validates post exists and is active via `postRepo.FindByID` (only returns active posts). Hidden/deleted posts cannot be reported.
-
-**Toggle pattern** — `BlockService.ToggleBlock` and `FollowService.FollowToggle` use the same pattern: check existing record, if found → delete (unblock/unfollow), if not → create (block/follow).
+- **Role protection** — `repository/auth.repository.go:HasRole` checks `user_roles` via JOIN. `ReportService` and `BlockService` reject targeting `SUPER_ADMIN` or `ADMIN` role users. `SearchRepository.SearchUsers` excludes them via `NOT EXISTS`.
+- **Post status** — `ReportService.CreateReport` validates post exists & is active via `postRepo.FindByID` (only returns active posts).
+- **Toggle pattern** — `BlockService.ToggleBlock` and `FollowService.FollowToggle`: check existing record → delete if found, create if not.
+- **Reaction toggle** — `postService.ReactPost` same pattern (check → delete existing or create new).
 
 ## JWT
 
-- `utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15 min), refresh TTL hardcoded to 7 days.
-- `utils.ParseToken` parses into `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`).
+- `utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15min), refresh TTL hardcoded to 7 days.
+- `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`).
 
 ## Password reset flow
 
-1. `POST /api/auth/forgot-password` — 32-byte hex token, stored in `password_reset_tokens`, email via Gmail SMTP (`smtp.gmail.com:587`).
+1. `POST /api/auth/forgot-password` — 32-byte hex token in `password_reset_tokens`, email via Gmail SMTP (`smtp.gmail.com:587`, Vietnamese template).
 2. `POST /api/auth/verify-reset-token` — checks validity & expiry.
 3. `POST /api/auth/reset-password` — updates password, marks token used.
-
-Token expiry: 10 min. Email template in Vietnamese.
+Token expiry: 10 min.
 
 ## Seed system
 
@@ -102,19 +108,14 @@ Token expiry: 10 min. Email template in Vietnamese.
 go build ./cmd/seed && ./seed.exe
 ```
 
-10 ordered steps, raw SQL (not GORM), **drops all tables on run**:
-1. **reset** — DROP 28 tables (`FOREIGN_KEY_CHECKS=0`)
-2. **schema** — CREATE 28 tables with FKs, indexes, utf8mb4
-3. **users** — 20 users (bcrypt `Password123!`), 2 banned, 1 suspended
-4. **core** — 3 roles, 10 emojis, 8 violation rules + `user_roles`
-5. **profiles** — 20 profiles, 5 private
-6. **social** — 30 posts, 60 comments, 50 tags, 80 reactions, 40 follows, 15 friends, 5 blocks, 20 bookmarks
-7. **relationships** — 5 communities, 25 group members
-8. **messaging** — 8 chats, ~24 participants, 50 messages
-9. **moderation** — 8 reports, 5 bans, 8 moderation logs
-10. **extended** — 5 ads + analytics, 15 media, 10 stories, 20 notifications, 5 calls
+10 ordered steps, raw SQL (not GORM), **drops all 32 tables on run**: reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All users have bcrypt `Password123!`.
 
-Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562).
+## WebSocket
+
+- Hub at `ws/hub.go` — per-user broadcast via `userID → []Client` map. `SendToUser` serializes `OutgoingMessage{Type, Data}` to JSON.
+- Auth via `?token=` query param (access JWT). No auth middleware — custom JWT parse in handler.
+- Client is write-only from server perspective (reads and discards incoming messages).
+- Used by `notificationService.Create` in follow/post service to push real-time notifications.
 
 ## Stubs / not wired
 
@@ -125,7 +126,7 @@ Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/r
 ## Notable quirks
 
 - **UUID generation diverges**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
-- **`PostService` is an interface** (`services/post.service.go`), whereas all other services use concrete structs. Its underlying repo is a concrete struct, not an interface.
+- **PostService is an interface** (`services/post.service.go`), `MediaService` is also an interface; all other services use concrete structs.
 - **`CLOUDINARY_URL` loaded in `LoadEnv`** (required), with `LoadCloudinaryEnv()` providing fallback for individual `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET` vars.
 
 ## Key packages
@@ -133,14 +134,15 @@ Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/r
 | Package | Files | Role |
 |---|---|---|
 | `config/` | 2 | Env loading, Cloudinary creds |
-| `controllers/` | 10 | HTTP handlers |
-| `services/` | 9 | Business logic |
-| `repository/` | 10 | GORM data access |
-| `dto/` | 8 | Request/response structs |
-| `validations/` | 5 | Explicit validation |
+| `controllers/` | 12 | HTTP handlers (1 stub) |
+| `services/` | 11 | Business logic |
+| `repository/` | 13 | GORM data access (1 unwired) |
+| `dto/` | 10 | Request/response structs |
+| `validations/` | 6 | Explicit validation |
 | `utils/` | 5 | JWT, bcrypt, UUID, username gen, email |
-| `models/` | 31 | GORM model structs |
-| `routes/` | 9 | Route registration |
+| `models/` | 32 | GORM model structs |
+| `routes/` | 11 | Route registration |
 | `middlewares/` | 1 | Gin JWT auth middleware |
 | `cmd/seed/` | 13 | Seed scripts + internal helpers |
 | `db/` | 1 | MySQL connection |
+| `ws/` | 3 | WebSocket hub, client, handler |

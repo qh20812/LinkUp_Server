@@ -22,6 +22,8 @@ func Run(env config.Env) error {
 			email VARCHAR(255) NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			storage_quota_bytes DOUBLE NOT NULL DEFAULT 2147483648,
+			storage_used_bytes DOUBLE NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			UNIQUE INDEX idx_users_username (username),
@@ -373,6 +375,51 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
 			UNIQUE INDEX idx_user_roles_pair (user_id, role_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 26. Depends on users
+		`CREATE TABLE IF NOT EXISTS notification_preferences (
+			user_id VARCHAR(36) PRIMARY KEY,
+			like_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			comment_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			follow_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			message_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			friend_request_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 27. Depends on users
+		`CREATE TABLE IF NOT EXISTS password_histories (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_password_histories_user_id (user_id),
+			INDEX idx_password_histories_created_at (created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 28. Depends on users
+		`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			token VARCHAR(255) NOT NULL UNIQUE,
+			expires_at DATETIME NOT NULL,
+			used_at DATETIME NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_password_reset_tokens_token (token),
+			INDEX idx_password_reset_tokens_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 29. Depends on users, posts
+		`CREATE TABLE IF NOT EXISTS post_shares (
+			id VARCHAR(36) PRIMARY KEY,
+			post_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 

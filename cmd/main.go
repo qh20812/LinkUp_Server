@@ -15,6 +15,7 @@ import (
 	"linkup/routes"
 	"linkup/services"
 	"linkup/validations"
+	"linkup/ws"
 )
 
 func main() {
@@ -28,6 +29,9 @@ func main() {
 
 	env := config.GetEnv()
 	port := env.Port
+
+	hub := ws.NewHub()
+	go hub.Run()
 
 	database, err := db.ConnectDb(env)
 	if err != nil {
@@ -61,8 +65,14 @@ func main() {
 		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
 		routes.RegisterPasswordResetRoutes(router, passwordResetController)
 
+		notificationRepository := repository.NewNotificationRepository(gormDB)
+		notificationPreferenceRepository := repository.NewNotificationPreferenceRepository(gormDB)
+		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, hub)
+		notificationController := controllers.NewNotificationController(notificationService)
+		routes.RegisterNotificationRoutes(router, notificationController, env)
+
 		postRepository := repository.NewPostRepository(gormDB)
-		postService := services.NewPostService(postRepository)
+		postService := services.NewPostService(postRepository, notificationService)
 		postController := controllers.NewPostController(postService)
 		routes.RegisterPostRoutes(router, postController, env)
 
@@ -71,7 +81,7 @@ func main() {
 		routes.RegisterProfileRoutes(router, profileController, env)
 
 		followRepository := repository.NewFollowRepository(gormDB)
-		followService := services.NewFollowService(followRepository, authRepository)
+		followService := services.NewFollowService(followRepository, authRepository, notificationService)
 		followController := controllers.NewFollowController(followService)
 		routes.RegisterFollowRoutes(router, followController, env)
 
@@ -91,12 +101,20 @@ func main() {
 		blockController := controllers.NewBlockController(blockService)
 		routes.RegisterBlockRoutes(router, blockController, env)
 
+		friendRepository := repository.NewFriendRepository(gormDB)
+		friendValidation := validations.NewFriendValidation()
+		friendService := services.NewFriendService(friendRepository, authRepository, profileRepository, friendValidation, notificationService)
+		friendController := controllers.NewFriendController(friendService)
+		routes.RegisterFriendRoutes(router, friendController, env)
+
 		searchRepository := repository.NewSearchRepository(gormDB)
 		searchValidation := validations.NewSearchValidation()
 		searchService := services.NewSearchService(searchRepository, searchValidation)
 		searchController := controllers.NewSearchController(searchService)
 		routes.RegisterSearchRoutes(router, searchController)
 	}
+
+	router.GET("/ws", ws.ServeWS(hub, env))
 
 	addr := ":" + port
 	fmt.Printf("Server listening on http://localhost%s\n", addr)
