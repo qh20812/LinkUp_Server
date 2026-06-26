@@ -15,6 +15,7 @@ import (
 	"linkup/routes"
 	"linkup/services"
 	"linkup/validations"
+	"linkup/ws"
 )
 
 func main() {
@@ -92,6 +93,15 @@ func main() {
 		searchService := services.NewSearchService(searchRepository, searchValidation)
 		searchController := controllers.NewSearchController(searchService)
 		routes.RegisterSearchRoutes(router, searchController)
+
+		chatRepository := repository.NewChatRepository(gormDB)
+		friendRepository := repository.NewFriendRepository(gormDB)
+		inviteRepository := repository.NewChatInvitationRepository(gormDB)
+		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository)
+		chatHub := ws.NewHub()
+		go chatHub.Run()
+		chatController := controllers.NewChatController(chatHub, chatService, env)
+		routes.RegisterChatRoutes(router, chatController, env)
 	}
 
 	addr := ":" + port
