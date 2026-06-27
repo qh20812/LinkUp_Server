@@ -6,7 +6,7 @@
 go build -o ./tmp/main.exe ./cmd          # production build
 air                                         # hot reload (`.air.toml` ready)
 go build ./cmd/seed && ./seed.exe          # full seed (drops & recreates all tables)
-go build ./...                              # verify all packages compile
+go build ./... && go vet ./...              # verify & vet all packages
 ```
 
 **Tests** — two categories:
@@ -15,18 +15,19 @@ go test ./tests/auth/... -v -run TestValidate  # validation-only, no DB
 go test ./tests/... -run TestRegisterHandler_Success  # needs TEST_DSN env var
 ```
 
-`tests/post/` is empty (no post tests yet). No linter/typecheck config — `go build ./...` is the main verification.
+`tests/post/` is empty (no post tests yet). No linter/typecheck config — `go build ./... && go vet ./...` is the main verification.
 
 ## Architecture
 
 ```
 cmd/main.go → controller → service → repository (GORM)
-cmd/seed/   → raw database/sql (10 ordered steps)
-ws/          → gorilla/websocket Hub (per-user broadcast)
+middlewares/  → auth.middleware.go (sets `userID`, `email` on Gin context)
+cmd/seed/     → raw database/sql (10 ordered steps)
+ws/            → gorilla/websocket Hub (per-user broadcast)
 ```
 
 - **Framework**: Gin (`gin.New()`, `.Use(gin.Logger(), gin.Recovery())`).
-- **DB**: `db/mysql.go` returns `*sql.DB` (DSN has **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
+- **DB**: `db/mysql.go` returns `*sql.DB` (DSN has `parseTime=true&charset=utf8mb4`, **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
 - **Module**: `linkup` (Go 1.26.3), run all build/test from repo root.
 - **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`.
 - **Validation**: `binding` tags in `dto/post.dto.go` (3 structs) and `dto/chat.dto.go` (3 structs). Elsewhere: explicit validation via `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
