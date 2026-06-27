@@ -15,7 +15,7 @@ go test ./tests/auth/... -v -run TestValidate  # validation-only, no DB
 go test ./tests/... -run TestRegisterHandler_Success  # needs TEST_DSN env var
 ```
 
-`tests/post/` is empty (no post tests yet).
+`tests/post/` is empty (no post tests yet). No linter/typecheck config — `go build ./...` is the main verification.
 
 ## Architecture
 
@@ -25,38 +25,45 @@ cmd/seed/   → raw database/sql (10 ordered steps)
 ws/          → gorilla/websocket Hub (per-user broadcast)
 ```
 
-- **Framework**: Gin (`gin.New()`, then `.Use(gin.Logger(), gin.Recovery())`).
+- **Framework**: Gin (`gin.New()`, `.Use(gin.Logger(), gin.Recovery())`).
 - **DB**: `db/mysql.go` returns `*sql.DB` (DSN has **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
 - **Module**: `linkup` (Go 1.26.3), run all build/test from repo root.
 - **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`.
-- **`binding` tags used only in `controllers/post.controller.go`** (3 input structs). Everywhere else: explicit validation via `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
+- **Validation**: `binding` tags in `dto/post.dto.go` (3 structs) and `dto/chat.dto.go` (3 structs). Elsewhere: explicit validation via `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
 
 ## Config quirks
 
 - `.env` loaded by `config.LoadEnv()` — **custom line parser** (not godotenv). Singleton guard prevents reloads.
 - Required: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
-- **`DB_SSL` bug**: if set to `false`, `validateRequired` treats it as missing (line 172-174 of `config/env.go`). Always set `DB_SSL=true`.
+- **`DB_SSL` bug**: `validateRequired` treats `false` as missing. Always set `DB_SSL=true`.
 - `PORT` defaults to `"8080"`. Optional: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
 - `config.GetEnv()` returns a **value copy**.
 - `CLOUDINARY_URL` is primary; `LoadCloudinaryEnv()` falls back to individual `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`.
 
 ## Routes
 
-All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS is outside). Auth middleware sets `userID` and `email` on Gin context.
+All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS is outside). Auth middleware sets `userID` and `email` on Gin context. Uses `Bearer` token in `Authorization` header.
 
 | Path | Method | Auth | Registration file |
 |---|---|---|---|
 | `/health` | GET | No | inline in `main.go` |
 | `/ws` | GET | `?token=` query | `ws/handler.go` |
-| `/api/auth/*` | POST | varies | `routes/auth.routes.go` |
-| `/api/auth/forgot-password*` | POST | No | `routes/password_reset.routes.go` |
+| `/api/auth/register` | POST | No | `routes/auth.routes.go` |
+| `/api/auth/login` | POST | No | |
+| `/api/auth/change-password` | POST | Auth | |
+| `/api/auth/forgot-password` | POST | No | `routes/password_reset.routes.go` |
+| `/api/auth/verify-reset-token` | POST | No | |
+| `/api/auth/reset-password` | POST | No | |
 | `/posts` | GET/POST | POST=Auth | `routes/post.routes.go` |
 | `/posts/:id` | GET | No | |
 | `/posts/:id/react` | POST | Auth | |
-| `/posts/:id/comments` | POST | Auth | |
-| `/api/profile*` | GET/PUT | PUT=Auth | `routes/profile.routes.go` |
+| `/posts/:id/comments` | GET/POST | POST=Auth | |
+| `/posts/:id/share` | POST | Auth | |
+| `/posts/:id/save` | POST | Auth | |
+| `/api/profile` | GET/PATCH | Auth | `routes/profile.routes.go` |
+| `/api/profile/:userID` | GET | No | |
 | `/api/follow/:userID` | POST | Auth | `routes/follow.routes.go` |
-| `/api/follow/stats/:userID` | GET | No | |
+| `/api/follow/stats/:userID` | GET | Auth | |
 | `/api/media/*` | all | Auth | `routes/media.routes.go` |
 | `/api/reports` | POST | Auth | `routes/report.routes.go` |
 | `/api/blocks` | POST/GET | Auth | `routes/block.routes.go` |
@@ -108,11 +115,11 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 
 ## JWT
 
-`utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL hardcoded to 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`).
+`utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL hardcoded to 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). A separate `utils.GenerateToken` exists for single-token generation (used by reset tokens).
 
 ## Stubs / not wired
 
-- `controllers/user.controller.go` — empty
+- `controllers/user.controller.go` — empty (2 lines)
 - `repository/user.repository.go` — `Create`, `FindByEmail` exist but **not wired** in `cmd/main.go`
 - `cmd/cloudinary-check/` — standalone binary
 
@@ -120,3 +127,5 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 
 - **UUID divergence**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
 - **`gorm` tags** appear in only 4 models: `post` (computed `->`), `password_history`/`post_share`/`notification_preference` (`primaryKey`). Models use `json` tags; `db` tags are unused.
+- **`validations` package**: 6 validators exist (`auth`, `block`, `friend`, `media`, `report`, `search`) but not all services use them — some just use `binding` tags or inline checks.
+- **Air config** builds `cmd/main.go` specifically (not `./cmd`), excludes `_test.go` via regex.
