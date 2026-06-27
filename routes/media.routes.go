@@ -13,5 +13,6 @@ func RegisterMediaRoutes(router *gin.Engine, ctrl *controllers.MediaController, 
 	{
 		mediaGroup.POST("/upload", middlewares.AuthMiddleware(env), ctrl.UploadMedia)
 		mediaGroup.GET("/storage", middlewares.AuthMiddleware(env), ctrl.GetStorageStatus)
+		mediaGroup.GET("/user-media", middlewares.AuthMiddleware(env), ctrl.GetUserMedia)
 	}
 }

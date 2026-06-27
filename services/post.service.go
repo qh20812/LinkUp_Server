@@ -21,11 +21,12 @@ type PostService interface {
 }
 
 type postService struct {
-	repo *repository.PostRepository
+	repo        *repository.PostRepository
+	notifService *NotificationService
 }
 
-func NewPostService(repo *repository.PostRepository) PostService {
-	return &postService{repo: repo}
+func NewPostService(repo *repository.PostRepository, notifService *NotificationService) PostService {
+	return &postService{repo: repo, notifService: notifService}
 }
 
 func (s *postService) CreatePost(ctx context.Context, userID, title, content string) (*models.Post, error) {
@@ -101,6 +102,10 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 
 	if errCreate := s.repo.CreateReaction(ctx, reaction); errCreate != nil {
 		return "", "", errCreate
+	}
+
+	if post, err := s.repo.FindByID(ctx, postID); err == nil && post != nil && post.UserID != userID {
+		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeLike, "đã thích bài viết của bạn", &postID, nil, nil)
 	}
 
 	return "reacted", emoji.Code, nil

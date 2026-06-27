@@ -11,12 +11,14 @@ import (
 type FollowService struct {
 	followRepository *repository.FollowRepository
 	authRepository   *repository.AuthRepository
+	notifService     *NotificationService
 }
 
-func NewFollowService(followRepository *repository.FollowRepository, authRepository *repository.AuthRepository) *FollowService {
+func NewFollowService(followRepository *repository.FollowRepository, authRepository *repository.AuthRepository, notifService *NotificationService) *FollowService {
 	return &FollowService{
 		followRepository: followRepository,
 		authRepository:   authRepository,
+		notifService:     notifService,
 	}
 }
 
@@ -57,6 +59,9 @@ func (s *FollowService) FollowToggle(ctx context.Context, followerID, followingI
 			return "", err
 		}
 		action = "followed"
+		if followingID != followerID {
+			s.notifService.Create(ctx, followingID, &followerID, models.NotificationTypeFollow, "đã theo dõi bạn", nil, &followerID, nil)
+		}
 	}
 
 	return action, nil

@@ -12,7 +12,8 @@ const (
 	NotificationTypeComment       NotificationType = "comment"
 	NotificationTypeFollow        NotificationType = "follow"
 	NotificationTypeMessage       NotificationType = "message"
-	NotificationTypeFriendRequest NotificationType = "friend_request"
+	NotificationTypeFriendRequest  NotificationType = "friend_request"
+	NotificationTypeFriendAccepted NotificationType = "friend_accepted"
 )
 
 type Notification struct {
@@ -53,6 +54,8 @@ func ParseNotificationType(value string) NotificationType {
 		return NotificationTypeMessage
 	case string(NotificationTypeFriendRequest):
 		return NotificationTypeFriendRequest
+	case string(NotificationTypeFriendAccepted):
+		return NotificationTypeFriendAccepted
 	default:
 		return NotificationTypeLike
 	}

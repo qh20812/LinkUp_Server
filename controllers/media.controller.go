@@ -102,3 +102,22 @@ func (ctrl *MediaController) GetStorageStatus(c *gin.Context) {
 		},
 	})
 }
+
+func (ctrl *MediaController) GetUserMedia(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+
+	medias, err := ctrl.service.GetUserMedia(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": medias,
+	})
+}
