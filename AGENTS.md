@@ -29,7 +29,7 @@ ws/          → gorilla/websocket Hub (per-user broadcast)
 - **DB**: `db/mysql.go` returns `*sql.DB` (DSN has **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
 - **Module**: `linkup` (Go 1.26.3), run all build/test from repo root.
 - **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`.
-- **`binding` tags used only in `controllers/post.controller.go`** (3 input structs). Everywhere else: explicit validation via `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
+- **`binding` tags used in `controllers/post.controller.go`** (3 input structs) and **`dto/chat.dto.go`** (3 fields). Everything else: explicit validation via `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
 
 ## Config quirks
 
