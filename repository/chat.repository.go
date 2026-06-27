@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"linkup/models"
+	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -96,4 +98,61 @@ func (r *ChatRepository) CreateDirectChat(ctx context.Context, chat *models.Chat
 		return nil, fmt.Errorf("create direct chat: %w", err)
 	}
 	return chat, nil
+}
+
+func (r *ChatRepository) FindMessageByID(ctx context.Context, messageID string) (*models.Message, error) {
+	var message models.Message
+	err := r.db.WithContext(ctx).Where("id = ?", messageID).First(&message).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("message not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find message by id: %w", err)
+	}
+	return &message, nil
+}
+
+func (r *ChatRepository) UpdateMessageDeleteStatus(ctx context.Context, messageID string, deletedForSender, deletedForReceiver bool, deletedAt *time.Time) (*models.Message, error) {
+	updates := map[string]any{
+		"deleted_for_sender":   deletedForSender,
+		"deleted_for_receiver": deletedForReceiver,
+	}
+	if deletedAt != nil {
+		updates["deleted_at"] = deletedAt
+	}
+
+	tx := r.db.WithContext(ctx).Model(&models.Message{}).Where("id = ?", messageID).Updates(updates)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("update message delete status: %w", tx.Error)
+	}
+
+	return r.FindMessageByID(ctx, messageID)
+}
+
+func (r *ChatRepository) GetMessages(ctx context.Context, chatID, userID string) ([]models.Message, error) {
+	var messages []models.Message
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ?", chatID).
+		Where("(sender_id = ? AND deleted_for_sender = false) OR (sender_id <> ? AND deleted_for_receiver = false)", userID, userID).
+		Order("created_at DESC").
+		Find(&messages).Error
+	if err != nil {
+		return nil, fmt.Errorf("list messages: %w", err)
+	}
+	return messages, nil
+}
+
+func (r *ChatRepository) SearchMessages(ctx context.Context, chatID, userID, keyword string) ([]models.Message, error) {
+	var messages []models.Message
+	pattern := "%" + strings.ToLower(keyword) + "%"
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ?", chatID).
+		Where("(sender_id = ? AND deleted_for_sender = false) OR (sender_id <> ? AND deleted_for_receiver = false)", userID, userID).
+		Where("LOWER(content) LIKE ?", pattern).
+		Order("created_at DESC").
+		Find(&messages).Error
+	if err != nil {
+		return nil, fmt.Errorf("search messages: %w", err)
+	}
+	return messages, nil
 }

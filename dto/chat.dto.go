@@ -59,3 +59,27 @@ type ChatInviteResponse struct {
 	ChatID   *string `json:"chat_id,omitempty"`
 	Message  string  `json:"message"`
 }
+
+type DeleteMessagePayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	Mode      string `json:"mode"`
+}
+
+type MessageDeletedPayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	DeletedBy string `json:"deleted_by"`
+	Mode      string `json:"mode"`
+}
+
+type SearchMessagePayload struct {
+	ChatID  string `json:"chat_id"`
+	Keyword string `json:"keyword"`
+}
+
+type SearchMessageResultPayload struct {
+	ChatID   string           `json:"chat_id"`
+	Keyword  string           `json:"keyword"`
+	Messages []MessagePayload `json:"messages"`
+}

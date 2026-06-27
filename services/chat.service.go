@@ -151,3 +151,45 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 
 	return chat, nil
 }
+
+func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode string) (*models.Message, error) {
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg.SenderID != userID {
+		return nil, errors.New("bạn không có quyền xóa tin nhắn")
+	}
+
+	if msg.DeletedForSender || msg.DeletedForReceiver {
+		return nil, errors.New("tin nhắn đã bị xóa")
+	}
+
+	deleteForAll := strings.EqualFold(mode, "all")
+
+	if deleteForAll {
+		deletedAt := time.Now().UTC()
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+}
+
+func (s *ChatService) GetAllMessages(ctx context.Context, userID, chatID string) ([]models.Message, error) {
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	return s.chatRepo.GetMessages(ctx, chatID, userID)
+}
+
+func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keyword string) ([]models.Message, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, errors.New("từ khóa tìm kiếm không được để trống")
+	}
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	return s.chatRepo.SearchMessages(ctx, chatID, userID, keyword)
+}
