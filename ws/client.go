@@ -132,7 +132,8 @@ func (c *Client) ReadPump() {
 			c.sendError("unknown event type")
 			_, _, err := c.conn.ReadMessage()
 			if err != nil {
-				break
+				log.Printf("ws read error: %v", err)
+				return
 			}
 		}
 	}
