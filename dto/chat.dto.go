@@ -72,3 +72,14 @@ type MessageDeletedPayload struct {
 	DeletedBy string `json:"deleted_by"`
 	Mode      string `json:"mode"`
 }
+
+type SearchMessagePayload struct {
+	ChatID  string `json:"chat_id"`
+	Keyword string `json:"keyword"`
+}
+
+type SearchMessageResultPayload struct {
+	ChatID   string           `json:"chat_id"`
+	Keyword  string           `json:"keyword"`
+	Messages []MessagePayload `json:"messages"`
+}

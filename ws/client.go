@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"linkup/dto"
+	"linkup/models"
 	"linkup/services"
 
 	"github.com/gorilla/websocket"
@@ -83,6 +84,21 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
+			history, err := c.service.GetAllMessages(c.ctx, c.userID, payload.ChatID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			resp, _ := json.Marshal(dto.WsEvent{
+				Type: "message:history",
+				Payload: mustMarshal(map[string]any{
+					"chat_id":  payload.ChatID,
+					"messages": toMessagePayloads(history),
+				}),
+			})
+			c.send <- resp
+
 		case "message:send":
 			var payload dto.SendMessagePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -157,6 +173,29 @@ func (c *Client) ReadPump() {
 				c.send <- ack
 			}
 
+		case "message:search":
+			var payload dto.SearchMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("invalid search payload")
+				continue
+			}
+
+			messages, err := c.service.SearchMessages(c.ctx, c.userID, payload.ChatID, payload.Keyword)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			resp, _ := json.Marshal(dto.WsEvent{
+				Type: "message:search_result",
+				Payload: mustMarshal(dto.SearchMessageResultPayload{
+					ChatID:   payload.ChatID,
+					Keyword:  payload.Keyword,
+					Messages: toMessagePayloads(messages),
+				}),
+			})
+			c.send <- resp
+
 		default:
 			c.sendError("unknown event type")
 		}
@@ -201,4 +240,20 @@ func (c *Client) sendError(text string) {
 func mustMarshal(v any) json.RawMessage {
 	out, _ := json.Marshal(v)
 	return out
+}
+
+func toMessagePayloads(messages []models.Message) []dto.MessagePayload {
+	result := make([]dto.MessagePayload, 0, len(messages))
+	for _, msg := range messages {
+		result = append(result, dto.MessagePayload{
+			ID:        msg.ID,
+			ChatID:    msg.ChatID,
+			SenderID:  msg.SenderID,
+			Content:   msg.Content,
+			EmojiID:   msg.EmojiID,
+			MediaID:   msg.MediaID,
+			CreatedAt: msg.CreatedAt,
+		})
+	}
+	return result
 }

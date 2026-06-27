@@ -175,3 +175,21 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 
 	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
 }
+
+func (s *ChatService) GetAllMessages(ctx context.Context, userID, chatID string) ([]models.Message, error) {
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	return s.chatRepo.GetMessages(ctx, chatID, userID)
+}
+
+func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keyword string) ([]models.Message, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, errors.New("từ khóa tìm kiếm không được để trống")
+	}
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	return s.chatRepo.SearchMessages(ctx, chatID, userID, keyword)
+}
