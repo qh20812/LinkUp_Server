@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -124,6 +125,37 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(payload),
 			})
 			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: resp}
+
+		case "message:delete":
+			var payload dto.DeleteMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("invalid delete payload")
+				continue
+			}
+
+			msg, err := c.service.DeleteMessage(c.ctx, c.userID, payload.MessageID, payload.Mode)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			deletedPayload := dto.MessageDeletedPayload{
+				ChatID:    payload.ChatID,
+				MessageID: msg.ID,
+				DeletedBy: c.userID,
+				Mode:      payload.Mode,
+			}
+
+			ack, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:deleted",
+				Payload: mustMarshal(deletedPayload),
+			})
+
+			if strings.EqualFold(payload.Mode, "all") {
+				c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: ack}
+			} else {
+				c.send <- ack
+			}
 
 		default:
 			c.sendError("unknown event type")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"linkup/models"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -96,4 +97,33 @@ func (r *ChatRepository) CreateDirectChat(ctx context.Context, chat *models.Chat
 		return nil, fmt.Errorf("create direct chat: %w", err)
 	}
 	return chat, nil
+}
+
+func (r *ChatRepository) FindMessageByID(ctx context.Context, messageID string) (*models.Message, error) {
+	var message models.Message
+	err := r.db.WithContext(ctx).Where("id = ?", messageID).First(&message).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("message not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find message by id: %w", err)
+	}
+	return &message, nil
+}
+
+func (r *ChatRepository) UpdateMessageDeleteStatus(ctx context.Context, messageID string, deletedForSender, deletedForReceiver bool, deletedAt *time.Time) (*models.Message, error) {
+	updates := map[string]any{
+		"deleted_for_sender":   deletedForSender,
+		"deleted_for_receiver": deletedForReceiver,
+	}
+	if deletedAt != nil {
+		updates["deleted_at"] = deletedAt
+	}
+
+	tx := r.db.WithContext(ctx).Model(&models.Message{}).Where("id = ?", messageID).Updates(updates)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("update message delete status: %w", tx.Error)
+	}
+
+	return r.FindMessageByID(ctx, messageID)
 }

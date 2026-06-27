@@ -151,3 +151,27 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 
 	return chat, nil
 }
+
+func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode string) (*models.Message, error) {
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	if msg.SenderID != userID {
+		return nil, errors.New("bạn không có quyền xóa tin nhắn")
+	}
+
+	if msg.DeletedForSender || msg.DeletedForReceiver {
+		return nil, errors.New("tin nhắn đã bị xóa")
+	}
+
+	deleteForAll := strings.EqualFold(mode, "all")
+
+	if deleteForAll {
+		deletedAt := time.Now().UTC()
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+}
