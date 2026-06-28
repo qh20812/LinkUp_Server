@@ -11,18 +11,18 @@ import (
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content string) (*models.Post, error)
+	CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error) // Thêm tham số status
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
-	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error) // 🌟 Đã đổi kiểu trả về
+	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
 	GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, error)
 	SharePost(ctx context.Context, userID, postID string) error
 	SavePost(ctx context.Context, userID, postID string) error
 }
 
 type postService struct {
-	repo        *repository.PostRepository
+	repo         *repository.PostRepository
 	notifService *NotificationService
 	validation   *validations.PostValidation
 }
@@ -31,12 +31,11 @@ func NewPostService(repo *repository.PostRepository, notifService *NotificationS
 	return &postService{repo: repo, notifService: notifService, validation: validation}
 }
 
-func (s *postService) CreatePost(ctx context.Context, userID, title, content string) (*models.Post, error) {
-	if err := s.validation.ValidateCreatePost(title, content); err != nil {
-		return nil, err
-	}
+func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error) {
+	// Chuyển đổi chuỗi string từ client sang PostStatus enum trong hệ thống
+	postStatus := models.ParsePostStatus(status)
 
-	post := models.NewPost(userID, title, content)
+	post := models.NewPost(userID, title, content, postStatus)
 	post.ID = utils.GenerateUUID()
 	post.CreatedAt = time.Now()
 	post.ViewsCount = 0
@@ -142,18 +141,18 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 		return nil, err
 	}
 
-	if post.UserID != userID { 
+	if post.UserID != userID {
 		senderIDPtr := userID
 		postIDPtr := postID
 		commentIDPtr := comment.ID
 
 		notification := models.NewNotification(
-			post.UserID,                  
-			&senderIDPtr,                 
-			models.NotificationTypeComment, 
-			"Bạn vừa có 1 comment mới trên bài viết của mình.", 
+			post.UserID,
+			&senderIDPtr,
+			models.NotificationTypeComment,
+			"Bạn vừa có 1 comment mới trên bài viết của mình.",
 		)
-		
+
 		notification.ID = utils.GenerateUUID()
 		notification.RedirectPostID = &postIDPtr
 		notification.RedirectCommentID = &commentIDPtr
@@ -163,7 +162,6 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 		_ = s.repo.CreateNotification(ctx, notification)
 	}
 
-	// 🌟 Thay đổi: Trả về toàn bộ danh sách comment sau khi lưu thành công
 	return s.repo.FindCommentsByPostID(ctx, postID)
 }
 
@@ -204,6 +202,6 @@ func (s *postService) SavePost(ctx context.Context, userID, postID string) error
 		PostID:    postID,
 		CreatedAt: time.Now(),
 	}
-	
+
 	return s.repo.CreateSave(ctx, bookmark)
 }
