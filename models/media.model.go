@@ -31,7 +31,7 @@ func NewMedia(userID string, postID *string, fileURI, fileType string, fileSize 
 		FileURI:  fileURI,
 		FileType: fileType,
 		FileSize: fileSize,
-		Status:   MediaStatusApproved,
+		Status:   MediaStatusPending,
 	}
 }
 

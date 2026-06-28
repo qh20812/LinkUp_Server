@@ -63,13 +63,17 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	return s.chatRepo.CreateMessage(ctx, &msg)
 }
 
-func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, error) {
+func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, bool, error) {
+	if userID == targetUserID {
+		return nil, false, errors.New("không thể tự chat trực tiếp với chính mình")
+	}
+
 	chat, err := s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
 	if err == nil {
-		return chat, nil
+		return chat, true, nil
 	}
 	if err != repository.ErrChatNotFound {
-		return nil, err
+		return nil, false, err
 	}
 
 	newChat := models.Chat{
@@ -85,7 +89,12 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 		{ID: utils.GenerateUUID(), ChatID: newChat.ID, UserID: targetUserID, JoinedAt: time.Now().UTC()},
 	}
 
-	return s.chatRepo.CreateDirectChat(ctx, &newChat, participants)
+	createdChat, err := s.chatRepo.CreateDirectChat(ctx, &newChat, participants)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return createdChat, false, nil
 }
 
 func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserID string) (*models.ChatInvite, error) {
@@ -140,7 +149,7 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 		return nil, nil
 	}
 
-	chat, err := s.GetOrCreateDirectChat(ctx, invite.RequesterID, invite.TargetID)
+	chat, _, err := s.GetOrCreateDirectChat(ctx, invite.RequesterID, invite.TargetID)
 	if err != nil {
 		return nil, err
 	}

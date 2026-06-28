@@ -71,7 +71,7 @@ func (r *ChatRepository) FindDirectChat(ctx context.Context, userA, userB string
 		Joins("JOIN chat_participants p1 ON p1.chat_id = chats.id").
 		Joins("JOIN chat_participants p2 ON p2.chat_id = chats.id").
 		Where("chats.type = ?", models.ChatTypeDirect).
-		Where("p1.user_id = ? AND p2.user_id = ?", userA, userB).
+		Where("(p1.user_id = ? AND p2.user_id = ?) OR (p1.user_id = ? AND p2.user_id = ?)", userA, userB, userB, userA).
 		First(&chat).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrChatNotFound

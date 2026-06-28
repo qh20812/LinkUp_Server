@@ -62,13 +62,21 @@ func (ctrl *ChatController) CreateDirectChat(c *gin.Context) {
 		return
 	}
 
-	chat, err := ctrl.chatService.GetOrCreateDirectChat(c.Request.Context(), userID, input.TargetUserID)
+	chat, exists, err := ctrl.chatService.GetOrCreateDirectChat(c.Request.Context(), userID, input.TargetUserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.DirectChatResponse{ChatID: chat.ID})
+	message := "Tạo chat trực tiếp thành công"
+	if exists {
+		message = "Đã có chat trực tiếp giữa 2 người"
+	}
+
+	c.JSON(http.StatusOK, dto.DirectChatResponse{
+		ChatID:  chat.ID,
+		Message: message,
+	})
 }
 
 func (ctrl *ChatController) CreateChatInvite(c *gin.Context) {

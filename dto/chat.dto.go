@@ -43,6 +43,7 @@ type DirectChatRequest struct {
 
 type DirectChatResponse struct {
 	ChatID string `json:"chat_id"`
+	Message string `json:"message,omitempty"`
 }
 
 type ChatInviteRequest struct {
