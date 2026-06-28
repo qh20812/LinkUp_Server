@@ -36,6 +36,14 @@ func (s *FollowService) FollowToggle(ctx context.Context, followerID, followingI
 		return "", fmt.Errorf("không thể follow người dùng này")
 	}
 
+	isSuperAdmin, err := s.authRepository.HasRole(ctx, followingID, models.RoleSuperAdmin)
+	if err != nil {
+		return "", fmt.Errorf("Kiểm tra vai trò: %w", err)
+	}
+	if isSuperAdmin {
+		return "", fmt.Errorf("không thể follow superadmin")
+	}
+
 	isFollowing, err := s.followRepository.IsFollowing(ctx, followerID, followingID)
 	if err != nil {
 		return "", fmt.Errorf("kiểm tra trạng thái follow: %w", err)
@@ -92,4 +100,3 @@ func (s *FollowService) GetFollowerStats(ctx context.Context, userID string, vie
 
 	return result, nil
 }
-
