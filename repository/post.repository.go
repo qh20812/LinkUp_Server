@@ -120,7 +120,7 @@ func (r *PostRepository) CreateNotification(ctx context.Context, notification mo
 	return r.db.WithContext(ctx).Create(&notification).Error
 }
 
-// 🌟 Hàm bổ sung: Lấy toàn bộ danh sách bình luận không phân trang
+// Lấy toàn bộ danh sách bình luận không phân trang
 func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string) ([]models.Comment, error) {
 	var comments []models.Comment
 	err := r.db.WithContext(ctx).

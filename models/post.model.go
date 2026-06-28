@@ -9,8 +9,10 @@ type PostStatus string
 
 const (
 	PostStatusActive  PostStatus = "active"
-	PostStatusHidden  PostStatus = "hidden"
+	PostStatusPublic  PostStatus = "public"
 	PostStatusPrivate PostStatus = "private"
+	PostStatusHidden  PostStatus = "hidden"
+	PostStatusFriend  PostStatus = "friend"
 	PostStatusDeleted PostStatus = "deleted"
 )
 
@@ -29,12 +31,16 @@ type Post struct {
 	SharesCount   int `json:"shares_count" gorm:"->"`
 }
 
-func NewPost(userID, title, content string) Post {
+// Cập nhật hàm khởi tạo nhận thêm status tinh chỉnh từ client
+func NewPost(userID, title, content string, status PostStatus) Post {
+	if status == "" {
+		status = PostStatusPublic // Mặc định là public nếu client không truyền
+	}
 	return Post{
 		UserID:  userID,
 		Title:   title,
 		Content: content,
-		Status:  PostStatusActive,
+		Status:  status,
 	}
 }
 
@@ -46,13 +52,17 @@ func ParsePostStatus(value string) PostStatus {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(PostStatusActive):
 		return PostStatusActive
-	case string(PostStatusHidden):
-		return PostStatusHidden
+	case string(PostStatusPublic):
+		return PostStatusPublic
 	case string(PostStatusPrivate):
 		return PostStatusPrivate
+	case string(PostStatusHidden):
+		return PostStatusHidden
+	case string(PostStatusFriend):
+		return PostStatusFriend
 	case string(PostStatusDeleted):
 		return PostStatusDeleted
 	default:
-		return PostStatusActive
+		return PostStatusPublic
 	}
 }
