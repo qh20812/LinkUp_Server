@@ -89,6 +89,7 @@ func main() {
 		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
+
 		reportRepository := repository.NewReportRepository(gormDB)
 		reportValidation := validations.NewReportValidation()
 		reportService := services.NewReportService(reportRepository, authRepository, postRepository, reportValidation)
@@ -121,6 +122,11 @@ func main() {
 		go chatHub.Run()
 		chatController := controllers.NewChatController(chatHub, chatService, env)
 		routes.RegisterChatRoutes(router, chatController, env)
+
+		groupChatRepository := repository.NewGroupChatRepository(gormDB)
+		groupChatService := services.NewGroupChatService(groupChatRepository)
+		groupChatController := controllers.NewGroupChatController(groupChatService)
+		routes.RegisterGroupChatRoutes(router, groupChatController, env)
 	}
 
 	router.GET("/ws", ws.ServeWS(hub, env))
