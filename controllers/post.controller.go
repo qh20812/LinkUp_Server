@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"linkup/dto"
 	"linkup/services"
+	"linkup/validations"
 	"net/http"
 	"strconv"
 
@@ -19,8 +20,14 @@ func NewPostController(service services.PostService) *PostController {
 }
 
 func (ctrl *PostController) CreatePost(c *gin.Context) {
-	var input dto.CreatePostInput 
+	var input dto.CreatePostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng JSON gửi lên không hợp lệ"})
+		return
+	}
+
+	// Gọi Validation kiểm tra độ dài ký tự và trạng thái hợp lệ
+	if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -32,7 +39,8 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content)
+	// Truyền thêm cả input.Status vào service xử lý
+	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -81,7 +89,7 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 		return
 	}
 
-	var input dto.ReactPostInput 
+	var input dto.ReactPostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu hoặc sai định dạng emoji_id"})
 		return
@@ -120,9 +128,15 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 		return
 	}
 
-	var input dto.CreateCommentInput 
+	var input dto.CreateCommentInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu hoặc sai định dạng nội dung bình luận"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng JSON gửi lên không hợp lệ"})
+		return
+	}
+
+	// Gọi Validation kiểm tra độ dài ký tự của bình luận
+	if err := validations.ValidateCreateComment(input.Content); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -133,7 +147,6 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	// 🌟 Nhận danh sách []models.Comment từ Service trả về
 	comments, err := ctrl.service.CreateComment(c.Request.Context(), userID, postID, input.ParentID, input.Content)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -142,7 +155,7 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Đăng bình luận thành công!",
-		"data":    comments, // Xuất toàn bộ danh sách ra JSON
+		"data":    comments,
 	})
 }
 
