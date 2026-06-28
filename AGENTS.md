@@ -88,7 +88,9 @@ All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS is outs
 
 ## Service patterns
 
-- **`PostService` and `MediaService` are interfaces** (in `services/`). All other services use concrete structs.
+- **`PostService` and `MediaService` are interfaces** (in `services/`). All other services use concrete structs. `PostService` takes `validations.PostValidation` as a constructor dependency.
+- **`friendService`** (`NewFriendService`) takes 5 dependencies: `friendRepository`, `authRepository`, `profileRepository`, `friendValidation`, `notificationService` — the only service wired with `profileRepository`.
+- **`chatService`** (`NewChatService`) takes `chatRepository`, `friendRepository`, `inviteRepository`, `notificationService`, `chatValidation` — uses `friendRepository`, not `authRepository`. Sends notifications on invite/accept/new message.
 - **`notificationService.Create`** is called from follow/friend/post services to push real-time via WebSocket Hub.
 
 ## WebSocket
@@ -123,10 +125,12 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 - `controllers/user.controller.go` — empty (2 lines)
 - `repository/user.repository.go` — `Create`, `FindByEmail` exist but **not wired** in `cmd/main.go`
 - `cmd/cloudinary-check/` — standalone binary
+- `dto/auth.dto.go` — no `binding` tags on any struct (unlike `post.dto.go` and `chat.dto.go`). Auth validation is fully delegated to `validations.AuthValidation`.
 
 ## Quirks
 
 - **UUID divergence**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
+- **`utils/email.go`** reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly — not from `config.Env` struct (which also stores them unused). New email features should follow the same `os.Getenv` pattern or reconcile both paths.
 - **`gorm` tags** appear in only 4 models: `post` (computed `->`), `password_history`/`post_share`/`notification_preference` (`primaryKey`). Models use `json` tags; `db` tags are unused.
-- **`validations` package**: 6 validators exist (`auth`, `block`, `friend`, `media`, `report`, `search`) but not all services use them — some just use `binding` tags or inline checks.
+- **`validations` package**: 8 validators exist (`auth`, `block`, `chat`, `friend`, `media`, `post`, `report`, `search`) but not all services use them — some just use `binding` tags or inline checks.
 - **Air config** builds `cmd/main.go` specifically (not `./cmd`), excludes `_test.go` via regex.

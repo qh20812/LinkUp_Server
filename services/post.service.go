@@ -6,6 +6,7 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 	"time"
 )
 
@@ -23,15 +24,16 @@ type PostService interface {
 type postService struct {
 	repo        *repository.PostRepository
 	notifService *NotificationService
+	validation   *validations.PostValidation
 }
 
-func NewPostService(repo *repository.PostRepository, notifService *NotificationService) PostService {
-	return &postService{repo: repo, notifService: notifService}
+func NewPostService(repo *repository.PostRepository, notifService *NotificationService, validation *validations.PostValidation) PostService {
+	return &postService{repo: repo, notifService: notifService, validation: validation}
 }
 
 func (s *postService) CreatePost(ctx context.Context, userID, title, content string) (*models.Post, error) {
-	if title == "" || content == "" {
-		return nil, errors.New("tên bài viết và nội dung không được bỏ trống")
+	if err := s.validation.ValidateCreatePost(title, content); err != nil {
+		return nil, err
 	}
 
 	post := models.NewPost(userID, title, content)
@@ -46,12 +48,7 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content str
 }
 
 func (s *postService) GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 10
-	}
+	page, pageSize = s.validation.NormalizePagination(page, pageSize)
 
 	offset := (page - 1) * pageSize
 	return s.repo.FetchActive(ctx, pageSize, offset)
@@ -74,8 +71,8 @@ func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models
 }
 
 func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID string) (string, string, error) {
-	if emojiID == "" {
-		return "", "", errors.New("emoji_id không được rỗng")
+	if err := s.validation.ValidateReactPost(emojiID); err != nil {
+		return "", "", err
 	}
 
 	emoji, err := s.repo.FindEmojiByID(ctx, emojiID)
@@ -112,6 +109,10 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 }
 
 func (s *postService) CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error) {
+	if err := s.validation.ValidateCreateComment(content); err != nil {
+		return nil, err
+	}
+
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil {
 		return nil, errors.New("bài viết không tồn tại")
@@ -119,10 +120,6 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 
 	if post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
 		return nil, errors.New("không thể bình luận vào bài viết đã bị ẩn hoặc ở chế độ riêng tư")
-	}
-
-	if content == "" {
-		return nil, errors.New("nội dung bình luận không được trống")
 	}
 
 	if parentID != nil && *parentID != "" {
@@ -176,12 +173,7 @@ func (s *postService) GetCommentList(ctx context.Context, postID string, page, p
 		return nil, errors.New("bài viết không tồn tại hoặc không thể truy cập")
 	}
 
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 10
-	}
+	page, pageSize = s.validation.NormalizePagination(page, pageSize)
 	offset := (page - 1) * pageSize
 
 	return s.repo.FetchCommentsByPostID(ctx, postID, pageSize, offset)
