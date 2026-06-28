@@ -55,3 +55,19 @@ func (r *ChatInvitationRepository) UpdateStatus(ctx context.Context, inviteID st
 	}
 	return r.db.WithContext(ctx).Model(&models.ChatInvite{}).Where("id = ?", inviteID).Updates(update).Error
 }
+
+func (r *ChatInvitationRepository) FindActiveBetween(ctx context.Context, userA, userB string) (*models.ChatInvite, error) {
+	var invite models.ChatInvite
+	err := r.db.WithContext(ctx).
+		Where("((requester_id = ? AND target_id = ?) OR (requester_id = ? AND target_id = ?)) AND status IN ?", userA, userB, userB, userA,
+			[]models.ChatInviteStatus{models.ChatInviteStatusPending, models.ChatInviteStatusAccepted}).
+		Order("created_at DESC").
+		First(&invite).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find active invite: %w", err)
+	}
+	return &invite, nil
+}

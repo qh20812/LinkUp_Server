@@ -118,6 +118,19 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 		return pending, nil
 	}
 
+	existing, err := s.inviteRepo.FindActiveBetween(ctx, userID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		switch existing.Status {
+		case models.ChatInviteStatusPending:
+			return nil, errors.New("lời mời đang chờ phản hổi")
+		case models.ChatInviteStatusAccepted:
+			return nil, errors.New("đã có lời mời được chấp nhận, không thể gửi")
+		}
+	}
+
 	invite := &models.ChatInvite{
 		ID:          utils.GenerateUUID(),
 		RequesterID: userID,
