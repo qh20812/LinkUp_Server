@@ -93,7 +93,22 @@ func Run(env config.Env) error {
 			INDEX idx_communities_creator (creator_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 5. No FK
+		// 5. Depends on communities
+		`CREATE TABLE IF NOT EXISTS community_rules (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			category VARCHAR(50) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			content TEXT,
+			position INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			INDEX idx_community_rules_community (community_id),
+			INDEX idx_community_rules_category (community_id, category, position)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 6. No FK
 		`CREATE TABLE IF NOT EXISTS chats (
 			id VARCHAR(36) PRIMARY KEY,
 			` + "`type`" + ` VARCHAR(20) NOT NULL DEFAULT 'direct',

@@ -135,6 +135,12 @@ func main() {
 		communityService := services.NewCommunityService(communityRepository, communityValidation)
 		communityController := controllers.NewCommunityController(communityService)
 		routes.RegisterCommunityRoutes(router, communityController, env)
+
+		communityRuleRepository := repository.NewCommunityRuleRepository(gormDB)
+		communityRuleValidation := validations.NewCommunityRuleValidation()
+		communityRuleService := services.NewCommunityRuleService(communityRuleRepository, communityRuleValidation)
+		communityRuleController := controllers.NewCommunityRuleController(communityRuleService)
+		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env)
 	}
 
 	router.GET("/ws", ws.ServeWS(hub, env))
