@@ -56,6 +56,16 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, errors.New("bạn không tham gia chat này")
 	}
 
+	if mediaID != nil {
+		owned, err := s.chatRepo.IsMediaOwnedByUser(ctx, *mediaID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			return nil, errors.New("media không thuộc về bạn")
+		}
+	}
+
 	msg := models.NewMessage(chatID, userID, content, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
@@ -74,6 +84,14 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 	}
 	if err != repository.ErrChatNotFound {
 		return nil, false, err
+	}
+
+	isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, userID, targetUserID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !isFriend {
+		return nil, false, errors.New("chưa là bạn bè, vui lòng gửi yêu cầu chat")
 	}
 
 	newChat := models.Chat{

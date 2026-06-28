@@ -156,3 +156,15 @@ func (r *ChatRepository) SearchMessages(ctx context.Context, chatID, userID, key
 	}
 	return messages, nil
 }
+
+func (r *ChatRepository) IsMediaOwnedByUser(ctx context.Context, mediaID, userID string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("media").
+		Where("id = ? AND user_id = ?", mediaID, userID).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("check media ownership: %w", err)
+	}
+	return count > 0, nil
+}
