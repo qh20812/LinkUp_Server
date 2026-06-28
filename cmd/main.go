@@ -129,6 +129,12 @@ func main() {
 		groupChatService := services.NewGroupChatService(groupChatRepository)
 		groupChatController := controllers.NewGroupChatController(groupChatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env)
+
+		communityRepository := repository.NewCommunityRepository(gormDB)
+		communityValidation := validations.NewCommunityValidation()
+		communityService := services.NewCommunityService(communityRepository, communityValidation)
+		communityController := controllers.NewCommunityController(communityService)
+		routes.RegisterCommunityRoutes(router, communityController, env)
 	}
 
 	router.GET("/ws", ws.ServeWS(hub, env))

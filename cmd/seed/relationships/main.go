@@ -56,8 +56,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i, c := range communities {
 		if err := internal.Exec(database,
-			`INSERT INTO communities (id, creator_id, name, role, description, avatar_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-			c.id, state.UserIDs[c.creatorIdx], c.name, "COMMUNITY_ADMIN", c.description,
+			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+			c.id, state.UserIDs[c.creatorIdx], c.name, c.description,
 			fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
 			now,
 		); err != nil {
