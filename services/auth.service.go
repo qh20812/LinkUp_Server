@@ -33,7 +33,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	email := normalizeEmail(input.Email)
 
 	if _, err := s.authRepo.FindByEmail(ctx, email); err == nil {
-		return dto.AuthResponse{}, errors.New("email already exists")
+		return dto.AuthResponse{}, errors.New("email đã tồn tại")
 	} else if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
 		return dto.AuthResponse{}, err
 	}
@@ -88,17 +88,17 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 	user, err := s.authRepo.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
-			return dto.AuthResponse{}, errors.New("invalid email or password")
+			return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
 		}
 		return dto.AuthResponse{}, err
 	}
 
 	if !user.IsActive() {
-		return dto.AuthResponse{}, fmt.Errorf("account is not active")
+		return dto.AuthResponse{}, fmt.Errorf("tài khoản chưa được kích hoạt")
 	}
 
 	if err := utils.ComparePassword(user.PasswordHash, input.Password); err != nil {
-		return dto.AuthResponse{}, errors.New("invalid email or password")
+		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
 	}
 
 	accessToken, refreshToken, err := s.generateTokens(user)
@@ -160,13 +160,13 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 	user, err := s.authRepo.FindByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
-			return errors.New("user not found")
+			return errors.New("không tìm thấy người dùng")
 		}
 		return err
 	}
 
 	if err := utils.ComparePassword(user.PasswordHash, input.OldPassword); err != nil {
-		return errors.New("invalid current password")
+		return errors.New("mật khẩu hiện tại không đúng")
 	}
 
 	if input.OldPassword == input.NewPassword {
@@ -180,7 +180,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 
 	for _, history := range histories {
 		if err := utils.ComparePassword(history.PasswordHash, input.NewPassword); err != nil {
-			return errors.New("cannot reuse a previous password")
+			return errors.New("không thể sử dụng lại mật khẩu trước đó")
 		}
 	}
 

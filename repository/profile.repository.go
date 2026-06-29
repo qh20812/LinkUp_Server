@@ -30,7 +30,7 @@ func (r *ProfileRepository) FindByUserID(ctx context.Context, userID string) (*m
     tx := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&profile)
     if tx.Error != nil {
         if tx.Error == gorm.ErrRecordNotFound {
-            return nil, fmt.Errorf("profile not found")
+		return nil, fmt.Errorf("không tìm thấy hồ sơ")
         }
         return nil, fmt.Errorf("find profile: %w", tx.Error)
     }

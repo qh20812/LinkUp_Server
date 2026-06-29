@@ -21,7 +21,7 @@ func NewSearchController(searchService *services.SearchService) *SearchControlle
 func (h *SearchController) Search(c *gin.Context) {
 	var input dto.SearchInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid query parameters"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
 		return
 	}
 

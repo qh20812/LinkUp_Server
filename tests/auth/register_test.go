@@ -39,18 +39,18 @@ func TestValidateRegisterInput(t *testing.T) {
 		wantErr     string
 	}{
 		{"valid input", "Test User", "test@example.com", "Password123!", ""},
-		{"empty display name", "", "test@example.com", "Password123!", "display name is required"},
-		{"display name too short", "A", "test@example.com", "Password123!", "display name must be at least 3 characters"},
-		{"display name too long", string(make([]rune, 56)), "test@example.com", "Password123!", "display name must be at most 55 characters"},
-		{"empty email", "Test User", "", "Password123!", "email is required"},
-		{"invalid email", "Test User", "not-an-email", "Password123!", "invalid email format"},
-		{"empty password", "Test User", "test@example.com", "", "password is required"},
-		{"password too short", "Test User", "test@example.com", "Ab1!", "password must be at least 8 characters"},
-		{"password too long", "Test User", "test@example.com", "Aa1!" + string(make([]byte, 130)), "password must be at most 128 characters"},
-		{"password missing uppercase", "Test User", "test@example.com", "password123!", "password must contain at least one uppercase letter"},
-		{"password missing lowercase", "Test User", "test@example.com", "PASSWORD123!", "password must contain at least one lowercase letter"},
-		{"password missing digit", "Test User", "test@example.com", "Password!!!", "password must contain at least one digit"},
-		{"password missing special char", "Test User", "test@example.com", "Password123", "password must contain at least one special character"},
+		{"empty display name", "", "test@example.com", "Password123!", "tên hiển thị không được để trống"},
+		{"display name too short", "A", "test@example.com", "Password123!", "tên hiển thị phải có ít nhất 3 ký tự"},
+		{"display name too long", string(make([]rune, 56)), "test@example.com", "Password123!", "tên hiển thị không được vượt quá 55 ký tự"},
+		{"empty email", "Test User", "", "Password123!", "email không được để trống"},
+		{"invalid email", "Test User", "not-an-email", "Password123!", "định dạng email không hợp lệ"},
+		{"empty password", "Test User", "test@example.com", "", "mật khẩu không được để trống"},
+		{"password too short", "Test User", "test@example.com", "Ab1!", "mật khẩu phải có ít nhất 8 ký tự"},
+		{"password too long", "Test User", "test@example.com", "Aa1!" + string(make([]byte, 130)), "mật khẩu không được vượt quá 128 ký tự"},
+		{"password missing uppercase", "Test User", "test@example.com", "password123!", "mật khẩu phải chứa ít nhất một chữ cái in hoa"},
+		{"password missing lowercase", "Test User", "test@example.com", "PASSWORD123!", "mật khẩu phải chứa ít nhất một chữ cái in thường"},
+		{"password missing digit", "Test User", "test@example.com", "Password!!!", "mật khẩu phải chứa ít nhất một chữ số"},
+		{"password missing special char", "Test User", "test@example.com", "Password123", "mật khẩu phải chứa ít nhất một ký tự đặc biệt"},
 	}
 
 	for _, tt := range tests {
@@ -89,7 +89,7 @@ func TestRegisterHandler_ValidationErrors(t *testing.T) {
 			name:       "missing all fields",
 			body:       map[string]interface{}{},
 			wantStatus: http.StatusBadRequest,
-			wantErr:    "display name is required",
+			wantErr:    "tên hiển thị không được để trống",
 		},
 		{
 			name: "invalid email",
@@ -99,7 +99,7 @@ func TestRegisterHandler_ValidationErrors(t *testing.T) {
 				"password":     "Password123!",
 			},
 			wantStatus: http.StatusBadRequest,
-			wantErr:    "invalid email format",
+			wantErr:    "định dạng email không hợp lệ",
 		},
 		{
 			name: "weak password",
@@ -109,13 +109,13 @@ func TestRegisterHandler_ValidationErrors(t *testing.T) {
 				"password":     "short",
 			},
 			wantStatus: http.StatusBadRequest,
-			wantErr:    "password must be at least 8 characters",
+			wantErr:    "mật khẩu phải có ít nhất 8 ký tự",
 		},
 		{
 			name: "invalid json body",
 			body: nil,
 			wantStatus: http.StatusBadRequest,
-			wantErr:    "invalid request body",
+			wantErr:    "dữ liệu đầu vào không hợp lệ",
 		},
 	}
 

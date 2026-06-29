@@ -7,11 +7,11 @@ import (
 )
 
 var (
-	ErrChatContentRequired = errors.New("message content, emoji, or media is required")
-	ErrChatContentTooLong  = errors.New("message content must be at most 2000 characters")
-	ErrSelfInvite          = errors.New("cannot invite yourself")
-	ErrSearchKeywordEmpty  = errors.New("search keyword is required")
-	ErrDeleteModeInvalid   = errors.New("delete mode must be 'all' or 'me'")
+	ErrChatContentRequired = errors.New("nội dung tin nhắn, emoji hoặc media là bắt buộc")
+	ErrChatContentTooLong  = errors.New("nội dung tin nhắn không được vượt quá 2000 ký tự")
+	ErrSelfInvite          = errors.New("không thể mời chính mình")
+	ErrSearchKeywordEmpty  = errors.New("từ khóa tìm kiếm là bắt buộc")
+	ErrDeleteModeInvalid   = errors.New("chế độ xóa phải là 'all' hoặc 'me'")
 )
 
 type ChatValidation struct{}
@@ -39,7 +39,7 @@ func (v *ChatValidation) ValidateRequestChatInvite(userID, targetUserID string) 
 
 func (v *ChatValidation) ValidateResponseChatInvite(userID, targetID string) error {
 	if userID != targetID {
-		return errors.New("you are not the recipient of this invite")
+		return errors.New("bạn không phải người nhận lời mời này")
 	}
 	return nil
 }
@@ -53,10 +53,10 @@ func (v *ChatValidation) ValidateSearchMessages(keyword string) error {
 
 func (v *ChatValidation) ValidateDeleteMessage(senderID, userID string, deletedForSender, deletedForReceiver bool) error {
 	if senderID != userID {
-		return errors.New("you are not the sender of this message")
+		return errors.New("bạn không phải người gửi tin nhắn này")
 	}
 	if deletedForSender || deletedForReceiver {
-		return errors.New("message already deleted")
+		return errors.New("tin nhắn đã bị xóa")
 	}
 	return nil
 }
@@ -70,7 +70,7 @@ func (v *ChatValidation) ValidateDeleteMode(mode string) error {
 
 func (v *ChatValidation) ValidateDirectChat(userID, targetUserID string) error {
 	if userID == targetUserID {
-		return errors.New("cannot create direct chat with yourself")
+		return errors.New("không thể tạo chat trực tiếp với chính mình")
 	}
 	return nil
 }

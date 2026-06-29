@@ -99,12 +99,12 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 
 	var input UpdatePreferencesInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
 		return
 	}
 
 	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "không có trường nào để cập nhật"})
 		return
 	}
 

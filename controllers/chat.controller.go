@@ -35,14 +35,14 @@ var upgrader = websocket.Upgrader{
 func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
 		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to upgrade websocket"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "không thể nâng cấp kết nối websocket"})
 		return
 	}
 
@@ -58,7 +58,7 @@ func (ctrl *ChatController) CreateDirectChat(c *gin.Context) {
 
 	var input dto.DirectChatRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id là bắt buộc"})
 		return
 	}
 
@@ -84,7 +84,7 @@ func (ctrl *ChatController) CreateChatInvite(c *gin.Context) {
 
 	var input dto.ChatInviteRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id là bắt buộc"})
 		return
 	}
 

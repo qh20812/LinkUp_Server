@@ -95,17 +95,17 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	return savedMsg, nil
 }
 
-func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, error) {
+func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, bool, error) {
 	if err := s.validation.ValidateDirectChat(userID, targetUserID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	chat, err := s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
 	if err == nil {
-		return chat, nil, true
+		return chat, true, nil
 	}
 	if err != repository.ErrChatNotFound {
-		return nil, err
+		return nil, false, err
 	}
 
 	isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, userID, targetUserID)
@@ -113,7 +113,7 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 		return nil, false, err
 	}
 	if !isFriend {
-		return nil, errors.New("chưa là bạn bè, vui lòng gửi yêu cầu chat")
+		return nil, false, errors.New("chưa là bạn bè, vui lòng gửi yêu cầu chat")
 	}
 
 	newChat := models.Chat{
@@ -132,11 +132,15 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 	createdChat, err := s.chatRepo.CreateDirectChat(ctx, &newChat, participants)
 	if err != nil {
 		if strings.Contains(err.Error(), errMySQLDuplicate) {
-			return s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
+			existing, findErr := s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
+			if findErr != nil {
+				return nil, false, findErr
+			}
+			return existing, true, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
-	return createdChat, nil
+	return createdChat, false, nil
 }
 
 func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserID string) (*models.ChatInvite, error) {

@@ -9,13 +9,13 @@ go build ./cmd/seed && ./seed.exe          # full seed (drops & recreates all ta
 go build ./... && go vet ./...              # verify & vet all packages
 ```
 
-**Tests** — two categories:
+**Tests** — validation-only (no DB) tests in `auth` and `community` packages:
 ```bash
-go test ./tests/auth/... -v -run TestValidate  # validation-only, no DB
+go test ./tests/auth/... -v -run TestValidate
+go test ./tests/community/... -v
 go test ./tests/... -run TestRegisterHandler_Success  # needs TEST_DSN env var
 ```
-
-`tests/post/` is empty (no post tests yet). No linter/typecheck config — `go build ./... && go vet ./...` is the main verification.
+`tests/chat/`, `tests/friend/`, `tests/post/` are empty. No linter config — `go build ./... && go vet ./...` is the main verification.
 
 ## Architecture
 
@@ -27,10 +27,10 @@ ws/            → gorilla/websocket Hub (per-user broadcast)
 ```
 
 - **Framework**: Gin (`gin.New()`, `.Use(gin.Logger(), gin.Recovery())`).
-- **DB**: `db/mysql.go` returns `*sql.DB` (DSN has `parseTime=true&charset=utf8mb4`, **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
-- **Module**: `linkup` (Go 1.26.3), run all build/test from repo root.
-- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`.
-- **Validation**: `binding` tags in `dto/post.dto.go` (3 structs) and `dto/chat.dto.go` (3 structs). Elsewhere: explicit validation via `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
+- **DB**: `db/mysql.go` returns `*sql.DB` (DSN `parseTime=true&charset=utf8mb4`, **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
+- **Module**: `linkup` (Go 1.26.3), run from repo root.
+- **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
+- **Validation**: `binding` tags on DTOs in `community`, `community_rule`, `group_chat`, `post` (1 struct: `ReactPostInput`), `chat` (3 structs). Others use explicit `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
 
 ## Config quirks
 
@@ -43,11 +43,11 @@ ws/            → gorilla/websocket Hub (per-user broadcast)
 
 ## Routes
 
-All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS is outside). Auth middleware sets `userID` and `email` on Gin context. Uses `Bearer` token in `Authorization` header.
+All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS + health are outside). Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Authorization` header.
 
 | Path | Method | Auth | Registration file |
 |---|---|---|---|
-| `/health` | GET | No | inline in `main.go` |
+| `/health` | GET | No | `cmd/main.go` inline |
 | `/ws` | GET | `?token=` query | `ws/handler.go` |
 | `/api/auth/register` | POST | No | `routes/auth.routes.go` |
 | `/api/auth/login` | POST | No | |
@@ -80,19 +80,24 @@ All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS is outs
 | `/api/chats/ws` | GET | Auth (middleware) | |
 | `/api/group-chats` | POST | Auth | `routes/group_chat.routes.go` |
 | `/api/group-chats/:chatID/add-member` | POST | Auth | |
+| `/api/communities` | POST | Auth | `routes/community.routes.go` |
+| `/api/communities/:communityID/rules` | GET | No | `routes/community_rule.routes.go` |
+| `/api/communities/:communityID/rules` | POST | Auth | |
+| `/api/communities/:communityID/rules/:ruleID` | PUT/DELETE | Auth | |
+| `/api/tags/:name/posts` | GET | No | `routes/tag.routes.go` |
 
 ## Business logic conventions
 
 - **Role protection**: `repository/auth.repository.go:HasRole` checks `user_roles` via JOIN. `ReportService` and `BlockService` reject targeting `SUPER_ADMIN` or `ADMIN`. `SearchRepository.SearchUsers` excludes them via `NOT EXISTS`.
 - **Toggle pattern**: `BlockService.ToggleBlock`, `FollowService.FollowToggle`, `FriendService.ToggleFriendRequest`, `postService.ReactPost`: check existing → delete if found, else create.
-- **Post status**: `FindByID` only returns active posts. Used by `ReportService` to validate post exists.
-- **Vietnamese error messages**: post/friend/chat services return Vietnamese error strings. Auth service returns English.
+- **Post status**: `FindByID` only returns active posts.
+- **Error languages**: post/friend/chat/community services return Vietnamese error strings. Auth service returns English.
 
 ## Service patterns
 
-- **`PostService` and `MediaService` are interfaces** (in `services/`). All other services use concrete structs. `PostService` takes `validations.PostValidation` as a constructor dependency.
-- **`friendService`** (`NewFriendService`) takes 5 dependencies: `friendRepository`, `authRepository`, `profileRepository`, `friendValidation`, `notificationService` — the only service wired with `profileRepository`.
-- **`chatService`** (`NewChatService`) takes `chatRepository`, `friendRepository`, `inviteRepository`, `notificationService`, `chatValidation` — uses `friendRepository`, not `authRepository`. Sends notifications on invite/accept/new message.
+- **`PostService` and `MediaService` are interfaces** (in `services/`). All other services use concrete structs.
+- **`friendService`** (`NewFriendService`) takes 5 dependencies: `friendRepository`, `authRepository`, `profileRepository`, `friendValidation`, `notificationService`.
+- **`chatService`** (`NewChatService`) takes `chatRepository`, `friendRepository`, `inviteRepository`, `notificationService`, `chatValidation`.
 - **`notificationService.Create`** is called from follow/friend/post services to push real-time via WebSocket Hub.
 
 ## WebSocket
@@ -104,13 +109,13 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 | `GET /ws` | `ws/handler.go:ServeWS` | `hub` (notification) | `Client` with `service=nil` → reads discarded | `?token=` access JWT |
 | `GET /api/chats/ws` | `controllers/chat.controller.go:HandleWebsocket` | `chatHub` | `Client` with `ChatService` → processes chat events | `AuthMiddleware` |
 
-- **`ws/hub.go`** unifies both patterns in one struct: `rooms map[string]map[*Client]bool` (chat broadcast) + `clients map[string]map[*Client]bool` (per-user notification). Has `SendToUser`, `JoinChat`, `RegisterClient`, and a `broadcast` channel.
-- **Import cycle avoided**: `services` imports `ws` (for `*ws.Hub`, `ws.OutgoingMessage`), but `ws` does NOT import `services`. Instead `ws/chat.service.go` defines a `ChatService interface` that `services/chat.service.go` implements implicitly.
-- **`ws/client.go`** handles chat events (`chat:join`, `message:send`, `typing:start/stop`) when `service != nil`; otherwise discards incoming (notification-only client).
+- **`ws/hub.go`**: `rooms` (chat broadcast) + `clients` (per-user notification). Methods: `SendToUser`, `JoinChat`, `RegisterClient`.
+- **Import cycle avoided**: `services` imports `ws`; `ws` does NOT import `services` — instead `ws/chat.service.go` defines a `ChatService interface` that `services/chat.service.go` implements implicitly.
+- **`ws/client.go`**: handles `chat:join`, `message:send`, `typing:start/stop` when `service != nil`; otherwise discards incoming (notification-only client).
 
 ## Seed system
 
-10 ordered steps: reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all 32 tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`.
+10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all 32 tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`.
 
 ## Password reset flow
 
@@ -124,15 +129,14 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 
 ## Stubs / not wired
 
-- `controllers/user.controller.go` — empty (2 lines)
-- `repository/user.repository.go` — `Create`, `FindByEmail` exist but **not wired** in `cmd/main.go`
-- `cmd/cloudinary-check/` — standalone binary
-- `dto/auth.dto.go` — no `binding` tags on any struct (unlike `post.dto.go` and `chat.dto.go`). Auth validation is fully delegated to `validations.AuthValidation`.
+- `controllers/user.controller.go` — empty. `repository/user.repository.go` — `Create`, `FindByEmail` exist but **not wired** in `cmd/main.go`.
+- `cmd/cloudinary-check/` — standalone binary, not part of the app.
+- `dto/auth.dto.go` — no `binding` tags. Auth validation is fully delegated to `validations.AuthValidation`.
 
 ## Quirks
 
 - **UUID divergence**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
 - **`utils/email.go`** reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly — not from `config.Env` struct (which also stores them unused). New email features should follow the same `os.Getenv` pattern or reconcile both paths.
 - **`gorm` tags** appear in only 4 models: `post` (computed `->`), `password_history`/`post_share`/`notification_preference` (`primaryKey`). Models use `json` tags; `db` tags are unused.
-- **`validations` package**: 9 validators exist (`auth`, `block`, `chat`, `comment`, `friend`, `media`, `post`, `report`, `search`) but not all services use them — some just use `binding` tags or inline checks.
-- **Air config** builds `cmd/main.go` specifically (not `./cmd`), excludes `_test.go` via regex.
+- **`validations` package**: 11 validators (`auth`, `block`, `chat`, `comment`, `community`, `community_rule`, `friend`, `media`, `post`, `report`, `search`) but not all services use them — some rely on `binding` tags or inline checks.
+- **Air config** (`air.toml`) builds `cmd/main.go` specifically (not `./cmd`), excludes `_test.go` via regex.

@@ -9,15 +9,15 @@ import (
 )
 
 var (
-	ErrPostTitleRequired    = errors.New("title is required")
-	ErrPostTitleMinLength   = errors.New("title must be at least 5 characters")
-	ErrPostTitleMaxLength   = errors.New("title must be at most 150 characters")
-	ErrPostContentRequired  = errors.New("content is required")
-	ErrPostContentMaxLength = errors.New("content must be at most 5000 characters")
-	ErrPostIDRequired       = errors.New("post id is required")
-	ErrEmojiRequired        = errors.New("emoji_id is required")
-	ErrCommentContentMaxLen = errors.New("comment content must be at most 1000 characters")
-	ErrInvalidPageSize      = errors.New("page_size must be between 1 and 100")
+	ErrPostTitleRequired    = errors.New("tiêu đề bài viết là bắt buộc")
+	ErrPostTitleMinLength   = errors.New("tiêu đề bài viết phải có ít nhất 5 ký tự")
+	ErrPostTitleMaxLength   = errors.New("tiêu đề bài viết không được vượt quá 150 ký tự")
+	ErrPostContentRequired  = errors.New("nội dung bài viết là bắt buộc")
+	ErrPostContentMaxLength = errors.New("nội dung bài viết không được vượt quá 5000 ký tự")
+	ErrPostIDRequired       = errors.New("mã bài viết là bắt buộc")
+	ErrEmojiRequired        = errors.New("emoji_id là bắt buộc")
+	ErrCommentContentMaxLen = errors.New("nội dung bình luận không được vượt quá 1000 ký tự")
+	ErrInvalidPageSize      = errors.New("page_size phải từ 1 đến 100")
 )
 
 type PostValidation struct{}

@@ -32,7 +32,7 @@ func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file là bắt buộc"})
 		return
 	}
 

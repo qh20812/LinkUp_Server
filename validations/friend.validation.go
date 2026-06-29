@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	ErrFriendTargetRequired = errors.New("target user is required")
-	ErrSelfFriendRequest    = errors.New("cannot send friend request to yourself")
+	ErrFriendTargetRequired = errors.New("người dùng mục tiêu là bắt buộc")
+	ErrSelfFriendRequest    = errors.New("không thể gửi lời mời kết bạn cho chính mình")
 )
 
 type FriendValidation struct{}

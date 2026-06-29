@@ -30,7 +30,7 @@ func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*model
 func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, targetUserID string) (*models.Profile, error) {
     profile, err := s.profileRepository.FindByUserID(ctx, targetUserID)
     if err != nil {
-        return nil, fmt.Errorf("profile not found")
+		return nil, fmt.Errorf("không tìm thấy hồ sơ")
     }
 
     if viewerID == targetUserID {
@@ -38,7 +38,7 @@ func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, t
     }
 
     if profile.IsPrivateProfile {
-        return nil, fmt.Errorf("this profile is private")
+		return nil, fmt.Errorf("hồ sơ này ở chế độ riêng tư")
     }
 
     return profile, nil
@@ -56,7 +56,7 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
             return nil, fmt.Errorf("edit profile: %w", err)
         }
         if existingPhone != nil {
-            return nil, fmt.Errorf("phone number already exists")
+		return nil, fmt.Errorf("số điện thoại đã tồn tại")
         }
     }
 

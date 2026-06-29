@@ -26,7 +26,7 @@ func (r *ChatInvitationRepository) FindPendingByID(ctx context.Context, inviteID
 	var invite models.ChatInvite
 	err := r.db.WithContext(ctx).Where("id = ? AND status = ?", inviteID, models.ChatInviteStatusPending).First(&invite).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("invite not found")
+		return nil, fmt.Errorf("không tìm thấy lời mời")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find invite: %w", err)

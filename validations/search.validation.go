@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	ErrKeywordTooShort = errors.New("keyword must be at least 2 characters")
-	ErrSearchTypeInvalid = errors.New("search type must be 'all', 'users', 'posts', or 'hashtags'")
+	ErrKeywordTooShort = errors.New("từ khóa tìm kiếm phải có ít nhất 2 ký tự")
+	ErrSearchTypeInvalid = errors.New("loại tìm kiếm phải là 'all', 'users', 'posts' hoặc 'hashtags'")
 )
 
 type SearchValidation struct{}

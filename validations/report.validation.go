@@ -6,11 +6,11 @@ import (
 )
 
 var (
-	ErrTargetTypeRequired = errors.New("target_type is required")
-	ErrTargetTypeInvalid  = errors.New("target_type must be 'user', 'post', or 'comment'")
-	ErrTargetIDRequired   = errors.New("target_id is required")
-	ErrReportTypeRequired = errors.New("report_type is required")
-	ErrReasonRequired     = errors.New("reason_detail is required")
+	ErrTargetTypeRequired = errors.New("target_type là bắt buộc")
+	ErrTargetTypeInvalid  = errors.New("target_type phải là 'user', 'post' hoặc 'comment'")
+	ErrTargetIDRequired   = errors.New("target_id là bắt buộc")
+	ErrReportTypeRequired = errors.New("report_type là bắt buộc")
+	ErrReasonRequired     = errors.New("reason_detail là bắt buộc")
 )
 
 type ReportValidation struct{}

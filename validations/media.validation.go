@@ -7,11 +7,11 @@ import (
 )
 
 var (
-	ErrFileRequired         = errors.New("file is required")
-	ErrFileTypeNotAllowed   = errors.New("file type not allowed")
-	ErrFileTooLarge         = errors.New("file exceeds size limit")
-	ErrInsufficientStorage  = errors.New("insufficient storage quota")
-	ErrStorageQuotaExceeded = errors.New("storage quota exceeded, purchase more quota")
+	ErrFileRequired         = errors.New("file là bắt buộc")
+	ErrFileTypeNotAllowed   = errors.New("định dạng file không được hỗ trợ")
+	ErrFileTooLarge         = errors.New("file vượt quá giới hạn kích thước")
+	ErrInsufficientStorage  = errors.New("dung lượng lưu trữ không đủ")
+	ErrStorageQuotaExceeded = errors.New("dung lượng lưu trữ đã đầy, vui lòng mua thêm dung lượng")
 )
 
 type MediaValidation struct {

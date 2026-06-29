@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	ErrTargetUserRequired = errors.New("target_user_id is required")
-	ErrSelfBlock          = errors.New("cannot block yourself")
+	ErrTargetUserRequired = errors.New("target_user_id là bắt buộc")
+	ErrSelfBlock          = errors.New("không thể chặn chính mình")
 )
 
 type BlockValidation struct{}

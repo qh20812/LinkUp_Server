@@ -41,7 +41,7 @@ func (s *BlockService) ToggleBlock(ctx context.Context, userID, targetUserID str
 		return dto.BlockUserResponse{}, fmt.Errorf("toggle block: %w", err)
 	}
 	if isAdmin || isSuperAdmin {
-		return dto.BlockUserResponse{}, errors.New("cannot block admin or super admin")
+		return dto.BlockUserResponse{}, errors.New("không thể chặn quản trị viên hoặc siêu quản trị viên")
 	}
 
 	existing, err := s.blockRepo.FindByUserAndTarget(ctx, userID, targetUserID)

@@ -47,13 +47,13 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 			return dto.CreateReportResponse{}, fmt.Errorf("check target role: %w", err)
 		}
 		if isAdmin || isSuperAdmin {
-			return dto.CreateReportResponse{}, errors.New("cannot report admin or super admin")
+			return dto.CreateReportResponse{}, errors.New("không thể báo cáo quản trị viên hoặc siêu quản trị viên")
 		}
 	case "post":
 		_, err := s.postRepo.FindByID(ctx, input.TargetID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return dto.CreateReportResponse{}, errors.New("post not found or not active")
+				return dto.CreateReportResponse{}, errors.New("không tìm thấy bài viết hoặc bài viết không hoạt động")
 			}
 			return dto.CreateReportResponse{}, fmt.Errorf("check post: %w", err)
 		}

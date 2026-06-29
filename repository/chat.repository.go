@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrChatNotFound = errors.New("chat not found")
+var ErrChatNotFound = errors.New("không tìm thấy chat")
 
 type ChatRepository struct {
 	db *gorm.DB
@@ -104,7 +104,7 @@ func (r *ChatRepository) FindMessageByID(ctx context.Context, messageID string) 
 	var message models.Message
 	err := r.db.WithContext(ctx).Where("id = ?", messageID).First(&message).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("message not found")
+		return nil, fmt.Errorf("không tìm thấy tin nhắn")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("find message by id: %w", err)

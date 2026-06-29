@@ -70,7 +70,7 @@ func (c *PasswordResetController) VerifyResetToken(ctx *gin.Context) {
 func (c *PasswordResetController) ResetPassword(ctx *gin.Context) {
     var input dto.ResetPasswordInput
     if err := ctx.ShouldBindJSON(&input); err != nil {
-        ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
         return
     }
 

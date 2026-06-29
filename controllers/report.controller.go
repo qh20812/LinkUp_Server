@@ -21,13 +21,13 @@ func NewReportController(reportService *services.ReportService) *ReportControlle
 func (h *ReportController) CreateReport(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
 		return
 	}
 
 	var input dto.CreateReportInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
 		return
 	}
 

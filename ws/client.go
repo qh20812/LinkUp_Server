@@ -69,7 +69,7 @@ func (c *Client) ReadPump() {
 
 		var event dto.WsEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
-			c.sendError("invalid message format")
+			c.sendError("định dạng tin nhắn không hợp lệ")
 			continue
 		}
 
@@ -77,7 +77,7 @@ func (c *Client) ReadPump() {
 		case "chat:join":
 			var payload dto.ChatJoinPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("invalid join payload")
+				c.sendError("dữ liệu tham gia không hợp lệ")
 				continue
 			}
 			if err := c.service.JoinChat(c.ctx, c.userID, payload.ChatID); err != nil {
@@ -105,7 +105,7 @@ func (c *Client) ReadPump() {
 		case "message:send":
 			var payload dto.SendMessagePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("invalid message payload")
+				c.sendError("dữ liệu tin nhắn không hợp lệ")
 				continue
 			}
 
@@ -134,7 +134,7 @@ func (c *Client) ReadPump() {
 		case "typing:start", "typing:stop":
 			var payload dto.TypingPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("invalid typing payload")
+				c.sendError("dữ liệu gõ chữ không hợp lệ")
 				continue
 			}
 			payload.UserID = c.userID
@@ -148,7 +148,7 @@ func (c *Client) ReadPump() {
 		case "message:delete":
 			var payload dto.DeleteMessagePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("invalid delete payload")
+				c.sendError("dữ liệu xóa không hợp lệ")
 				continue
 			}
 
@@ -179,7 +179,7 @@ func (c *Client) ReadPump() {
 		case "message:search":
 			var payload dto.SearchMessagePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("invalid search payload")
+				c.sendError("dữ liệu tìm kiếm không hợp lệ")
 				continue
 			}
 
@@ -200,7 +200,7 @@ func (c *Client) ReadPump() {
 			c.send <- resp
 
 		default:
-			c.sendError("unknown event type")
+			c.sendError("loại sự kiện không xác định")
 			_, _, err := c.conn.ReadMessage()
 			if err != nil {
 				log.Printf("ws read error: %v", err)

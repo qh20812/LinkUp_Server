@@ -21,7 +21,7 @@ func NewProfileController(profileService *services.ProfileService) *ProfileContr
 func (h *ProfileController) ViewProfile(c *gin.Context) {
     userID, exists := c.Get("userID")
     if !exists {
-        c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
         return
     }
 
@@ -49,7 +49,7 @@ func (h *ProfileController) ViewProfile(c *gin.Context) {
 func (h *ProfileController) ViewProfileByID(c *gin.Context) {
     targetUserID := c.Param("userID")
     if targetUserID == "" {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id là bắt buộc"})
         return
     }
 
@@ -60,8 +60,8 @@ func (h *ProfileController) ViewProfileByID(c *gin.Context) {
 
     profile, err := h.profileService.ViewProfileByID(c.Request.Context(), viewerID, targetUserID)
     if err != nil {
-        if err.Error() == "this profile is private" {
-            c.JSON(http.StatusForbidden, gin.H{"error": "this profile is private"})
+		if err.Error() == "hồ sơ này ở chế độ riêng tư" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "hồ sơ này ở chế độ riêng tư"})
             return
         }
         c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -86,13 +86,13 @@ func (h *ProfileController) ViewProfileByID(c *gin.Context) {
 func (h *ProfileController) EditProfile(c *gin.Context) {
     userID, exists := c.Get("userID")
     if !exists {
-        c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
         return
     }
 
     var input dto.EditProfileInput
     if err := c.ShouldBindJSON(&input); err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
         return
     }
 
@@ -100,12 +100,12 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
         input.DateOfBirth == nil && input.AvatarURI == nil &&
         input.Bio == nil && input.IsPrivateProfile == nil &&
         input.IsPrivatePosts == nil && input.AllowStrangerFriendRequest == nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "at least one field is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cần ít nhất một trường để cập nhật"})
         return
     }
 
     if input.DisplayName != nil && *input.DisplayName == "" {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "display_name cannot be empty"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tên hiển thị không được để trống"})
         return
     }
 
@@ -116,7 +116,7 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
     }
 
     response := dto.EditProfileResponse{
-        Message: "Profile updated successfully",
+	Message: "Cập nhật hồ sơ thành công",
         Data: dto.ViewProfileResponse{
             DisplayName:                updatedProfile.DisplayName,
             PhoneNumber:                updatedProfile.PhoneNumber,

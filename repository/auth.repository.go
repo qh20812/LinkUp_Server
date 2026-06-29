@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrUserNotFound = errors.New("user not found")
+var ErrUserNotFound = errors.New("không tìm thấy người dùng")
 
 type AuthRepository struct {
 	db *gorm.DB
