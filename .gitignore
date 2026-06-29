@@ -57,3 +57,5 @@ coverage/
 .flaskenv*
 !.env.project
 !.env.vault
+
+AGENTS.md

@@ -6,21 +6,28 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 	"strings"
 	"time"
 )
 
+const errMySQLDuplicate = "Duplicate entry"
+
 type ChatService struct {
-	chatRepo   *repository.ChatRepository
-	friendRepo *repository.FriendRepository
-	inviteRepo *repository.ChatInvitationRepository
+	chatRepo     *repository.ChatRepository
+	friendRepo   *repository.FriendRepository
+	inviteRepo   *repository.ChatInvitationRepository
+	notifService *NotificationService
+	validation   *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
-		chatRepo:   chatRepo,
-		friendRepo: friendRepo,
-		inviteRepo: inviteRepo,
+		chatRepo:     chatRepo,
+		friendRepo:   friendRepo,
+		inviteRepo:   inviteRepo,
+		notifService: notifService,
+		validation:   validation,
 	}
 }
 
@@ -36,11 +43,8 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 }
 
 func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID *string) (*models.Message, error) {
-	if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
-		return nil, errors.New("nội dung tin nhắn không được để trống")
-	}
-	if len(content) > 2000 {
-		return nil, errors.New("nội dung tin nhắn quá dài")
+	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
+		return nil, err
 	}
 
 	_, err := s.chatRepo.FindChatByID(ctx, chatID)
@@ -70,20 +74,38 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 
-	return s.chatRepo.CreateMessage(ctx, &msg)
+	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
+	if err != nil {
+		return nil, err
+	}
+
+	participants, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
+	if err == nil {
+		preview := content
+		if len(preview) > 100 {
+			preview = preview[:100]
+		}
+		for _, pid := range participants {
+			if pid != userID {
+				s.notifService.Create(ctx, pid, &userID, models.NotificationTypeMessage, preview, nil, nil, nil)
+			}
+		}
+	}
+
+	return savedMsg, nil
 }
 
-func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, bool, error) {
-	if userID == targetUserID {
-		return nil, false, errors.New("không thể tự chat trực tiếp với chính mình")
+func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, error) {
+	if err := s.validation.ValidateDirectChat(userID, targetUserID); err != nil {
+		return nil, err
 	}
 
 	chat, err := s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
 	if err == nil {
-		return chat, true, nil
+		return chat, nil, true
 	}
 	if err != repository.ErrChatNotFound {
-		return nil, false, err
+		return nil, err
 	}
 
 	isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, userID, targetUserID)
@@ -91,7 +113,7 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 		return nil, false, err
 	}
 	if !isFriend {
-		return nil, false, errors.New("chưa là bạn bè, vui lòng gửi yêu cầu chat")
+		return nil, errors.New("chưa là bạn bè, vui lòng gửi yêu cầu chat")
 	}
 
 	newChat := models.Chat{
@@ -109,15 +131,17 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 
 	createdChat, err := s.chatRepo.CreateDirectChat(ctx, &newChat, participants)
 	if err != nil {
-		return nil, false, err
+		if strings.Contains(err.Error(), errMySQLDuplicate) {
+			return s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
+		}
+		return nil, err
 	}
-
-	return createdChat, false, nil
+	return createdChat, nil
 }
 
 func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserID string) (*models.ChatInvite, error) {
-	if userID == targetUserID {
-		return nil, errors.New("không thể tự mời chính mình")
+	if err := s.validation.ValidateRequestChatInvite(userID, targetUserID); err != nil {
+		return nil, err
 	}
 
 	isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, userID, targetUserID)
@@ -161,6 +185,9 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 	if err := s.inviteRepo.Create(ctx, invite); err != nil {
 		return nil, err
 	}
+
+	s.notifService.Create(ctx, targetUserID, &userID, models.NotificationTypeMessage, "đã mời bạn tham gia chat", nil, &userID, nil)
+
 	return invite, nil
 }
 
@@ -169,8 +196,8 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 	if err != nil {
 		return nil, err
 	}
-	if invite.TargetID != userID {
-		return nil, errors.New("bạn không có quyền phản hồi lời mời này")
+	if err := s.validation.ValidateResponseChatInvite(userID, invite.TargetID); err != nil {
+		return nil, err
 	}
 
 	if !accept {
@@ -189,6 +216,8 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 		return nil, err
 	}
 
+	s.notifService.Create(ctx, invite.RequesterID, &userID, models.NotificationTypeMessage, "đã chấp nhận lời mời chat", nil, &userID, nil)
+
 	return chat, nil
 }
 
@@ -198,12 +227,11 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 		return nil, err
 	}
 
-	if msg.SenderID != userID {
-		return nil, errors.New("bạn không có quyền xóa tin nhắn")
+	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, msg.DeletedForSender, msg.DeletedForReceiver); err != nil {
+		return nil, err
 	}
-
-	if msg.DeletedForSender || msg.DeletedForReceiver {
-		return nil, errors.New("tin nhắn đã bị xóa")
+	if err := s.validation.ValidateDeleteMode(mode); err != nil {
+		return nil, err
 	}
 
 	deleteForAll := strings.EqualFold(mode, "all")
@@ -224,9 +252,8 @@ func (s *ChatService) GetAllMessages(ctx context.Context, userID, chatID string)
 }
 
 func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keyword string) ([]models.Message, error) {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
-		return nil, errors.New("từ khóa tìm kiếm không được để trống")
+	if err := s.validation.ValidateSearchMessages(keyword); err != nil {
+		return nil, err
 	}
 	if err := s.JoinChat(ctx, userID, chatID); err != nil {
 		return nil, err

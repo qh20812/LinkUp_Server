@@ -74,23 +74,3 @@ func ParseGroupRole(value string) GroupRole {
 	}
 }
 
-// CommunityRole — member roles within a community
-type CommunityRole string
-
-const (
-	CommunityRoleAdmin  CommunityRole = "COMMUNITY_ADMIN"
-	CommunityRoleMember CommunityRole = "COMMUNITY_MEMBER"
-)
-
-func (r CommunityRole) String() string {
-	return string(r)
-}
-
-func ParseCommunityRole(value string) CommunityRole {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(CommunityRoleAdmin):
-		return CommunityRoleAdmin
-	default:
-		return CommunityRoleMember
-	}
-}

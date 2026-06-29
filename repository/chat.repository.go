@@ -142,6 +142,18 @@ func (r *ChatRepository) GetMessages(ctx context.Context, chatID, userID string)
 	return messages, nil
 }
 
+func (r *ChatRepository) GetParticipantIDs(ctx context.Context, chatID string) ([]string, error) {
+	var userIDs []string
+	err := r.db.WithContext(ctx).
+		Table("chat_participants").
+		Where("chat_id = ?", chatID).
+		Pluck("user_id", &userIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("get participants: %w", err)
+	}
+	return userIDs, nil
+}
+
 func (r *ChatRepository) SearchMessages(ctx context.Context, chatID, userID, keyword string) ([]models.Message, error) {
 	var messages []models.Message
 	pattern := "%" + strings.ToLower(keyword) + "%"
