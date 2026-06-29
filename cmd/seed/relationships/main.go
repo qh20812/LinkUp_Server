@@ -56,8 +56,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i, c := range communities {
 		if err := internal.Exec(database,
-			`INSERT INTO communities (id, creator_id, name, role, description, avatar_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-			c.id, state.UserIDs[c.creatorIdx], c.name, "COMMUNITY_ADMIN", c.description,
+			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+			c.id, state.UserIDs[c.creatorIdx], c.name, c.description,
 			fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
 			now,
 		); err != nil {
@@ -67,6 +67,28 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID); err != nil {
 			return fmt.Errorf("relationships: community_admin user_role for %s: %w", state.UserIDs[c.creatorIdx], err)
+		}
+
+		rules := []struct {
+			category string
+			title    string
+			content  string
+			position int
+		}{
+			{"conduct", "Tôn trọng lẫn nhau", "Hãy luôn giữ thái độ tôn trọng với các thành viên khác. Không công kích cá nhân, quấy rối hoặc phân biệt đối xử.", 1},
+			{"conduct", "Giữ văn minh", "Thảo luận lành mạnh, không spam, không flood tin nhắn.", 2},
+			{"prohibited", "Nội dung bất hợp pháp", "Không đăng tải nội dung vi phạm pháp luật, bao gồm bản quyền và sở hữu trí tuệ.", 1},
+			{"prohibited", "Quảng cáo trái phép", "Không đăng quảng cáo hoặc link giới thiệu khi chưa được cho phép.", 2},
+			{"guidelines", "Cách đăng bài", "Đăng bài đúng chủ đề, tiêu đề rõ ràng, sử dụng tag phù hợp.", 1},
+			{"guidelines", "Đóng góp tích cực", "Chia sẻ kiến thức, hỗ trợ thành viên mới, báo cáo nội dung vi phạm.", 2},
+		}
+		for _, rule := range rules {
+			if err := internal.Exec(database,
+				`INSERT INTO community_rules (id, community_id, category, title, content, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+				internal.UUID(), c.id, rule.category, rule.title, rule.content, rule.position, now,
+			); err != nil {
+				return fmt.Errorf("relationships: insert rule %s for community %s: %w", rule.title, c.name, err)
+			}
 		}
 	}
 
