@@ -22,7 +22,7 @@ func (r *TagRepository) CreateTagsInTx(ctx context.Context, tx *gorm.DB, tags []
 		return nil
 	}
 
-	// Khắc phục lỗi Panic: Nếu tx truyền vào bị nil, sử dụng r.db mặc định bên ngoài độc lập
+	// Nếu tx truyền vào bị nil, sử dụng r.db mặc định bên ngoài độc lập
 	executor := tx
 	if executor == nil {
 		executor = r.db

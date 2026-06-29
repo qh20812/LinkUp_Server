@@ -71,14 +71,12 @@ func main() {
 		notificationController := controllers.NewNotificationController(notificationService)
 		routes.RegisterNotificationRoutes(router, notificationController, env)
 
-		// 🌟 ĐÃ CẬP NHẬT: Khởi tạo cụm Tag tại đây
 		tagRepository := repository.NewTagRepository(gormDB)
 		tagService := services.NewTagService(tagRepository)
 		tagController := controllers.NewTagController(tagService)
 		routes.RegisterTagRoutes(router, tagController)
 
 		postRepository := repository.NewPostRepository(gormDB)
-		// 🌟 ĐÃ CẬP NHẬT: Truyền thêm tham số tagService vào hàm khởi tạo
 		postService := services.NewPostService(postRepository, notificationService, tagService)
 		postController := controllers.NewPostController(postService)
 		routes.RegisterPostRoutes(router, postController, env)

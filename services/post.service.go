@@ -24,14 +24,14 @@ type PostService interface {
 type postService struct {
 	repo         *repository.PostRepository
 	notifService *NotificationService
-	tagService   *TagService // 🌟 Đã cập nhật
+	tagService   *TagService
 }
 
 func NewPostService(repo *repository.PostRepository, notifService *NotificationService, tagService *TagService) PostService {
 	return &postService{
 		repo:         repo,
 		notifService: notifService,
-		tagService:   tagService, // 🌟 Đã cập nhật
+		tagService:   tagService,
 	}
 }
 
@@ -47,7 +47,7 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		return nil, err
 	}
 
-	// 🌟 Đã cập nhật: Tự động bóc tách và lưu hashtag từ bài viết mới
+	// Tự động tách và lưu hashtag từ bài viết mới
 	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
 	}
@@ -151,7 +151,7 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 		return nil, err
 	}
 
-	// 🌟 Đã cập nhật: Tự động bóc tách và lưu hashtag từ bình luận mới
+	// Tự động tách và lưu hashtag từ bình luận mới
 	if err := s.tagService.ProcessCommentHashtags(ctx, nil, postID, comment.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho comment %s: %v", comment.ID, err)
 	}
