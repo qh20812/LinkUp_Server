@@ -6,11 +6,12 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"log"
 	"time"
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error) // Thêm tham số status
+	CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error)
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
@@ -23,14 +24,18 @@ type PostService interface {
 type postService struct {
 	repo         *repository.PostRepository
 	notifService *NotificationService
+	tagService   *TagService // 🌟 Đã cập nhật
 }
 
-func NewPostService(repo *repository.PostRepository, notifService *NotificationService) PostService {
-	return &postService{repo: repo, notifService: notifService}
+func NewPostService(repo *repository.PostRepository, notifService *NotificationService, tagService *TagService) PostService {
+	return &postService{
+		repo:         repo,
+		notifService: notifService,
+		tagService:   tagService, // 🌟 Đã cập nhật
+	}
 }
 
 func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error) {
-	// Chuyển đổi chuỗi string từ client sang PostStatus enum trong hệ thống
 	postStatus := models.ParsePostStatus(status)
 
 	post := models.NewPost(userID, title, content, postStatus)
@@ -41,6 +46,12 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 	if err := s.repo.Create(ctx, &post); err != nil {
 		return nil, err
 	}
+
+	// 🌟 Đã cập nhật: Tự động bóc tách và lưu hashtag từ bài viết mới
+	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
+		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
+	}
+
 	return &post, nil
 }
 
@@ -138,6 +149,11 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 
 	if err := s.repo.CreateComment(ctx, &comment); err != nil {
 		return nil, err
+	}
+
+	// 🌟 Đã cập nhật: Tự động bóc tách và lưu hashtag từ bình luận mới
+	if err := s.tagService.ProcessCommentHashtags(ctx, nil, postID, comment.ID, content); err != nil {
+		log.Printf("[Hashtag Error] không thể lưu tag cho comment %s: %v", comment.ID, err)
 	}
 
 	if post.UserID != userID {
