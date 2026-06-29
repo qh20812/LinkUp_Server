@@ -77,7 +77,8 @@ func main() {
 		routes.RegisterTagRoutes(router, tagController)
 
 		postRepository := repository.NewPostRepository(gormDB)
-		postService := services.NewPostService(postRepository, notificationService, tagService)
+		postValidation := validations.NewPostValidation()
+		postService := services.NewPostService(postRepository, notificationService, postValidation, tagService)
 		postController := controllers.NewPostController(postService)
 		routes.RegisterPostRoutes(router, postController, env)
 
@@ -122,7 +123,8 @@ func main() {
 		chatRepository := repository.NewChatRepository(gormDB)
 		friendRepository = repository.NewFriendRepository(gormDB)
 		inviteRepository := repository.NewChatInvitationRepository(gormDB)
-		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository)
+		chatValidation := validations.NewChatValidation()
+		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, notificationService, chatValidation)
 		chatHub := ws.NewHub()
 		go chatHub.Run()
 		chatController := controllers.NewChatController(chatHub, chatService, env)
@@ -132,6 +134,18 @@ func main() {
 		groupChatService := services.NewGroupChatService(groupChatRepository)
 		groupChatController := controllers.NewGroupChatController(groupChatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env)
+
+		communityRepository := repository.NewCommunityRepository(gormDB)
+		communityValidation := validations.NewCommunityValidation()
+		communityService := services.NewCommunityService(communityRepository, communityValidation)
+		communityController := controllers.NewCommunityController(communityService)
+		routes.RegisterCommunityRoutes(router, communityController, env)
+
+		communityRuleRepository := repository.NewCommunityRuleRepository(gormDB)
+		communityRuleValidation := validations.NewCommunityRuleValidation()
+		communityRuleService := services.NewCommunityRuleService(communityRuleRepository, communityRuleValidation)
+		communityRuleController := controllers.NewCommunityRuleController(communityRuleService)
+		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env)
 	}
 
 	router.GET("/ws", ws.ServeWS(hub, env))

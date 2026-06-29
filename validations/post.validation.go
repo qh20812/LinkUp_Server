@@ -5,7 +5,60 @@ import (
 	"fmt"
 	"linkup/models"
 	"strings"
+	"unicode/utf8"
 )
+
+var (
+	ErrPostTitleRequired    = errors.New("title is required")
+	ErrPostTitleMinLength   = errors.New("title must be at least 5 characters")
+	ErrPostTitleMaxLength   = errors.New("title must be at most 150 characters")
+	ErrPostContentRequired  = errors.New("content is required")
+	ErrPostContentMaxLength = errors.New("content must be at most 5000 characters")
+	ErrPostIDRequired       = errors.New("post id is required")
+	ErrEmojiRequired        = errors.New("emoji_id is required")
+	ErrCommentContentMaxLen = errors.New("comment content must be at most 1000 characters")
+	ErrInvalidPageSize      = errors.New("page_size must be between 1 and 100")
+)
+
+type PostValidation struct{}
+
+func NewPostValidation() *PostValidation {
+	return &PostValidation{}
+}
+
+func (v *PostValidation) ValidateReactPost(emojiID string) error {
+	if strings.TrimSpace(emojiID) == "" {
+		return ErrEmojiRequired
+	}
+	return nil
+}
+
+func (v *PostValidation) ValidateCreateComment(content string) error {
+	if strings.TrimSpace(content) == "" {
+		return ErrPostContentRequired
+	}
+	if utf8.RuneCountInString(content) > 1000 {
+		return ErrCommentContentMaxLen
+	}
+	return nil
+}
+
+func (v *PostValidation) ValidatePostID(postID string) error {
+	if strings.TrimSpace(postID) == "" {
+		return ErrPostIDRequired
+	}
+	return nil
+}
+
+func (v *PostValidation) NormalizePagination(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+	return page, pageSize
+}
 
 // ValidateCreatePost kiểm tra dữ liệu đầu vào khi tạo bài viết
 func ValidateCreatePost(title, content, status string) error {
