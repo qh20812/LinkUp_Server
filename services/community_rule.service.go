@@ -37,6 +37,14 @@ func (s *CommunityRuleService) CreateRule(ctx context.Context, userID, community
 		return nil, err
 	}
 
+	exists, err := s.ruleRepo.ExistsByCommunityCategoryTitle(ctx, communityID, category, title)
+	if err != nil {
+		return nil, errors.New("lỗi khi kiểm tra trùng lặp nội quy")
+	}
+	if exists {
+		return nil, validations.ErrRuleTitleDuplicate
+	}
+
 	if position == nil {
 		maxPos, err := s.ruleRepo.GetMaxPosition(ctx, communityID, category)
 		if err != nil {

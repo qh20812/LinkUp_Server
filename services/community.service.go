@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -12,19 +13,23 @@ import (
 )
 
 type CommunityService struct {
-	repo       *repository.CommunityRepository
-	authRepo   *repository.AuthRepository
+	repo         *repository.CommunityRepository
+	authRepo     *repository.AuthRepository
+	profileRepo  *repository.ProfileRepository
 	mediaService MediaService
-	groupRole  *utils.GroupRoleChecker
-	validation *validations.CommunityValidation
+	notifService *NotificationService
+	groupRole    *utils.GroupRoleChecker
+	validation   *validations.CommunityValidation
 }
 
-func NewCommunityService(repo *repository.CommunityRepository, validation *validations.CommunityValidation, authRepo *repository.AuthRepository, mediaService MediaService) *CommunityService {
+func NewCommunityService(repo *repository.CommunityRepository, validation *validations.CommunityValidation, authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService) *CommunityService {
 	return &CommunityService{
 		repo:         repo,
 		validation:   validation,
 		authRepo:     authRepo,
+		profileRepo:  profileRepo,
 		mediaService: mediaService,
+		notifService: notifService,
 		groupRole:    utils.NewGroupRoleChecker(repo.GetUserRole),
 	}
 }
@@ -124,6 +129,123 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 	if err := s.repo.UpdateBackground(ctx, community.ID, media.FileURI); err != nil {
 		return errors.New("cập nhật background cộng đồng thất bại")
 	}
+
+	return nil
+}
+
+func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID string) (string, error) {
+	user, err := s.authRepo.FindByID(ctx, userID)
+	if err != nil {
+		return "", errors.New("người dùng không tồn tại")
+	}
+	if !user.IsActive() {
+		return "", errors.New("tài khoản chưa được kích hoạt")
+	}
+
+	community, err := s.repo.FindByID(ctx, communityID)
+	if err != nil {
+		return "", validations.ErrCommunityNotFound
+	}
+
+	isMember, err := s.repo.IsUserMember(ctx, communityID, userID)
+	if err != nil {
+		return "", errors.New("lỗi khi kiểm tra thành viên")
+	}
+	if isMember {
+		return "", validations.ErrAlreadyMember
+	}
+
+	existing, err := s.repo.FindPendingJoinRequestByUserAndCommunity(ctx, communityID, userID)
+	if err == nil && existing != nil {
+		return "", validations.ErrJoinRequestPending
+	}
+
+	now := time.Now().UTC()
+	joinReq := models.NewCommunityJoinRequest(communityID, userID)
+	joinReq.ID = utils.GenerateUUID()
+	joinReq.CreatedAt = now
+
+	if err := s.repo.CreateJoinRequest(ctx, &joinReq); err != nil {
+		return "", errors.New("gửi yêu cầu tham gia thất bại")
+	}
+
+	s.notifService.Create(ctx, community.CreatorID, &userID, models.NotificationTypeCommunityJoinRequest, "đã gửi yêu cầu tham gia cộng đồng", nil, &userID, nil)
+
+	return joinReq.ID, nil
+}
+
+func (s *CommunityService) ListPendingRequests(ctx context.Context, adminID, communityID string) (dto.JoinRequestListResponse, error) {
+	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+		return dto.JoinRequestListResponse{}, validations.ErrNotCommunityAdmin
+	}
+
+	requests, err := s.repo.FindPendingJoinRequestsByCommunity(ctx, communityID)
+	if err != nil {
+		return dto.JoinRequestListResponse{}, errors.New("lỗi khi lấy danh sách yêu cầu")
+	}
+
+	items := make([]dto.JoinRequestItem, 0, len(requests))
+	for _, req := range requests {
+		profile, err := s.profileRepo.FindByUserID(ctx, req.UserID)
+		displayName := ""
+		avatarURI := ""
+		if err == nil {
+			displayName = profile.DisplayName
+			avatarURI = profile.AvatarURI
+		}
+		items = append(items, dto.JoinRequestItem{
+			ID:          req.ID,
+			UserID:      req.UserID,
+			DisplayName: displayName,
+			AvatarURI:   avatarURI,
+			Status:      string(req.Status),
+			CreatedAt:   req.CreatedAt,
+		})
+	}
+
+	return dto.JoinRequestListResponse{Requests: items}, nil
+}
+
+func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requestID string) error {
+	req, err := s.repo.FindJoinRequestByID(ctx, requestID)
+	if err != nil {
+		return validations.ErrJoinRequestNotFound
+	}
+	if req.Status != models.JoinRequestStatusPending {
+		return validations.ErrJoinRequestAlreadyHandled
+	}
+
+	if err := s.groupRole.RequireRole(ctx, req.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
+		return validations.ErrNotCommunityAdmin
+	}
+
+	if err := s.repo.ApproveJoinRequest(ctx, requestID); err != nil {
+		return err
+	}
+
+	s.notifService.Create(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinApproved, "đã chấp nhận yêu cầu tham gia cộng đồng", nil, &adminID, nil)
+
+	return nil
+}
+
+func (s *CommunityService) RejectJoinRequest(ctx context.Context, adminID, requestID string) error {
+	req, err := s.repo.FindJoinRequestByID(ctx, requestID)
+	if err != nil {
+		return validations.ErrJoinRequestNotFound
+	}
+	if req.Status != models.JoinRequestStatusPending {
+		return validations.ErrJoinRequestAlreadyHandled
+	}
+
+	if err := s.groupRole.RequireRole(ctx, req.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
+		return validations.ErrNotCommunityAdmin
+	}
+
+	if err := s.repo.RejectJoinRequest(ctx, requestID); err != nil {
+		return err
+	}
+
+	s.notifService.Create(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinRejected, "đã từ chối yêu cầu tham gia cộng đồng", nil, &adminID, nil)
 
 	return nil
 }

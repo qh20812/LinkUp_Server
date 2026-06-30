@@ -145,6 +145,94 @@ func (r *CommunityRepository) GetUserRole(ctx context.Context, communityID, user
 	return mapRoleNameToGroupRole(result.RoleName), nil
 }
 
+// CreateJoinRequest tạo một yêu cầu tham gia community.
+func (r *CommunityRepository) CreateJoinRequest(ctx context.Context, req *models.CommunityJoinRequest) error {
+	return r.db.WithContext(ctx).Create(req).Error
+}
+
+// FindPendingJoinRequestByUserAndCommunity tìm yêu cầu pending của user trong community.
+func (r *CommunityRepository) FindPendingJoinRequestByUserAndCommunity(ctx context.Context, communityID, userID string) (*models.CommunityJoinRequest, error) {
+	var req models.CommunityJoinRequest
+	err := r.db.WithContext(ctx).
+		Where("community_id = ? AND user_id = ? AND status = ?", communityID, userID, models.JoinRequestStatusPending).
+		First(&req).Error
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+// FindJoinRequestByID tìm join request theo ID.
+func (r *CommunityRepository) FindJoinRequestByID(ctx context.Context, requestID string) (*models.CommunityJoinRequest, error) {
+	var req models.CommunityJoinRequest
+	err := r.db.WithContext(ctx).Where("id = ?", requestID).First(&req).Error
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+// FindPendingJoinRequestsByCommunity lấy danh sách yêu cầu pending của community.
+func (r *CommunityRepository) FindPendingJoinRequestsByCommunity(ctx context.Context, communityID string) ([]models.CommunityJoinRequest, error) {
+	var requests []models.CommunityJoinRequest
+	err := r.db.WithContext(ctx).
+		Where("community_id = ? AND status = ?", communityID, models.JoinRequestStatusPending).
+		Order("created_at ASC").
+		Find(&requests).Error
+	return requests, err
+}
+
+// ApproveJoinRequest transaction: cập nhật status = approved + tạo group_member + gán GROUP_MEMBER role.
+func (r *CommunityRepository) ApproveJoinRequest(ctx context.Context, requestID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var req models.CommunityJoinRequest
+		if err := tx.Where("id = ? AND status = ?", requestID, models.JoinRequestStatusPending).First(&req).Error; err != nil {
+			return fmt.Errorf("yêu cầu tham gia không tồn tại hoặc đã được xử lý: %w", err)
+		}
+
+		now := time.Now().UTC()
+		req.Status = models.JoinRequestStatusApproved
+		req.RespondedAt = &now
+		if err := tx.Save(&req).Error; err != nil {
+			return fmt.Errorf("cập nhật trạng thái yêu cầu thất bại: %w", err)
+		}
+
+		member := models.NewGroupMember(req.CommunityID, req.UserID)
+		member.ID = utils.GenerateUUID()
+		member.JoinedAt = now
+		member.Points = 0
+		if err := tx.Create(&member).Error; err != nil {
+			return fmt.Errorf("thêm thành viên thất bại: %w", err)
+		}
+
+		var groupMemberRole models.Role
+		if err := tx.Where("name = ?", models.RoleGroupMember).First(&groupMemberRole).Error; err != nil {
+			return fmt.Errorf("không tìm thấy role GROUP_MEMBER: %w", err)
+		}
+
+		userRole := models.NewScopedUserRole(req.UserID, groupMemberRole.ID, req.CommunityID, models.ScopeTypeCommunity)
+		userRole.ID = utils.GenerateUUID()
+		userRole.AssignedAt = now
+		if err := tx.Create(&userRole).Error; err != nil {
+			return fmt.Errorf("gán role thành viên thất bại: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// RejectJoinRequest cập nhật status = rejected.
+func (r *CommunityRepository) RejectJoinRequest(ctx context.Context, requestID string) error {
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).
+		Model(&models.CommunityJoinRequest{}).
+		Where("id = ? AND status = ?", requestID, models.JoinRequestStatusPending).
+		Updates(map[string]interface{}{
+			"status":      models.JoinRequestStatusRejected,
+			"responded_at": now,
+		}).Error
+}
+
 // mapRoleNameToGroupRole ánh xạ role name từ roles table sang GroupRole enum.
 func mapRoleNameToGroupRole(name models.RoleName) models.GroupRole {
 	switch name {

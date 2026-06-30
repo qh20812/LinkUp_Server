@@ -83,3 +83,96 @@ func (ctrl *CommunityController) SetCommunityBackground(c *gin.Context) {
 		"message": "Cập nhật background cộng đồng thành công!",
 	})
 }
+
+func (ctrl *CommunityController) RequestJoin(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	userID := val.(string)
+
+	communityID := c.Param("communityID")
+	if communityID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		return
+	}
+
+	requestID, err := ctrl.communityService.RequestJoin(c.Request.Context(), userID, communityID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Gửi yêu cầu tham gia cộng đồng thành công!",
+		"request_id": requestID,
+	})
+}
+
+func (ctrl *CommunityController) ListPendingJoinRequests(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	adminID := val.(string)
+
+	communityID := c.Param("communityID")
+	if communityID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		return
+	}
+
+	response, err := ctrl.communityService.ListPendingRequests(c.Request.Context(), adminID, communityID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *CommunityController) ApproveJoinRequest(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	adminID := val.(string)
+
+	requestID := c.Param("requestID")
+	if requestID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "requestID là bắt buộc"})
+		return
+	}
+
+	if err := ctrl.communityService.ApproveJoinRequest(c.Request.Context(), adminID, requestID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chấp nhận yêu cầu tham gia thành công!"})
+}
+
+func (ctrl *CommunityController) RejectJoinRequest(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	adminID := val.(string)
+
+	requestID := c.Param("requestID")
+	if requestID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "requestID là bắt buộc"})
+		return
+	}
+
+	if err := ctrl.communityService.RejectJoinRequest(c.Request.Context(), adminID, requestID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Từ chối yêu cầu tham gia thành công!"})
+}

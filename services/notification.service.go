@@ -113,7 +113,8 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 		return pref.FollowEnabled
 	case models.NotificationTypeMessage:
 		return pref.MessageEnabled
-	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted:
+	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted,
+		models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved, models.NotificationTypeCommunityJoinRejected:
 		return pref.FriendRequestEnabled
 	default:
 		return true

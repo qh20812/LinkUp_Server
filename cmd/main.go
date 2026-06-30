@@ -137,7 +137,7 @@ func main() {
 
 		communityRepository := repository.NewCommunityRepository(gormDB)
 		communityValidation := validations.NewCommunityValidation()
-		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, mediaService)
+		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService)
 		communityController := controllers.NewCommunityController(communityService, mediaService)
 		routes.RegisterCommunityRoutes(router, communityController, env)
 
