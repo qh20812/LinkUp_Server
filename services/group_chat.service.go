@@ -77,7 +77,6 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID string
 }
 
 // 2. CHỨC NĂNG: BAN THÀNH VIÊN (CHẶN QUAY LẠI)
-// Hàm BanMember tối ưu lại trong services/group_chat_service.go
 func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targetUserID string) error {
 	if adminID == targetUserID {
 		return errors.New("bạn không thể tự chặn chính mình")
@@ -92,7 +91,7 @@ func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targe
 		return errors.New("chỉ quản trị viên (CHAT_ADMIN) mới có quyền chặn thành viên")
 	}
 
-	// Kiểm tra xem mục tiêu đã bị ban từ trước chưa
+	// Kiểm tra xem mục tiêu đã bị ban trước đó chưa
 	isBanned, err := s.groupRepo.IsUserBanned(ctx, chatID, targetUserID)
 	if err != nil {
 		return err
@@ -109,7 +108,6 @@ func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targe
 		CreatedAt: time.Now().UTC(),
 	}
 
-	// Gọi duy nhất hàm này là đủ (Repo tự lo việc lưu bảng Ban và xóa bảng Participant)
 	return s.groupRepo.BanUser(ctx, banData)
 }
 

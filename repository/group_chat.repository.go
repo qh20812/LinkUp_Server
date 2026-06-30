@@ -69,7 +69,6 @@ func (r *GroupChatRepository) BanUser(ctx context.Context, ban *models.GroupChat
 }
 
 // Kiểm tra xem user có phải Admin của nhóm hay không
-// Trong repository/group_chat_repository.go
 func (r *GroupChatRepository) IsUserAdmin(ctx context.Context, chatID, userID string) (bool, error) {
 	var count int64
 	// 🌟 THÊM .Debug() VÀO ĐÂY:

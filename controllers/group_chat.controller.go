@@ -27,7 +27,6 @@ func (ctrl *GroupChatController) CreateGroup(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
 		return
 	}
-	// Sửa lỗi ép kiểu bằng cách dùng fmt.Sprintf an toàn tuyệt đối giống ChatController
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	var input dto.CreateGroupInput
