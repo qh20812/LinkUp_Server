@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"linkup/dto"
 	"linkup/services"
 	"net/http"
 
@@ -175,4 +176,69 @@ func (ctrl *CommunityController) RejectJoinRequest(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Từ chối yêu cầu tham gia thành công!"})
+}
+
+func (ctrl *CommunityController) UpdateMemberRole(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	adminID := val.(string)
+
+	communityID := c.Param("communityID")
+	memberID := c.Param("memberID")
+
+	var input dto.UpdateMemberRoleInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	if err := ctrl.communityService.UpdateMemberRole(c.Request.Context(), adminID, communityID, memberID, input.Role); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật vai trò thành công!"})
+}
+
+func (ctrl *CommunityController) GetCommunityMembers(c *gin.Context) {
+	communityID := c.Param("communityID")
+
+	response, err := ctrl.communityService.GetCommunityMembers(c.Request.Context(), communityID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *CommunityController) LeaveCommunity(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	userID := val.(string)
+
+	communityID := c.Param("communityID")
+	if communityID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		return
+	}
+
+	var input dto.LeaveCommunityInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	if err := ctrl.communityService.LeaveCommunity(c.Request.Context(), userID, communityID, input.Quiet); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Rời cộng đồng thành công!"})
 }

@@ -61,6 +61,55 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	return notification, nil
 }
 
+func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string) ([]models.Notification, error) {
+	if len(receiverIDs) == 0 {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+	var notifications []models.Notification
+
+	for _, receiverID := range receiverIDs {
+		pref, err := s.prefRepo.GetByUserID(ctx, receiverID)
+		if err != nil {
+			continue
+		}
+		if pref != nil && !isNotificationEnabled(pref, notifType) {
+			continue
+		}
+
+		notifications = append(notifications, models.Notification{
+			ID:                utils.GenerateUUID(),
+			ReceiverID:        receiverID,
+			SenderID:          senderID,
+			Type:              notifType,
+			RedirectPostID:    redirectPostID,
+			RedirectUserID:    redirectUserID,
+			RedirectCommentID: redirectCommentID,
+			Content:           content,
+			IsRead:            false,
+			CreatedAt:         now,
+		})
+	}
+
+	if len(notifications) == 0 {
+		return nil, nil
+	}
+
+	if err := s.notifRepo.CreateBulk(ctx, notifications); err != nil {
+		return nil, fmt.Errorf("create notifications bulk: %w", err)
+	}
+
+	for i := range notifications {
+		s.hub.SendToUser(notifications[i].ReceiverID, ws.OutgoingMessage{
+			Type: "notification",
+			Data: &notifications[i],
+		})
+	}
+
+	return notifications, nil
+}
+
 func (s *NotificationService) GetList(ctx context.Context, userID string, page, pageSize int, unreadOnly bool) ([]models.Notification, int64, error) {
 	if page < 1 {
 		page = 1
@@ -114,7 +163,9 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 	case models.NotificationTypeMessage:
 		return pref.MessageEnabled
 	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted,
-		models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved, models.NotificationTypeCommunityJoinRejected:
+		models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved,
+		models.NotificationTypeCommunityJoinRejected, models.NotificationTypeCommunityRoleChanged,
+		models.NotificationTypeCommunityMemberLeft:
 		return pref.FriendRequestEnabled
 	default:
 		return true

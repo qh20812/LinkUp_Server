@@ -20,3 +20,23 @@ type JoinRequestItem struct {
 type JoinRequestListResponse struct {
 	Requests []JoinRequestItem `json:"requests"`
 }
+
+type UpdateMemberRoleInput struct {
+	Role string `json:"role" binding:"required,oneof=GROUP_ADMIN GROUP_MOD GROUP_MEMBER"`
+}
+
+type CommunityMemberItem struct {
+	UserID      string    `json:"user_id"`
+	DisplayName string    `json:"display_name"`
+	AvatarURI   string    `json:"avatar_uri"`
+	Role        string    `json:"role"`
+	JoinedAt    time.Time `json:"joined_at"`
+}
+
+type CommunityMemberListResponse struct {
+	Members []CommunityMemberItem `json:"members"`
+}
+
+type LeaveCommunityInput struct {
+	Quiet bool `json:"quiet" binding:"omitempty"`
+}

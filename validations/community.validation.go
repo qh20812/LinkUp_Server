@@ -21,6 +21,11 @@ var (
 	ErrJoinRequestAlreadyHandled  = errors.New("yêu cầu tham gia đã được xử lý")
 	ErrNotCommunityAdmin          = errors.New("bạn không phải quản trị viên của cộng đồng này")
 	ErrCommunityNotFound          = errors.New("cộng đồng không tồn tại")
+	ErrMemberNotFound             = errors.New("thành viên không tồn tại trong cộng đồng")
+	ErrInvalidRole                = errors.New("vai trò không hợp lệ")
+	ErrCannotChangeOwnRole       = errors.New("không thể thay đổi vai trò của chính mình")
+	ErrCannotTargetAdmin          = errors.New("không thể thay đổi vai trò của quản trị viên")
+	ErrCreatorCannotLeave        = errors.New("người tạo cộng đồng không thể rời đi, vui lòng chuyển quyền trước")
 )
 
 type CommunityValidation struct{}
@@ -91,4 +96,13 @@ func (v *CommunityValidation) ValidateBackgroundURI(backgroundURI string) error 
 		return ErrCommunityBackgroundInvalid
 	}
 	return nil
+}
+
+func (v *CommunityValidation) ValidateUpdateRole(role string) error {
+	switch role {
+	case "GROUP_ADMIN", "GROUP_MOD", "GROUP_MEMBER":
+		return nil
+	default:
+		return ErrInvalidRole
+	}
 }

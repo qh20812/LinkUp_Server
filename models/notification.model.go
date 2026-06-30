@@ -17,6 +17,8 @@ const (
 	NotificationTypeCommunityJoinRequest      NotificationType = "community_join_request"
 	NotificationTypeCommunityJoinApproved     NotificationType = "community_join_approved"
 	NotificationTypeCommunityJoinRejected     NotificationType = "community_join_rejected"
+	NotificationTypeCommunityRoleChanged      NotificationType = "community_role_changed"
+	NotificationTypeCommunityMemberLeft      NotificationType = "community_member_left"
 )
 
 type Notification struct {
@@ -65,6 +67,10 @@ func ParseNotificationType(value string) NotificationType {
 		return NotificationTypeCommunityJoinApproved
 	case string(NotificationTypeCommunityJoinRejected):
 		return NotificationTypeCommunityJoinRejected
+	case string(NotificationTypeCommunityRoleChanged):
+		return NotificationTypeCommunityRoleChanged
+	case string(NotificationTypeCommunityMemberLeft):
+		return NotificationTypeCommunityMemberLeft
 	default:
 		return NotificationTypeLike
 	}

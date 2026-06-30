@@ -160,6 +160,8 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID 
 		return "", validations.ErrJoinRequestPending
 	}
 
+	s.repo.DeleteNonPendingJoinRequests(ctx, communityID, userID)
+
 	now := time.Now().UTC()
 	joinReq := models.NewCommunityJoinRequest(communityID, userID)
 	joinReq.ID = utils.GenerateUUID()
@@ -246,6 +248,108 @@ func (s *CommunityService) RejectJoinRequest(ctx context.Context, adminID, reque
 	}
 
 	s.notifService.Create(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinRejected, "đã từ chối yêu cầu tham gia cộng đồng", nil, &adminID, nil)
+
+	return nil
+}
+
+func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, communityID, memberID, newRole string) error {
+	if err := s.validation.ValidateUpdateRole(newRole); err != nil {
+		return err
+	}
+
+	if _, err := s.repo.FindByID(ctx, communityID); err != nil {
+		return validations.ErrCommunityNotFound
+	}
+
+	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+		return validations.ErrNotCommunityAdmin
+	}
+
+	if adminID == memberID {
+		return validations.ErrCannotChangeOwnRole
+	}
+
+	isMember, err := s.repo.IsUserMember(ctx, communityID, memberID)
+	if err != nil || !isMember {
+		return validations.ErrMemberNotFound
+	}
+
+	isCreator, err := s.repo.IsUserCreator(ctx, communityID, memberID)
+	if err != nil {
+		return errors.New("lỗi khi kiểm tra thông tin thành viên")
+	}
+	if isCreator {
+		return validations.ErrCannotTargetAdmin
+	}
+
+	newRoleName := models.RoleName(newRole)
+	if err := s.repo.UpdateUserRole(ctx, communityID, memberID, newRoleName); err != nil {
+		return errors.New("cập nhật vai trò thất bại")
+	}
+
+	s.notifService.Create(ctx, memberID, &adminID, models.NotificationTypeCommunityRoleChanged, "đã thay đổi vai trò của bạn trong cộng đồng", nil, &adminID, nil)
+
+	return nil
+}
+
+func (s *CommunityService) GetCommunityMembers(ctx context.Context, communityID string) (dto.CommunityMemberListResponse, error) {
+	if _, err := s.repo.FindByID(ctx, communityID); err != nil {
+		return dto.CommunityMemberListResponse{}, validations.ErrCommunityNotFound
+	}
+
+	members, err := s.repo.FindMembersByCommunity(ctx, communityID)
+	if err != nil {
+		return dto.CommunityMemberListResponse{}, err
+	}
+
+	return dto.CommunityMemberListResponse{Members: members}, nil
+}
+
+func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, communityID string, quiet bool) error {
+	community, err := s.repo.FindByID(ctx, communityID)
+	if err != nil {
+		return validations.ErrCommunityNotFound
+	}
+
+	isMember, err := s.repo.IsUserMember(ctx, communityID, userID)
+	if err != nil {
+		return errors.New("lỗi khi kiểm tra thành viên")
+	}
+	if !isMember {
+		return validations.ErrMemberNotFound
+	}
+
+	isCreator, err := s.repo.IsUserCreator(ctx, communityID, userID)
+	if err != nil {
+		return errors.New("lỗi khi kiểm tra thông tin thành viên")
+	}
+	if isCreator {
+		return validations.ErrCreatorCannotLeave
+	}
+
+	if err := s.repo.RemoveMember(ctx, communityID, userID); err != nil {
+		return err
+	}
+
+	if quiet {
+		adminIDs, err := s.repo.FindCommunityAdmins(ctx, communityID)
+		if err == nil && len(adminIDs) > 0 {
+			s.notifService.CreateBulk(ctx, adminIDs, &userID, models.NotificationTypeCommunityMemberLeft, "đã rời khỏi cộng đồng", nil, &community.CreatorID, nil)
+		}
+	} else {
+		memberIDs, err := s.repo.FindCommunityMemberIDs(ctx, communityID)
+		if err == nil {
+			var receiverIDs []string
+			for _, id := range memberIDs {
+				if id != userID {
+					receiverIDs = append(receiverIDs, id)
+				}
+			}
+			if len(receiverIDs) > 0 {
+				s.notifService.CreateBulk(ctx, receiverIDs, &userID, models.NotificationTypeCommunityMemberLeft, "đã rời khỏi cộng đồng", nil, &community.CreatorID, nil)
+			}
+		}
+	}
 
 	return nil
 }
