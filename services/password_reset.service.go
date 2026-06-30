@@ -47,6 +47,7 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 
 	token := s.generateResetToken()
 	resetToken := models.NewPasswordResetToken(user.ID, token, 10*time.Minute)
+	resetToken.ID = utils.GenerateUUID()
 
 	if _, err := s.resetRepo.Create(ctx, &resetToken); err != nil {
 		return dto.ForgotPasswordResponse{}, err

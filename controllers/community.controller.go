@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"linkup/dto"
 	"linkup/services"
 	"net/http"
 
@@ -10,10 +9,11 @@ import (
 
 type CommunityController struct {
 	communityService *services.CommunityService
+	mediaService     services.MediaService
 }
 
-func NewCommunityController(communityService *services.CommunityService) *CommunityController {
-	return &CommunityController{communityService: communityService}
+func NewCommunityController(communityService *services.CommunityService, mediaService services.MediaService) *CommunityController {
+	return &CommunityController{communityService: communityService, mediaService: mediaService}
 }
 
 func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
@@ -23,13 +23,26 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 		return
 	}
 
-	var input dto.CreateCommunityInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ hoặc thiếu trường bắt buộc"})
+	name := c.PostForm("name")
+	description := c.PostForm("description")
+
+	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
 		return
 	}
 
-	community, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), input.Name, input.Description, input.AvatarURI)
+	avatarURI := ""
+	file, err := c.FormFile("avatar")
+	if err == nil && file != nil {
+		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Tải ảnh đại diện thất bại"})
+			return
+		}
+		avatarURI = media.FileURI
+	}
+
+	community, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

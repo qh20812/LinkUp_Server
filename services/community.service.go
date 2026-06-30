@@ -37,12 +37,28 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 	community.ID = utils.GenerateUUID()
 	community.CreatedAt = now
 
-	adminMember := models.NewGroupMember(community.ID, creatorID, models.GroupRoleAdmin)
+	adminMember := models.NewGroupMember(community.ID, creatorID)
 	adminMember.ID = utils.GenerateUUID()
 	adminMember.JoinedAt = now
 	adminMember.Points = 500
 
-	if err := s.repo.Create(ctx, &community, &adminMember); err != nil {
+	scopeType := models.ScopeTypeCommunity
+	userRoles := []models.UserRole{
+		models.NewScopedUserRole(creatorID, "", community.ID, scopeType),
+		models.NewScopedUserRole(creatorID, "", community.ID, scopeType),
+	}
+
+	var communityAdminRole, groupAdminRole models.Role
+	if err := s.repo.FindRoleByName(ctx, models.RoleCommunityAdmin, &communityAdminRole); err != nil {
+		return nil, err
+	}
+	if err := s.repo.FindRoleByName(ctx, models.RoleGroupAdmin, &groupAdminRole); err != nil {
+		return nil, err
+	}
+	userRoles[0].RoleID = communityAdminRole.ID
+	userRoles[1].RoleID = groupAdminRole.ID
+
+	if err := s.repo.CreateWithRoles(ctx, &community, &adminMember, userRoles); err != nil {
 		return nil, err
 	}
 	return &community, nil
