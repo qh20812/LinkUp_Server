@@ -453,6 +453,10 @@ func Run(env config.Env) error {
 			FOREIGN KEY (target_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 31. Message Security
+		`ALTER TABLE chats ADD COLUMN encryption_key VARCHAR(255) NOT NULL AFTER avatar_uri`,
+		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true`,
 	}
 
 	for _, stmt := range statements {
