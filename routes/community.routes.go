@@ -18,5 +18,8 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 		communityGroup.GET("/:communityID/join-requests", ctrl.ListPendingJoinRequests)
 		communityGroup.PUT("/:communityID/join-requests/:requestID/approve", ctrl.ApproveJoinRequest)
 		communityGroup.PUT("/:communityID/join-requests/:requestID/reject", ctrl.RejectJoinRequest)
+		communityGroup.GET("/:communityID/members", ctrl.GetCommunityMembers)
+		communityGroup.PUT("/:communityID/members/:memberID/role", ctrl.UpdateMemberRole)
+		communityGroup.DELETE("/:communityID/leave", ctrl.LeaveCommunity)
 	}
 }
