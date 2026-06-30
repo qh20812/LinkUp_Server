@@ -35,17 +35,19 @@ func (r *ChatInvitationRepository) FindPendingByID(ctx context.Context, inviteID
 }
 
 func (r *ChatInvitationRepository) FindPendingBetween(ctx context.Context, requesterID, targetID string) (*models.ChatInvite, error) {
-	var invite models.ChatInvite
-	err := r.db.WithContext(ctx).
-		Where("requester_id = ? AND target_id = ? AND status = ?", requesterID, targetID, models.ChatInviteStatusPending).
-		First(&invite).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find pending invite: %w", err)
-	}
-	return &invite, nil
+    var invite models.ChatInvite
+    err := r.db.WithContext(ctx).
+        Where("((requester_id = ? AND target_id = ?) OR (requester_id = ? AND target_id = ?)) AND status = ?",
+            requesterID, targetID, targetID, requesterID, models.ChatInviteStatusPending).
+        Order("created_at DESC").
+        First(&invite).Error
+    if errors.Is(err, gorm.ErrRecordNotFound) {
+        return nil, nil
+    }
+    if err != nil {
+        return nil, fmt.Errorf("find pending invite: %w", err)
+    }
+    return &invite, nil
 }
 
 func (r *ChatInvitationRepository) UpdateStatus(ctx context.Context, inviteID string, status models.ChatInviteStatus, chatID *string) error {

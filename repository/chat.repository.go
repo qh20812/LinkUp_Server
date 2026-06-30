@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"linkup/models"
+	"linkup/utils"
 	"strings"
 	"time"
 
@@ -84,20 +85,31 @@ func (r *ChatRepository) FindDirectChat(ctx context.Context, userA, userB string
 
 func (r *ChatRepository) CreateDirectChat(ctx context.Context, chat *models.Chat, participants []models.ChatParticipant) (*models.Chat, error) {
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		encKey, err := utils.GenerateEncryptionKey()
+		if err != nil {
+			return fmt.Errorf("generate encryption key: %w", err)
+		}
+		chat.EncryptionKey = encKey
+
 		if err := tx.Create(chat).Error; err != nil {
 			return err
 		}
-		if len(participants) > 0 {
-			if err := tx.Create(&participants).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+
+		return tx.CreateInBatches(participants, 100).Error
 	})
-	if err != nil {
-		return nil, fmt.Errorf("create direct chat: %w", err)
+	return chat, err
+}
+
+func (r *ChatRepository) GetEncryptionKey(ctx context.Context, chatID string) (string, error) {
+	var chat models.Chat
+	err := r.db.WithContext(ctx).Select("encryption_key").Where("id = ?", chatID).First(&chat).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", fmt.Errorf("chat not found")
 	}
-	return chat, nil
+	if err != nil {
+		return "", fmt.Errorf("get encryption key: %w", err)
+	}
+	return chat.EncryptionKey, nil
 }
 
 func (r *ChatRepository) FindMessageByID(ctx context.Context, messageID string) (*models.Message, error) {

@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -87,9 +88,9 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
-			history, err := c.service.GetAllMessages(c.ctx, c.userID, payload.ChatID)
+			history, err := c.service.GetAllMessagesDecrypted(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
-				c.sendError(err.Error())
+				c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
 				continue
 			}
 

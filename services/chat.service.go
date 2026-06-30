@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -57,20 +58,31 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, err
 	}
 	if !participant {
-		return nil, errors.New("bạn không tham gia chat này")
+		return nil, errors.New("bạn không phải thành viên của chat này")
 	}
 
 	if mediaID != nil {
-		owned, err := s.chatRepo.IsMediaOwnedByUser(ctx, *mediaID, userID)
+		isOwned, err := s.chatRepo.IsMediaOwnedByUser(ctx, *mediaID, userID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("check media ownership: %w", err)
 		}
-		if !owned {
+		if !isOwned {
 			return nil, errors.New("media không thuộc về bạn")
 		}
 	}
 
-	msg := models.NewMessage(chatID, userID, content, mediaID, emojiID)
+	// ===== ENCRYPTION =====
+	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("get encryption key: %w", err)
+	}
+
+	encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt message: %w", err)
+	}
+
+	msg := models.NewMessage(chatID, userID, encryptedContent, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 
@@ -81,13 +93,9 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 
 	participants, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
 	if err == nil {
-		preview := content
-		if len(preview) > 100 {
-			preview = preview[:100]
-		}
-		for _, pid := range participants {
-			if pid != userID {
-				s.notifService.Create(ctx, pid, &userID, models.NotificationTypeMessage, preview, nil, nil, nil)
+		for _, participantID := range participants {
+			if participantID != userID {
+				s.notifService.Create(ctx, participantID, &userID, models.NotificationTypeMessage, "đã gửi tin nhắn", nil, &userID, &chatID)
 			}
 		}
 	}
@@ -95,11 +103,37 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	return savedMsg, nil
 }
 
+func (s *ChatService) GetAllMessagesDecrypted(ctx context.Context, userID, chatID string) ([]models.Message, error) {
+	messages, err := s.GetAllMessages(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range messages {
+		decrypted, err := utils.DecryptMessage(messages[i].Content, encryptionKey)
+		if err != nil {
+			fmt.Printf("failed to decrypt message %s: %v\n", messages[i].ID, err)
+			continue
+		}
+		messages[i].Content = decrypted
+	}
+
+	return messages, nil
+}
+
 func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, bool, error) {
 	if err := s.validation.ValidateDirectChat(userID, targetUserID); err != nil {
 		return nil, false, err
 	}
+	return s.ensureDirectChat(ctx, userID, targetUserID, true)
+}
 
+func (s *ChatService) ensureDirectChat(ctx context.Context, userID, targetUserID string, requiredFriendship bool) (*models.Chat, bool, error) {
 	chat, err := s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
 	if err == nil {
 		return chat, true, nil
@@ -108,12 +142,14 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 		return nil, false, err
 	}
 
-	isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, userID, targetUserID)
-	if err != nil {
-		return nil, false, err
-	}
-	if !isFriend {
-		return nil, false, errors.New("chưa là bạn bè, vui lòng gửi yêu cầu chat")
+	if requiredFriendship {
+		isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, userID, targetUserID)
+		if err != nil {
+			return nil, false, err
+		}
+		if !isFriend {
+			return nil, false, errors.New("chưa là bạn, vui lòng gửi yêu cầu chat")
+		}
 	}
 
 	newChat := models.Chat{
@@ -161,7 +197,7 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 		return nil, err
 	}
 	if pending != nil {
-		return pending, nil
+		return nil, errors.New("lời mời chat đang chờ phản hồi")
 	}
 
 	existing, err := s.inviteRepo.FindActiveBetween(ctx, userID, targetUserID)
@@ -211,7 +247,7 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 		return nil, nil
 	}
 
-	chat, _, err := s.GetOrCreateDirectChat(ctx, invite.RequesterID, invite.TargetID)
+	chat, _, err := s.ensureDirectChat(ctx, invite.RequesterID, invite.TargetID, false)
 	if err != nil {
 		return nil, err
 	}
