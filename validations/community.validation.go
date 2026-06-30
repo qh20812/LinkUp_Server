@@ -8,12 +8,13 @@ import (
 )
 
 var (
-	ErrCommunityNameRequired  = errors.New("tên cộng đồng không được để trống")
-	ErrCommunityNameMinLength = errors.New("tên cộng đồng phải có ít nhất 3 ký tự")
-	ErrCommunityNameMaxLength = errors.New("tên cộng đồng không được vượt quá 100 ký tự")
-	ErrCommunityDescMaxLength = errors.New("mô tả cộng đồng không được vượt quá 500 ký tự")
-	ErrCommunityAvatarInvalid = errors.New("avatar URI không hợp lệ")
-	ErrCommunityNameExists    = errors.New("tên cộng đồng đã tồn tại")
+	ErrCommunityNameRequired     = errors.New("tên cộng đồng không được để trống")
+	ErrCommunityNameMinLength    = errors.New("tên cộng đồng phải có ít nhất 3 ký tự")
+	ErrCommunityNameMaxLength    = errors.New("tên cộng đồng không được vượt quá 100 ký tự")
+	ErrCommunityDescMaxLength    = errors.New("mô tả cộng đồng không được vượt quá 500 ký tự")
+	ErrCommunityAvatarInvalid    = errors.New("avatar URI không hợp lệ")
+	ErrCommunityBackgroundInvalid = errors.New("background URI không hợp lệ")
+	ErrCommunityNameExists       = errors.New("tên cộng đồng đã tồn tại")
 )
 
 type CommunityValidation struct{}
@@ -70,6 +71,18 @@ func (v *CommunityValidation) ValidateAvatarURI(avatarURI string) error {
 	parsed, err := url.ParseRequestURI(avatarURI)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return ErrCommunityAvatarInvalid
+	}
+	return nil
+}
+
+func (v *CommunityValidation) ValidateBackgroundURI(backgroundURI string) error {
+	backgroundURI = strings.TrimSpace(backgroundURI)
+	if backgroundURI == "" {
+		return nil
+	}
+	parsed, err := url.ParseRequestURI(backgroundURI)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ErrCommunityBackgroundInvalid
 	}
 	return nil
 }

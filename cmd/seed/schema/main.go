@@ -87,6 +87,7 @@ func Run(env config.Env) error {
 			name VARCHAR(255) NOT NULL UNIQUE,
 			description TEXT,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
+			background_uri VARCHAR(512) NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -114,6 +115,7 @@ func Run(env config.Env) error {
 			` + "`type`" + ` VARCHAR(20) NOT NULL DEFAULT 'direct',
 			name VARCHAR(255) NOT NULL DEFAULT '',
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
+			encryption_key VARCHAR(255) NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -455,7 +457,6 @@ func Run(env config.Env) error {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 31. Message Security
-		`ALTER TABLE chats ADD COLUMN encryption_key VARCHAR(255) NOT NULL AFTER avatar_uri`,
 		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true`,
 	}
 

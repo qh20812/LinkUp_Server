@@ -48,7 +48,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	communities := []communityData{
 		{internal.UUID(), "Go Developers", "A community for Go programming enthusiasts", 2},
-		{internal.UUID(), "Cloud Architects", "Discussing cloud infrastructure and architecture", 1},
+		{internal.UUID(), "Cloud Architects", "Discussing cloud infrastructure and architecture", 4},
 		{internal.UUID(), "AI Enthusiasts", "Exploring artificial intelligence and machine learning", 3},
 		{internal.UUID(), "DevOps United", "Sharing DevOps best practices and tools", 5},
 		{internal.UUID(), "Open Source Contributors", "Collaborating on open source projects", 8},
@@ -56,7 +56,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i, c := range communities {
 		if err := internal.Exec(database,
-			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, background_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', ?, NULL)`,
 			c.id, state.UserIDs[c.creatorIdx], c.name, c.description,
 			fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
 			now,

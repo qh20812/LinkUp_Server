@@ -13,5 +13,6 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 	communityGroup.Use(middlewares.AuthMiddleware(env))
 	{
 		communityGroup.POST("", ctrl.CreateCommunity)
+		communityGroup.PUT("/:communityID/background", ctrl.SetCommunityBackground)
 	}
 }

@@ -87,6 +87,14 @@ func (r *CommunityRepository) IsNameTaken(ctx context.Context, name string) (boo
 	return count > 0, err
 }
 
+// UpdateBackground cập nhật background_uri của community.
+func (r *CommunityRepository) UpdateBackground(ctx context.Context, communityID, backgroundURI string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Community{}).
+		Where("id = ?", communityID).
+		Update("background_uri", backgroundURI).Error
+}
+
 // IsUserAdmin kiểm tra user có phải admin của community không (dựa trên user_roles).
 func (r *CommunityRepository) IsUserAdmin(ctx context.Context, communityID, userID string) (bool, error) {
 	var count int64
