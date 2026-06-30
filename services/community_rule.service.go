@@ -12,14 +12,23 @@ import (
 
 type CommunityRuleService struct {
 	ruleRepo   *repository.CommunityRuleRepository
+	groupRole  *utils.GroupRoleChecker
 	validation *validations.CommunityRuleValidation
 }
 
-func NewCommunityRuleService(ruleRepo *repository.CommunityRuleRepository, validation *validations.CommunityRuleValidation) *CommunityRuleService {
-	return &CommunityRuleService{ruleRepo: ruleRepo, validation: validation}
+func NewCommunityRuleService(ruleRepo *repository.CommunityRuleRepository, communityRepo *repository.CommunityRepository, validation *validations.CommunityRuleValidation) *CommunityRuleService {
+	return &CommunityRuleService{
+		ruleRepo:   ruleRepo,
+		groupRole:  utils.NewGroupRoleChecker(communityRepo.GetUserRole),
+		validation: validation,
+	}
 }
 
-func (s *CommunityRuleService) CreateRule(ctx context.Context, communityID string, category models.RuleCategory, title, content string, position *int) (*models.CommunityRule, error) {
+func (s *CommunityRuleService) CreateRule(ctx context.Context, userID, communityID string, category models.RuleCategory, title, content string, position *int) (*models.CommunityRule, error) {
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+		return nil, err
+	}
+
 	pos := 0
 	if position != nil {
 		pos = *position
@@ -47,10 +56,14 @@ func (s *CommunityRuleService) CreateRule(ctx context.Context, communityID strin
 	return &rule, nil
 }
 
-func (s *CommunityRuleService) UpdateRule(ctx context.Context, ruleID, title, content string, category *models.RuleCategory, position *int) (*models.CommunityRule, error) {
+func (s *CommunityRuleService) UpdateRule(ctx context.Context, userID, ruleID, title, content string, category *models.RuleCategory, position *int) (*models.CommunityRule, error) {
 	existing, err := s.ruleRepo.FindByID(ctx, ruleID)
 	if err != nil {
 		return nil, errors.New("nội quy không tồn tại")
+	}
+
+	if err := s.groupRole.RequireRole(ctx, existing.CommunityID, userID, models.GroupRoleAdmin); err != nil {
+		return nil, err
 	}
 
 	if title != "" {
@@ -87,11 +100,16 @@ func (s *CommunityRuleService) UpdateRule(ctx context.Context, ruleID, title, co
 	return existing, nil
 }
 
-func (s *CommunityRuleService) DeleteRule(ctx context.Context, ruleID string) error {
-	_, err := s.ruleRepo.FindByID(ctx, ruleID)
+func (s *CommunityRuleService) DeleteRule(ctx context.Context, userID, ruleID string) error {
+	existing, err := s.ruleRepo.FindByID(ctx, ruleID)
 	if err != nil {
 		return errors.New("nội quy không tồn tại")
 	}
+
+	if err := s.groupRole.RequireRole(ctx, existing.CommunityID, userID, models.GroupRoleAdmin); err != nil {
+		return err
+	}
+
 	return s.ruleRepo.Delete(ctx, ruleID)
 }
 

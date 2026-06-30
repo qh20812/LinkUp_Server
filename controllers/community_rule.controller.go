@@ -22,7 +22,7 @@ func (ctrl *CommunityRuleController) CreateRule(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
 		return
 	}
-	_ = userID
+	uid := userID.(string)
 
 	communityID := c.Param("communityID")
 
@@ -32,7 +32,7 @@ func (ctrl *CommunityRuleController) CreateRule(c *gin.Context) {
 		return
 	}
 
-	rule, err := ctrl.ruleService.CreateRule(c.Request.Context(), communityID, input.Category, input.Title, input.Content, &input.Position)
+	rule, err := ctrl.ruleService.CreateRule(c.Request.Context(), uid, communityID, input.Category, input.Title, input.Content, &input.Position)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -50,7 +50,7 @@ func (ctrl *CommunityRuleController) UpdateRule(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
 		return
 	}
-	_ = userID
+	uid := userID.(string)
 
 	ruleID := c.Param("ruleID")
 
@@ -60,7 +60,7 @@ func (ctrl *CommunityRuleController) UpdateRule(c *gin.Context) {
 		return
 	}
 
-	rule, err := ctrl.ruleService.UpdateRule(c.Request.Context(), ruleID, input.Title, input.Content, &input.Category, input.Position)
+	rule, err := ctrl.ruleService.UpdateRule(c.Request.Context(), uid, ruleID, input.Title, input.Content, &input.Category, input.Position)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -78,11 +78,11 @@ func (ctrl *CommunityRuleController) DeleteRule(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
 		return
 	}
-	_ = userID
+	uid := userID.(string)
 
 	ruleID := c.Param("ruleID")
 
-	if err := ctrl.ruleService.DeleteRule(c.Request.Context(), ruleID); err != nil {
+	if err := ctrl.ruleService.DeleteRule(c.Request.Context(), uid, ruleID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

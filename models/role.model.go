@@ -7,9 +7,16 @@ import (
 type RoleName string
 
 const (
-	RoleSuperAdmin RoleName = "SUPER_ADMIN"
-	RoleAdmin      RoleName = "ADMIN"
-	RoleUser       RoleName = "USER"
+	RoleSuperAdmin      RoleName = "SUPER_ADMIN"
+	RoleAdmin           RoleName = "ADMIN"
+	RoleUser            RoleName = "USER"
+	RoleChatAdmin       RoleName = "CHAT_ADMIN"
+	RoleChatMember      RoleName = "CHAT_MEMBER"
+	RoleGroupAdmin      RoleName = "GROUP_ADMIN"
+	RoleGroupMod        RoleName = "GROUP_MOD"
+	RoleGroupMember     RoleName = "GROUP_MEMBER"
+	RoleCommunityAdmin  RoleName = "COMMUNITY_ADMIN"
+	RoleCommunityMember RoleName = "COMMUNITY_MEMBER"
 )
 
 type Role struct {

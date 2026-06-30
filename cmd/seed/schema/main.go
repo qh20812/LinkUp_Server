@@ -242,7 +242,6 @@ func Run(env config.Env) error {
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
 			user_id VARCHAR(36) NOT NULL,
-			role VARCHAR(50) NOT NULL DEFAULT 'GROUP_MEMBER',
 			points INT NOT NULL DEFAULT 0,
 			joined_at DATETIME NOT NULL,
 			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
@@ -388,10 +387,12 @@ func Run(env config.Env) error {
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
 			role_id VARCHAR(36) NOT NULL,
+			scope_id VARCHAR(36) NULL,
+			scope_type VARCHAR(20) NULL,
 			assigned_at DATETIME NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
-			UNIQUE INDEX idx_user_roles_pair (user_id, role_id)
+			UNIQUE INDEX idx_user_roles_pair (user_id, role_id, scope_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 26. Depends on users

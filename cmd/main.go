@@ -138,12 +138,12 @@ func main() {
 		communityRepository := repository.NewCommunityRepository(gormDB)
 		communityValidation := validations.NewCommunityValidation()
 		communityService := services.NewCommunityService(communityRepository, communityValidation)
-		communityController := controllers.NewCommunityController(communityService)
+		communityController := controllers.NewCommunityController(communityService, mediaService)
 		routes.RegisterCommunityRoutes(router, communityController, env)
 
 		communityRuleRepository := repository.NewCommunityRuleRepository(gormDB)
 		communityRuleValidation := validations.NewCommunityRuleValidation()
-		communityRuleService := services.NewCommunityRuleService(communityRuleRepository, communityRuleValidation)
+		communityRuleService := services.NewCommunityRuleService(communityRuleRepository, communityRepository, communityRuleValidation)
 		communityRuleController := controllers.NewCommunityRuleController(communityRuleService)
 		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env)
 	}

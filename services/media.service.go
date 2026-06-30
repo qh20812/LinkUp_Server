@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 	"linkup/validations"
 	"mime/multipart"
 	"net/url"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -71,7 +71,7 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 
 	uploadResult, err := s.cloudinary.Upload.Upload(ctx, src, uploader.UploadParams{
 		Folder:       fmt.Sprintf("linkup/users/%s", userID),
-		PublicID:     uuid.New().String(),
+		PublicID:     utils.GenerateUUID(),
 		ResourceType: "auto",
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 	}
 
 	media := models.NewMedia(userID, nil, uploadResult.SecureURL, file.Header.Get("Content-Type"), float64(file.Size))
-	media.ID = uuid.New().String()
+	media.ID = utils.GenerateUUID()
 	media.CreatedAt = time.Now()
 
 	if err := s.repo.Create(ctx, &media); err != nil {

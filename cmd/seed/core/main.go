@@ -115,7 +115,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		assigned[key] = true
 		return internal.Exec(database,
-			`INSERT INTO user_roles (id, user_id, role_id, assigned_at) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO user_roles (id, user_id, role_id, scope_id, scope_type, assigned_at) VALUES (?, ?, ?, NULL, NULL, ?)`,
 			internal.UUID(), userID, roleID, now,
 		)
 	}

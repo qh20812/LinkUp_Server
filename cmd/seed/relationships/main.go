@@ -27,15 +27,15 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	userRoleAssigned := map[string]bool{}
 
-	addUserRole := func(userID, roleID string) error {
-		key := userID + "|" + roleID
+	addUserRole := func(userID, roleID, scopeID string) error {
+		key := userID + "|" + roleID + "|" + scopeID
 		if userRoleAssigned[key] {
 			return nil
 		}
 		userRoleAssigned[key] = true
 		return internal.Exec(database,
-			`INSERT INTO user_roles (id, user_id, role_id, assigned_at) VALUES (?, ?, ?, ?)`,
-			internal.UUID(), userID, roleID, now,
+			`INSERT INTO user_roles (id, user_id, role_id, scope_id, scope_type, assigned_at) VALUES (?, ?, ?, ?, 'community', ?)`,
+			internal.UUID(), userID, roleID, scopeID, now,
 		)
 	}
 
@@ -65,7 +65,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		state.CommunityIDs = append(state.CommunityIDs, c.id)
 
-		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID); err != nil {
+		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID, c.id); err != nil {
 			return fmt.Errorf("relationships: community_admin user_role for %s: %w", state.UserIDs[c.creatorIdx], err)
 		}
 
@@ -126,8 +126,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 
 		if err := internal.Exec(database,
-			`INSERT INTO group_members (id, community_id, user_id, role, points, joined_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			internal.UUID(), state.CommunityIDs[m.communityIdx], userID, m.role, points, now,
+			`INSERT INTO group_members (id, community_id, user_id, points, joined_at) VALUES (?, ?, ?, ?, ?)`,
+			internal.UUID(), state.CommunityIDs[m.communityIdx], userID, points, now,
 		); err != nil {
 			return fmt.Errorf("relationships: insert member for community %d user %d: %w", m.communityIdx, m.userIdx, err)
 		}
@@ -141,11 +141,13 @@ func Run(env config.Env, state *internal.SeedState) error {
 		default:
 			roleID = groupMemberRoleID
 		}
-		if err := addUserRole(userID, roleID); err != nil {
+		communityID := state.CommunityIDs[m.communityIdx]
+
+		if err := addUserRole(userID, roleID, communityID); err != nil {
 			return fmt.Errorf("relationships: user_role %s for user %s: %w", m.role, userID, err)
 		}
 
-		if err := addUserRole(userID, communityMemberRoleID); err != nil {
+		if err := addUserRole(userID, communityMemberRoleID, communityID); err != nil {
 			return fmt.Errorf("relationships: community_member user_role for %s: %w", userID, err)
 		}
 	}
