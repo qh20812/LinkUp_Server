@@ -33,6 +33,11 @@ func AuthMiddleware(env config.Env) gin.HandlerFunc {
         }
 
         claims := token.Claims.(*utils.TokenClaims)
+        if claims.TokenType != "access" {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "token không hợp lệ"})
+            c.Abort()
+            return
+        }
         c.Set("userID", claims.UserID)
         c.Set("email", claims.Email)
         c.Next()

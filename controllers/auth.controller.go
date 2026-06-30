@@ -81,3 +81,19 @@ func (h *AuthController) ChangePassword(c *gin.Context) {
 
 	c.JSON(http.StatusOK, dto.ChangePasswordResponse{Message: "đổi mật khẩu thành công"})
 }
+
+func (h *AuthController) RefreshToken(c *gin.Context) {
+	var input dto.RefreshTokenInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	response, err := h.authService.RefreshToken(c.Request.Context(), input)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
