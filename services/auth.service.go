@@ -75,6 +75,10 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
+	if err := s.authRepo.AssignUserRole(ctx, createdUser.ID, models.RoleUser, nil, nil); err != nil {
+		return dto.AuthResponse{}, err
+	}
+
 	accessToken, refreshToken, err := s.generateTokens(createdUser)
 	if err != nil {
 		return dto.AuthResponse{}, err

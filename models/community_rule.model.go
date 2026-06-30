@@ -5,9 +5,9 @@ import "time"
 type RuleCategory string
 
 const (
-	RuleConduct    RuleCategory = "conduct"
-	RuleProhibited RuleCategory = "prohibited"
-	RuleGuidelines RuleCategory = "guidelines"
+	RuleConduct    RuleCategory = "conduct" // Quy tắc về hành vi
+	RuleProhibited RuleCategory = "prohibited" // Quy tắc về những hành vi bị cấm
+	RuleGuidelines RuleCategory = "guidelines" // Quy tắc về hướng dẫn chung
 )
 
 type CommunityRule struct {

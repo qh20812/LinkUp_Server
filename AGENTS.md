@@ -1,5 +1,7 @@
 # LinkUp Server — AGENTS.md
 
+> **Note**: This file is `.gitignore`d (line 61). It is local-only and won't be committed.
+
 ## Build & run
 
 ```bash
@@ -9,13 +11,13 @@ go build ./cmd/seed && ./seed.exe          # full seed (drops & recreates all ta
 go build ./... && go vet ./...              # verify & vet all packages
 ```
 
-**Tests** — validation-only (no DB) tests in `auth` and `community` packages:
+**Tests** — validation-only (no DB) in `auth` and `community`:
 ```bash
 go test ./tests/auth/... -v -run TestValidate
 go test ./tests/community/... -v
 go test ./tests/... -run TestRegisterHandler_Success  # needs TEST_DSN env var
 ```
-`tests/chat/`, `tests/friend/`, `tests/post/` are empty. No linter config — `go build ./... && go vet ./...` is the main verification.
+`tests/chat/`, `tests/friend/`, `tests/post/` are empty. No linter — `go build && go vet` is the verification gate.
 
 ## Architecture
 
@@ -26,20 +28,20 @@ cmd/seed/     → raw database/sql (10 ordered steps)
 ws/            → gorilla/websocket Hub (per-user broadcast)
 ```
 
-- **Framework**: Gin (`gin.New()`, `.Use(gin.Logger(), gin.Recovery())`).
-- **DB**: `db/mysql.go` returns `*sql.DB` (DSN `parseTime=true&charset=utf8mb4`, **no TLS params**); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
+- **Gin** with `gin.New()` + `gin.Logger(), gin.Recovery()`.
+- **DB**: `db/mysql.go` returns `*sql.DB` (DSN: `parseTime=true&charset=utf8mb4`, no TLS); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
 - **Module**: `linkup` (Go 1.26.3), run from repo root.
 - **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
-- **Validation**: `binding` tags on DTOs in `community`, `community_rule`, `group_chat`, `post` (1 struct: `ReactPostInput`), `chat` (3 structs). Others use explicit `validations` package (sentinel errors, struct methods). Query params use `form:` tags with `c.ShouldBindQuery`.
+- **Validation split**: DTOs use `binding` tags (`community`, `community_rule`, `group_chat`, `post:ReactPostInput`, `chat:3 structs`). Others use `validations` package (sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
 
 ## Config quirks
 
 - `.env` loaded by `config.LoadEnv()` — **custom line parser** (not godotenv). Singleton guard prevents reloads.
 - Required: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
-- **`DB_SSL` bug**: `validateRequired` treats `false` as missing. Always set `DB_SSL=true`.
+- **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing. Always set `DB_SSL=true`.
 - `PORT` defaults to `"8080"`. Optional: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
-- `config.GetEnv()` returns a **value copy**.
-- `CLOUDINARY_URL` is primary; `LoadCloudinaryEnv()` falls back to individual `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`.
+- `config.GetEnv()` returns a **value copy** — mutations to the returned struct don't affect the singleton.
+- `CLOUDINARY_URL` is primary; `LoadCloudinaryEnv()` falls back to `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`.
 
 ## Routes
 
@@ -115,17 +117,15 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 
 ## Seed system
 
-10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all 32 tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`.
+10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all 34 tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`. Relationships step also seeds `community_rules` for each community.
 
 ## Password reset flow
 
-1. `POST /api/auth/forgot-password` — 32-byte hex token in `password_reset_tokens`, email via Gmail SMTP (`smtp.gmail.com:587`, Vietnamese template).
-2. `POST /api/auth/verify-reset-token` — checks validity & expiry.
-3. `POST /api/auth/reset-password` — updates password, marks token used. Token expiry: 10 min.
+3-step: `forgot-password` (token in DB, email via Gmail SMTP Vietnamese template, 10 min expiry) → `verify-reset-token` → `reset-password`.
 
 ## JWT
 
-`utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL hardcoded to 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). A separate `utils.GenerateToken` exists for single-token generation (used by reset tokens).
+`utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). Separate `utils.GenerateToken` for single tokens (reset).
 
 ## Stubs / not wired
 
