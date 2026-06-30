@@ -199,3 +199,44 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 
 	return s.authRepo.UpdatePassword(ctx, userID, hashedPassword)
 }
+
+func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenInput) (dto.TokenResponse, error) {
+	token, err := utils.ParseToken(s.env.JWTSecret, input.RefreshToken)
+	if err != nil || !token.Valid {
+		return dto.TokenResponse{}, errors.New("refresh token không hợp lệ hoặc đã hết hạn")
+	}
+
+	claims, ok := token.Claims.(*utils.TokenClaims)
+	if !ok {
+		return dto.TokenResponse{}, errors.New("refresh token không hợp lệ")
+	}
+
+	if claims.TokenType != "refresh" {
+		return dto.TokenResponse{}, errors.New("token không phải refresh token")
+	}
+
+	user, err := s.authRepo.FindByID(ctx, claims.UserID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return dto.TokenResponse{}, errors.New("người dùng không tồn tại")
+		}
+		return dto.TokenResponse{}, err
+	}
+
+	if !user.IsActive() {
+		return dto.TokenResponse{}, errors.New("tài khoản chưa được kích hoạt")
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(user)
+	if err != nil {
+		return dto.TokenResponse{}, err
+	}
+
+	return dto.TokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(s.accessTTL().Seconds()),
+		RefreshTTLIn: int64(s.refreshTTL().Seconds()),
+	}, nil
+}

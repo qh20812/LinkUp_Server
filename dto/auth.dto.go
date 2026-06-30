@@ -44,6 +44,10 @@ type ChangePasswordResponse struct {
 	Message string `json:"message"`
 }
 
+type RefreshTokenInput struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 type StorageInfo struct {
 	QuotaBytes float64 `json:"quota_bytes"`
 	UsedBytes  float64 `json:"used_bytes"`
