@@ -454,8 +454,8 @@ func Run(env config.Env) error {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 31. Message Security
-		`ALTER TABLE chats ADD COLUMN encryption_key VARCHAR(255) NOT NULL AFTER avatar_uri;`,
-		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true;`,
+		`ALTER TABLE chats ADD COLUMN encryption_key VARCHAR(255) NOT NULL AFTER avatar_uri`,
+		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true`,
 	}
 
 	for _, stmt := range statements {
