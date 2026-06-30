@@ -2,20 +2,26 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/validations"
 	"mime/multipart"
+	"net/url"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type MediaService interface {
 	UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
+	DeleteMedia(ctx context.Context, userID string, mediaID string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
 }
@@ -87,6 +93,38 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 	return &media, nil
 }
 
+func (s *mediaService) DeleteMedia(ctx context.Context, userID string, mediaID string) error {
+	media, err := s.repo.GetByID(ctx, mediaID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return validations.ErrMediaNotFound
+		}
+		return fmt.Errorf("get media by id: %w", err)
+	}
+
+	if media.UserID != userID {
+		return validations.ErrMediaForbidden
+	}
+
+	if s.cloudinary != nil {
+		publicID, resourceType, parseErr := parseCloudinaryPublicID(media.FileURI)
+		if parseErr == nil {
+			if _, err = s.cloudinary.Upload.Destroy(ctx, uploader.DestroyParams{
+				PublicID:     publicID,
+				ResourceType: resourceType,
+			}); err != nil {
+				return fmt.Errorf("delete from cloudinary: %w", err)
+			}
+		}
+	}
+
+	if err := s.repo.DeleteWithStorageAdjustment(ctx, userID, media); err != nil {
+		return fmt.Errorf("delete media record: %w", err)
+	}
+
+	return nil
+}
+
 func (s *mediaService) GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error) {
 	quota, used, err = s.repo.GetUserStorageInfo(ctx, userID)
 	if err != nil {
@@ -101,4 +139,49 @@ func (s *mediaService) GetUserStorageStatus(ctx context.Context, userID string) 
 
 func (s *mediaService) GetUserMedia(ctx context.Context, userID string) ([]models.Media, error) {
 	return s.repo.GetByUserID(ctx, userID)
+}
+
+func parseCloudinaryPublicID(fileURI string) (string, string, error) {
+	parsedURL, err := url.Parse(fileURI)
+	if err != nil {
+		return "", "", err
+	}
+	if parsedURL.Path == "" {
+		return "", "", fmt.Errorf("invalid cloudinary path")
+	}
+
+	segments := strings.Split(strings.Trim(parsedURL.Path, "/"), "/")
+	idx := -1
+	for i, seg := range segments {
+		if seg == "upload" {
+			idx = i
+			break
+		}
+	}
+
+	if idx <= 0 || idx+1 >= len(segments) {
+		return "", "", fmt.Errorf("invalid cloudinary path")
+	}
+
+	resourceType := segments[idx-1]
+	partsAfterUpload := segments[idx+1:]
+
+	if len(partsAfterUpload) == 0 {
+		return "", "", fmt.Errorf("missing public id")
+	}
+
+	if strings.HasPrefix(partsAfterUpload[0], "v") || strings.HasPrefix(partsAfterUpload[0], "f") || strings.HasPrefix(partsAfterUpload[0], "c") {
+		partsAfterUpload = partsAfterUpload[1:]
+	}
+
+	if len(partsAfterUpload) == 0 {
+		return "", "", fmt.Errorf("missing public id")
+	}
+
+	publicID := strings.Join(partsAfterUpload, "/")
+	if ext := path.Ext(publicID); ext != "" {
+		publicID = strings.TrimSuffix(publicID, ext)
+	}
+
+	return publicID, resourceType, nil
 }

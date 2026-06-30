@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"fmt"
 	"linkup/dto"
 	"linkup/services"
@@ -75,6 +76,36 @@ func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 			"available_bytes": available,
 		},
 	})
+}
+
+func (crtl *MediaController) DeleteMedia(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"errors": "Không tìm thấy thông tin đăng nhập"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+
+	mediaID := c.Param("id")
+	if mediaID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu media id"})
+		return
+	}
+
+	err := crtl.service.DeleteMedia(c.Request.Context(), userID, mediaID)
+	switch {
+	case errors.Is(err, validations.ErrMediaNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Media không tồn tại"})
+	case errors.Is(err, validations.ErrMediaForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": "Bạn không có quyền xóa media này"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "Xóa media thành công",
+			"media_id": mediaID,
+		})
+	}
 }
 
 func (ctrl *MediaController) GetStorageStatus(c *gin.Context) {

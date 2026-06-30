@@ -34,6 +34,10 @@ func (r *MediaRepository) GetByUserID(ctx context.Context, userID string) ([]mod
 	return medias, err
 }
 
+func (r *MediaRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&models.Media{}, "id = ?", id).Error
+}
+
 func (r *MediaRepository) UpdateStorageUsage(ctx context.Context, userID string, addedBytes float64) error {
 	return r.db.WithContext(ctx).
 		Model(&models.User{}).
@@ -50,4 +54,17 @@ func (r *MediaRepository) GetUserStorageInfo(ctx context.Context, userID string)
 		First(&user).
 		Error
 	return user.StorageQuotaBytes, user.StorageUsedBytes, err
+}
+
+func (r *MediaRepository) DeleteWithStorageAdjustment(ctx context.Context, userID string, media *models.Media) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&models.Media{}, "id = ?", media.ID).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.User{}).
+			Where("id = ?", userID).
+			Update("storage_used_bytes", gorm.Expr("GREATEST(storage_used_bytes - ?, 0)", int64(media.FileSize))).
+			Error
+	})
 }

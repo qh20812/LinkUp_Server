@@ -12,6 +12,8 @@ var (
 	ErrFileTooLarge         = errors.New("file vượt quá giới hạn kích thước")
 	ErrInsufficientStorage  = errors.New("dung lượng lưu trữ không đủ")
 	ErrStorageQuotaExceeded = errors.New("dung lượng lưu trữ đã đầy, vui lòng mua thêm dung lượng")
+	ErrMediaNotFound = errors.New("media không tồn tại")
+	ErrMediaForbidden = errors.New("Bạn không có quyền xóa media này")
 )
 
 type MediaValidation struct {
