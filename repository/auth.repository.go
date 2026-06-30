@@ -71,6 +71,7 @@ func (r *AuthRepository) FindByID(ctx context.Context, userID string) (*models.U
 	return &user, nil
 }
 
+// SavePasswordHistory lưu lịch sử mật khẩu của người dùng vào cơ sở dữ liệu.
 func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string, hashedPassword string) error {
 	history := &models.PasswordHistory{
 		ID:           utils.GenerateUUID(),
@@ -85,12 +86,13 @@ func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string,
 	return nil
 }
 
+// HasRole kiểm tra xem người dùng có vai trò cụ thể hay không (platform role, scope=NULL).
 func (r *AuthRepository) HasRole(ctx context.Context, userID string, roleName models.RoleName) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("user_roles").
 		Joins("JOIN roles ON roles.id = user_roles.role_id").
-		Where("user_roles.user_id = ? AND roles.name = ?", userID, roleName).
+		Where("user_roles.user_id = ? AND roles.name = ? AND user_roles.scope_id IS NULL", userID, roleName).
 		Count(&count).Error
 	if err != nil {
 		return false, fmt.Errorf("check role: %w", err)
@@ -98,6 +100,22 @@ func (r *AuthRepository) HasRole(ctx context.Context, userID string, roleName mo
 	return count > 0, nil
 }
 
+// HasScopedRole kiểm tra user có role trong scope (community/chat) cụ thể không.
+func (r *AuthRepository) HasScopedRole(ctx context.Context, userID string, roleName models.RoleName, scopeID string, scopeType models.ScopeType) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND roles.name = ? AND user_roles.scope_id = ? AND user_roles.scope_type = ?",
+			userID, roleName, scopeID, scopeType).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("check scoped role: %w", err)
+	}
+	return count > 0, nil
+}
+
+// GetPasswordHistoryByUserID lấy danh sách lịch sử mật khẩu của người dùng theo userID.
 func (r *AuthRepository) GetPasswordHistoryByUserID(ctx context.Context, userID string) ([]models.PasswordHistory, error) {
 	var histories []models.PasswordHistory
 	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&histories).Error
@@ -105,4 +123,24 @@ func (r *AuthRepository) GetPasswordHistoryByUserID(ctx context.Context, userID 
 		return nil, fmt.Errorf("get password history: %w", err)
 	}
 	return histories, nil
+}
+
+// AssignUserRole gán một role cho user trong user_roles.
+// scopeID/scopeType = nil cho platform role, có giá trị cho scoped role (community/chat).
+func (r *AuthRepository) AssignUserRole(ctx context.Context, userID string, roleName models.RoleName, scopeID *string, scopeType *models.ScopeType) error {
+	var role models.Role
+	if err := r.db.WithContext(ctx).Where("name = ?", roleName).First(&role).Error; err != nil {
+		return fmt.Errorf("find role %s: %w", roleName, err)
+	}
+
+	userRole := models.NewUserRole(userID, role.ID)
+	userRole.ID = utils.GenerateUUID()
+	userRole.ScopeID = scopeID
+	userRole.ScopeType = scopeType
+	userRole.AssignedAt = time.Now().UTC()
+
+	if err := r.db.WithContext(ctx).Create(&userRole).Error; err != nil {
+		return fmt.Errorf("assign role %s: %w", roleName, err)
+	}
+	return nil
 }

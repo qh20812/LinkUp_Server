@@ -30,15 +30,15 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	userRoleAssigned := map[string]bool{}
 
-	addUserRole := func(userID, roleID string) error {
-		key := userID + "|" + roleID
+	addUserRole := func(userID, roleID, scopeID string) error {
+		key := userID + "|" + roleID + "|" + scopeID
 		if userRoleAssigned[key] {
 			return nil
 		}
 		userRoleAssigned[key] = true
 		return internal.Exec(database,
-			`INSERT INTO user_roles (id, user_id, role_id, assigned_at) VALUES (?, ?, ?, ?)`,
-			internal.UUID(), userID, roleID, now,
+			`INSERT INTO user_roles (id, user_id, role_id, scope_id, scope_type, assigned_at) VALUES (?, ?, ?, ?, 'chat', ?)`,
+			internal.UUID(), userID, roleID, scopeID, now,
 		)
 	}
 
@@ -106,7 +106,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		} else {
 			roleID = chatMemberRoleID
 		}
-		if err := addUserRole(userID, roleID); err != nil {
+		chatID := state.ChatIDs[p.chatIdx]
+		if err := addUserRole(userID, roleID, chatID); err != nil {
 			return fmt.Errorf("messaging: user_role %s for %s: %w", p.role, userID, err)
 		}
 	}
