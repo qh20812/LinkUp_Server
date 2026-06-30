@@ -13,14 +13,18 @@ const (
 	UserStatusSuspended UserStatus = "suspended"
 )
 
+const DefaultStorageQuotaBytes float64 = 2147483648
+
 type User struct {
-	ID           string     `json:"id" db:"id"`
-	Username     string     `json:"username" db:"username"`
-	Email        string     `json:"email" db:"email"`
-	PasswordHash string     `json:"password_hash" db:"password_hash"`
-	Status       UserStatus `json:"status" db:"status"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt    *time.Time `json:"updated_at,omitempty" db:"updated_at"`
+	ID                string     `json:"id"`
+	Username          string     `json:"username"`
+	Email             string     `json:"email"`
+	PasswordHash      string     `json:"password_hash"`
+	Status            UserStatus `json:"status"`
+	StorageQuotaBytes float64    `json:"storage_quota_bytes"` // e.g., 1GB = 1073741824
+	StorageUsedBytes  float64    `json:"storage_used_bytes"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }
 
 func NewUser(username, email, passwordHash string) User {
@@ -28,6 +32,8 @@ func NewUser(username, email, passwordHash string) User {
 		Email:        email,
 		PasswordHash: passwordHash,
 		Status:       UserStatusActive,
+		StorageQuotaBytes: DefaultStorageQuotaBytes,
+		StorageUsedBytes: 0,
 	}
 }
 
@@ -54,4 +60,16 @@ func ParseUserStatus(value string) UserStatus {
 	default:
 		return UserStatusActive
 	}
+}
+
+func (u User) AvailableStorageBytes() float64 {
+	used := u.StorageUsedBytes
+	if used < 0 {
+		used = 0
+	}
+	available := u.StorageQuotaBytes - used
+	if available < 0 {
+		return 0
+	}
+	return available
 }

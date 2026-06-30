@@ -1,134 +1,142 @@
 # LinkUp Server — AGENTS.md
 
-## Quick start
+> **Note**: This file is `.gitignore`d (line 61). It is local-only and won't be committed.
+
+## Build & run
 
 ```bash
-go build -o ./tmp/main.exe ./cmd   # or `air` for hot reload
-go build ./cmd/seed && ./seed.exe  # full seed run (resets DB!)
-go build ./...                      # verify all packages compile
+go build -o ./tmp/main.exe ./cmd          # production build
+air                                         # hot reload (`.air.toml` ready)
+go build ./cmd/seed && ./seed.exe          # full seed (drops & recreates all tables)
+go build ./... && go vet ./...              # verify & vet all packages
 ```
 
-No `_test.go` files exist anywhere.
+**Tests** — validation-only (no DB) in `auth` and `community`:
+```bash
+go test ./tests/auth/... -v -run TestValidate
+go test ./tests/community/... -v
+go test ./tests/... -run TestRegisterHandler_Success  # needs TEST_DSN env var
+```
+`tests/chat/`, `tests/friend/`, `tests/post/` are empty. No linter — `go build && go vet` is the verification gate.
 
 ## Architecture
 
 ```
 cmd/main.go → controller → service → repository (GORM)
-cmd/seed/   → raw database/sql (10 ordered steps, resets DB)
-cmd/cloudinary-check/ → standalone Cloudinary connectivity test
+middlewares/  → auth.middleware.go (sets `userID`, `email` on Gin context)
+cmd/seed/     → raw database/sql (10 ordered steps)
+ws/            → gorilla/websocket Hub (per-user broadcast)
 ```
 
-- **Framework**: Gin (`gin.New()`; `.Use(gin.Logger(), gin.Recovery())` in `cmd/main.go:36-37`)
-- **DB**: `db.ConnectDb(env)` returns `*sql.DB`; `main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)` for GORM repos. DSN has **no TLS params** — `DB_SSL` is parsed in config but never used in DSN. `registerTLSConfig` in `db/mysql.go` is a dead stub.
-- **All model IDs are `string` (UUID)**. Foreign keys (`UserID`, `PostID`, etc.) are `string`/`*string`. Models have `json` and `db` tags; `db` tags are unused relics.
-- **DTOs have no `binding` tags** (except `post.controller.go:CreatePostInput`) — validation is via `validations.AuthValidation` methods in the controller.
-- **29 model files** (28 seed tables + `password_reset_token.model.go` — not in seed schema).
+- **Gin** with `gin.New()` + `gin.Logger(), gin.Recovery()`.
+- **DB**: `db/mysql.go` returns `*sql.DB` (DSN: `parseTime=true&charset=utf8mb4`, no TLS); `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
+- **Module**: `linkup` (Go 1.26.3), run from repo root.
+- **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
+- **Validation split**: DTOs use `binding` tags (`community`, `community_rule`, `group_chat`, `post:ReactPostInput`, `chat:3 structs`). Others use `validations` package (sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
 
-## Config
+## Config quirks
 
-- `.env` loaded by `config.LoadEnv()` (custom line parser — **not** godotenv). Singleton guard prevents reloads.
-- Required env vars (fail if empty): `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`
-  - `DB_SSL` parsed via `strconv.ParseBool` — **not in `validateRequired`** but will fail at parse time if unset.
-  - `PORT` defaults to `"8080"`.
-- Optional Gmail: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`)
-- Cloudinary: `CLOUDINARY_URL` (`cloudinary://key:secret@cloudname`) primary; fallback `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. Loaded via `config.LoadCloudinaryEnv()`.
-- `config.GetEnv()` returns a **value copy** of the singleton `Env` struct.
-- `config/cloundinary.go` is misnamed (should be `cloudinary`).
+- `.env` loaded by `config.LoadEnv()` — **custom line parser** (not godotenv). Singleton guard prevents reloads.
+- Required: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
+- **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing. Always set `DB_SSL=true`.
+- `PORT` defaults to `"8080"`. Optional: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
+- `config.GetEnv()` returns a **value copy** — mutations to the returned struct don't affect the singleton.
+- `CLOUDINARY_URL` is primary; `LoadCloudinaryEnv()` falls back to `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`.
 
 ## Routes
 
-All routes wired in `cmd/main.go` (all protected by a `nil` DB guard):
+All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS + health are outside). Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Authorization` header.
 
-| Path | Method | Auth | Handler file |
+| Path | Method | Auth | Registration file |
 |---|---|---|---|
-| `/health` | GET | No | inline in `main.go` |
-| `/` | GET | No | inline in `main.go` |
+| `/health` | GET | No | `cmd/main.go` inline |
+| `/ws` | GET | `?token=` query | `ws/handler.go` |
 | `/api/auth/register` | POST | No | `routes/auth.routes.go` |
-| `/api/auth/login` | POST | No | `routes/auth.routes.go` |
-| `/api/auth/change-password` | POST | `middlewares.AuthMiddleware` | `routes/auth.routes.go` |
+| `/api/auth/login` | POST | No | |
+| `/api/auth/change-password` | POST | Auth | |
 | `/api/auth/forgot-password` | POST | No | `routes/password_reset.routes.go` |
-| `/api/auth/verify-reset-token` | POST | No | `routes/password_reset.routes.go` |
-| `/api/auth/reset-password` | POST | No | `routes/password_reset.routes.go` |
-| `/posts` | POST | inline in `post.routes.go` | `routes/post.routes.go` |
-| `/posts` | GET | No | `routes/post.routes.go` |
+| `/api/auth/verify-reset-token` | POST | No | |
+| `/api/auth/reset-password` | POST | No | |
+| `/posts` | GET/POST | POST=Auth | `routes/post.routes.go` |
+| `/posts/:id` | GET | No | |
+| `/posts/:id/react` | POST | Auth | |
+| `/posts/:id/comments` | GET/POST | POST=Auth | |
+| `/posts/:id/share` | POST | Auth | |
+| `/posts/:id/save` | POST | Auth | |
+| `/api/profile` | GET/PATCH | Auth | `routes/profile.routes.go` |
+| `/api/profile/:userID` | GET | No | |
+| `/api/follow/:userID` | POST | Auth | `routes/follow.routes.go` |
+| `/api/follow/stats/:userID` | GET | Auth | |
+| `/api/media/*` | all | Auth | `routes/media.routes.go` |
+| `/api/reports` | POST | Auth | `routes/report.routes.go` |
+| `/api/blocks` | POST/GET | Auth | `routes/block.routes.go` |
+| `/api/search` | GET | No | `routes/search.routes.go` |
+| `/api/notifications*` | all | Auth | `routes/notification.routes.go` |
+| `/api/friend-requests` | GET | Auth | `routes/friend.routes.go` |
+| `/api/friend-requests/:userID` | POST | Auth | |
+| `/api/friend-requests/:id/accept` | PUT | Auth | |
+| `/api/friend-requests/:id` | DELETE | Auth | |
+| `/api/chats/direct` | POST | Auth | `routes/chat.routes.go` |
+| `/api/chats/invite` | POST | Auth | |
+| `/api/chats/invite/respond` | POST | Auth | |
+| `/api/chats/ws` | GET | Auth (middleware) | |
+| `/api/group-chats` | POST | Auth | `routes/group_chat.routes.go` |
+| `/api/group-chats/:chatID/add-member` | POST | Auth | |
+| `/api/communities` | POST | Auth | `routes/community.routes.go` |
+| `/api/communities/:communityID/rules` | GET | No | `routes/community_rule.routes.go` |
+| `/api/communities/:communityID/rules` | POST | Auth | |
+| `/api/communities/:communityID/rules/:ruleID` | PUT/DELETE | Auth | |
+| `/api/tags/:name/posts` | GET | No | `routes/tag.routes.go` |
 
-Two separate auth middleware implementations exist:
-- `middlewares/auth.middleware.go` — uses `utils.ParseToken`, sets `userID` and `email`
-- `routes/post.routes.go` inline — uses `jwt.Parse` directly, sets `userId`
+## Business logic conventions
 
-Note: `cmd/main.go:61` has a duplicate `routes.RegisterAuthRoutes(router, authController)` call (missing `env` arg vs line 55) — will not compile as-is.
+- **Role protection**: `repository/auth.repository.go:HasRole` checks `user_roles` via JOIN. `ReportService` and `BlockService` reject targeting `SUPER_ADMIN` or `ADMIN`. `SearchRepository.SearchUsers` excludes them via `NOT EXISTS`.
+- **Toggle pattern**: `BlockService.ToggleBlock`, `FollowService.FollowToggle`, `FriendService.ToggleFriendRequest`, `postService.ReactPost`: check existing → delete if found, else create.
+- **Post status**: `FindByID` only returns active posts.
+- **Error languages**: post/friend/chat/community services return Vietnamese error strings. Auth service returns English.
 
-## JWT
+## Service patterns
 
-- `utils.GenerateTokenPair(secret, userID, email, accessTTL, refreshTTL)` — `golang-jwt/jwt/v5` HS256.
-- Access TTL from `JWTExpiresIn` env var (minutes); falls back to 15 min.
-- Refresh TTL hardcoded to `7 * 24 * time.Hour` (`auth.service.go:108`).
-- `utils.ParseToken` parses into `*utils.TokenClaims` (fields: `UserID`, `Email`, `TokenType`).
-- `utils.GenerateToken` for single-token cases (used by password reset).
+- **`PostService` and `MediaService` are interfaces** (in `services/`). All other services use concrete structs.
+- **`friendService`** (`NewFriendService`) takes 5 dependencies: `friendRepository`, `authRepository`, `profileRepository`, `friendValidation`, `notificationService`.
+- **`chatService`** (`NewChatService`) takes `chatRepository`, `friendRepository`, `inviteRepository`, `notificationService`, `chatValidation`.
+- **`notificationService.Create`** is called from follow/friend/post services to push real-time via WebSocket Hub.
 
-## Password reset flow
+## WebSocket
 
-1. `POST /api/auth/forgot-password` — generates 32-byte hex token, stores in `password_reset_tokens` table, sends email via Gmail SMTP (`smtp.gmail.com:587`)
-2. `POST /api/auth/verify-reset-token` — checks token validity & expiry
-3. `POST /api/auth/reset-password` — updates password, marks token used
+Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 
-Token expiry: 10 minutes. Email template is in Vietnamese, uses `GMAIL_USER`/`GMAIL_PASSWORD` env vars.
+| Endpoint | Handler | Hub | Client type | Auth |
+|---|---|---|---|---|
+| `GET /ws` | `ws/handler.go:ServeWS` | `hub` (notification) | `Client` with `service=nil` → reads discarded | `?token=` access JWT |
+| `GET /api/chats/ws` | `controllers/chat.controller.go:HandleWebsocket` | `chatHub` | `Client` with `ChatService` → processes chat events | `AuthMiddleware` |
 
-## Key packages
-
-| Package | Role |
-|---|---|
-| `config/` | Env loading (custom parser), Cloudinary creds |
-| `controllers/` | HTTP handlers (Gin context) — 4 files |
-| `services/` | Business logic — 3 files (auth, password_reset, post) |
-| `repository/` | GORM data access — 4 files |
-| `dto/` | Request/response structs — 2 files (auth, password_reset) |
-| `validations/` | Explicit validation (not struct tags) — `AuthValidation` |
-| `utils/` | JWT, bcrypt hashing, username generation, UUID, Gmail SMTP |
-| `db/` | MySQL connection via `database/sql` + `go-sql-driver/mysql` |
-| `models/` | GORM model structs (29 files) |
-| `cmd/seed/` | Seed scripts (raw SQL, 10 modules + `internal/` helpers) |
-| `routes/` | Route registration — 3 files |
-| `middlewares/` | `auth.middleware.go` (Gin JWT middleware) |
+- **`ws/hub.go`**: `rooms` (chat broadcast) + `clients` (per-user notification). Methods: `SendToUser`, `JoinChat`, `RegisterClient`.
+- **Import cycle avoided**: `services` imports `ws`; `ws` does NOT import `services` — instead `ws/chat.service.go` defines a `ChatService interface` that `services/chat.service.go` implements implicitly.
+- **`ws/client.go`**: handles `chat:join`, `message:send`, `typing:start/stop` when `service != nil`; otherwise discards incoming (notification-only client).
 
 ## Seed system
 
-```bash
-go build ./cmd/seed && ./seed.exe
-```
+10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all 34 tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`. Relationships step also seeds `community_rules` for each community.
 
-10 ordered steps, raw SQL (not GORM), **drops all tables on run**:
+## Password reset flow
 
-1. **reset** — DROP TABLE 28 tables (`FOREIGN_KEY_CHECKS=0`)
-2. **schema** — CREATE TABLE 28 tables with FKs, indexes, utf8mb4
-3. **users** — 20 users (bcrypt `Password123!`), 2 banned, 1 suspended
-4. **core** — 3 roles, 10 emojis, 8 violation rules + `user_roles`
-5. **profiles** — 20 profiles with avatars and bios, 5 private
-6. **social** — 30 posts, 60 comments (nested), 50 tags, 80 reactions, 40 follows, 15 friends, 5 blocks, 20 bookmarks
-7. **relationships** — 5 communities, 25 group members
-8. **messaging** — 8 chats, ~24 participants, 50 messages
-9. **moderation** — 8 reports, 5 bans, 8 moderation logs
-10. **extended** — 5 ads + analytics, 15 media, 10 stories, 20 notifications, 5 calls
+3-step: `forgot-password` (token in DB, email via Gmail SMTP Vietnamese template, 10 min expiry) → `verify-reset-token` → `reset-password`.
 
-Steps share data through `internal.SeedState` (`cmd/seed/internal/state.go`). UUIDs generated via `internal.UUID()` (crypto/rand, RFC 9562 variant).
+## JWT
 
-Table list for manual DROP:
-```
-ad_analytics, moderation_logs, bans, reports, notifications, calls, messages,
-chat_participants, chats, group_members, communities, tags, post_reactions,
-bookmarks, blocks, friends, follows, comments, posts, media, stories, ads,
-user_roles, profiles, violation_rules, emojis, roles, users
-```
+`utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). Separate `utils.GenerateToken` for single tokens (reset).
 
 ## Stubs / not wired
 
-- `controllers/user.controller.go` — empty file (just `package controllers`)
-- `repository/user.repository.go` — has `Create`, `FindByEmail` but **not wired** in `cmd/main.go`
-- `config.LoadCloudinaryEnv()`, `config/cloundinary.go` — loaded but never called from `main.go`
-- `cmd/cloudinary-check/` — standalone binary, not part of server
+- `controllers/user.controller.go` — empty. `repository/user.repository.go` — `Create`, `FindByEmail` exist but **not wired** in `cmd/main.go`.
+- `cmd/cloudinary-check/` — standalone binary, not part of the app.
+- `dto/auth.dto.go` — no `binding` tags. Auth validation is fully delegated to `validations.AuthValidation`.
 
-## Validation & errors
+## Quirks
 
-- `validations.AuthValidation` exports sentinel errors (`ErrUserNotFound`, `ErrPasswordTooShort`, etc.) for `errors.Is()` checks.
-- `repository.ErrUserNotFound` (`auth.repository.go:13`) — checked by `auth.service.go` with `errors.Is()`.
-- Password rules: ≥8 chars, ≤128, must have upper, lower, digit, special.
+- **UUID divergence**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
+- **`utils/email.go`** reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly — not from `config.Env` struct (which also stores them unused). New email features should follow the same `os.Getenv` pattern or reconcile both paths.
+- **`gorm` tags** appear in only 4 models: `post` (computed `->`), `password_history`/`post_share`/`notification_preference` (`primaryKey`). Models use `json` tags; `db` tags are unused.
+- **`validations` package**: 11 validators (`auth`, `block`, `chat`, `comment`, `community`, `community_rule`, `friend`, `media`, `post`, `report`, `search`) but not all services use them — some rely on `binding` tags or inline checks.
+- **Air config** (`air.toml`) builds `cmd/main.go` specifically (not `./cmd`), excludes `_test.go` via regex.

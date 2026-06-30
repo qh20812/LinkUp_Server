@@ -32,8 +32,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 	}
 
 	users := []user{
-		{internal.UUID(), "john_doe", "john@example.com", "active"},
-		{internal.UUID(), "jane_smith", "jane@example.com", "active"},
+		{internal.UUID(), "superadmin", "superadmin@example.com", "active"},
+		{internal.UUID(), "admin1", "admin1@example.com", "active"},
 		{internal.UUID(), "alice_wonder", "alice@example.com", "active"},
 		{internal.UUID(), "bob_builder", "bob@example.com", "active"},
 		{internal.UUID(), "charlie_dev", "charlie@example.com", "active"},

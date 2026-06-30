@@ -30,8 +30,9 @@ type TokenResponse struct {
 }
 
 type AuthResponse struct {
-	User   AuthUserResponse `json:"user"`
-	Tokens TokenResponse    `json:"tokens"`
+	User    AuthUserResponse `json:"user"`
+	Tokens  TokenResponse    `json:"tokens"`
+	Storage StorageInfo      `json:"storage,omitempty"`
 }
 
 type ChangePasswordInput struct {
@@ -41,4 +42,14 @@ type ChangePasswordInput struct {
 
 type ChangePasswordResponse struct {
 	Message string `json:"message"`
+}
+
+type RefreshTokenInput struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type StorageInfo struct {
+	QuotaBytes float64 `json:"quota_bytes"`
+	UsedBytes  float64 `json:"used_bytes"`
+	AvailBytes float64 `json:"available_bytes"`
 }

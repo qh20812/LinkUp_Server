@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	ErrResetTokenNotFound = errors.New("reset token not found")
-	ErrResetTokenExpired  = errors.New("reset token expired")
-	ErrResetTokenUsed     = errors.New("reset token already used")
+	ErrResetTokenNotFound = errors.New("không tìm thấy token đặt lại mật khẩu")
+	ErrResetTokenExpired  = errors.New("token đặt lại mật khẩu đã hết hạn")
+	ErrResetTokenUsed     = errors.New("token đặt lại mật khẩu đã được sử dụng")
 )
 
 type PasswordResetRepository struct {

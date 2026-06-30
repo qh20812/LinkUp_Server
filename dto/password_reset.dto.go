@@ -6,7 +6,6 @@ type ForgotPasswordInput struct {
 
 type ForgotPasswordResponse struct {
 	Message string `json:"message"`
-	Token   string `json:"token,omitempty"`
 }
 
 type VerifyResetTokenInput struct {

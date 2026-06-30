@@ -13,6 +13,7 @@ func RegisterAuthRoutes(router *gin.Engine, authController *controllers.AuthCont
 	{
 		auth.POST("/register", authController.Register)
 		auth.POST("/login", authController.Login)
+		auth.POST("/refresh", authController.RefreshToken)
 		
 		protected := auth.Group("")
 		protected.Use(middlewares.AuthMiddleware(env))

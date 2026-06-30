@@ -22,7 +22,7 @@ func NewAuthController(authService *services.AuthService, validation *validation
 func (h *AuthController) Register(c *gin.Context) {
 	var input dto.RegisterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
 		return
 	}
 
@@ -43,7 +43,7 @@ func (h *AuthController) Register(c *gin.Context) {
 func (h *AuthController) Login(c *gin.Context) {
 	var input dto.LoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
 		return
 	}
 
@@ -64,13 +64,13 @@ func (h *AuthController) Login(c *gin.Context) {
 func (h *AuthController) ChangePassword(c *gin.Context) {
 	userID := c.GetString("userID") //From JWT middlware
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
 		return
 	}
 
 	var input dto.ChangePasswordInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
 		return
 	}
 
@@ -79,5 +79,21 @@ func (h *AuthController) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.ChangePasswordResponse{Message: "password changed successfully"})
+	c.JSON(http.StatusOK, dto.ChangePasswordResponse{Message: "đổi mật khẩu thành công"})
+}
+
+func (h *AuthController) RefreshToken(c *gin.Context) {
+	var input dto.RefreshTokenInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	response, err := h.authService.RefreshToken(c.Request.Context(), input)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }

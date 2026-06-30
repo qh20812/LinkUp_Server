@@ -22,6 +22,8 @@ func Run(env config.Env) error {
 			email VARCHAR(255) NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			storage_quota_bytes DOUBLE NOT NULL DEFAULT 2147483648,
+			storage_used_bytes DOUBLE NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			UNIQUE INDEX idx_users_username (username),
@@ -83,21 +85,37 @@ func Run(env config.Env) error {
 			id VARCHAR(36) PRIMARY KEY,
 			creator_id VARCHAR(36) NOT NULL,
 			name VARCHAR(255) NOT NULL UNIQUE,
-			role VARCHAR(50) NOT NULL DEFAULT 'COMMUNITY_MEMBER',
 			description TEXT,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
+			background_uri VARCHAR(512) NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_communities_creator (creator_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 5. No FK
+		// 5. Depends on communities
+		`CREATE TABLE IF NOT EXISTS community_rules (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			category VARCHAR(50) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			content TEXT,
+			position INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			INDEX idx_community_rules_community (community_id),
+			INDEX idx_community_rules_category (community_id, category, position)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 6. No FK
 		`CREATE TABLE IF NOT EXISTS chats (
 			id VARCHAR(36) PRIMARY KEY,
 			` + "`type`" + ` VARCHAR(20) NOT NULL DEFAULT 'direct',
 			name VARCHAR(255) NOT NULL DEFAULT '',
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
+			encryption_key VARCHAR(255) NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -226,7 +244,6 @@ func Run(env config.Env) error {
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
 			user_id VARCHAR(36) NOT NULL,
-			role VARCHAR(50) NOT NULL DEFAULT 'GROUP_MEMBER',
 			points INT NOT NULL DEFAULT 0,
 			joined_at DATETIME NOT NULL,
 			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
@@ -254,6 +271,9 @@ func Run(env config.Env) error {
 			content TEXT NOT NULL,
 			media_id VARCHAR(36) NULL,
 			emoji_id VARCHAR(36) NULL,
+			deleted_for_sender TINYINT(1) NOT NULL DEFAULT 0,
+			deleted_for_receiver TINYINT(1) NOT NULL DEFAULT 0,
+			deleted_at DATETIME NULL,
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
 			FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -369,11 +389,75 @@ func Run(env config.Env) error {
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
 			role_id VARCHAR(36) NOT NULL,
+			scope_id VARCHAR(36) NULL,
+			scope_type VARCHAR(20) NULL,
 			assigned_at DATETIME NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
-			UNIQUE INDEX idx_user_roles_pair (user_id, role_id)
+			UNIQUE INDEX idx_user_roles_pair (user_id, role_id, scope_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 26. Depends on users
+		`CREATE TABLE IF NOT EXISTS notification_preferences (
+			user_id VARCHAR(36) PRIMARY KEY,
+			like_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			comment_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			follow_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			message_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			friend_request_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 27. Depends on users
+		`CREATE TABLE IF NOT EXISTS password_histories (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_password_histories_user_id (user_id),
+			INDEX idx_password_histories_created_at (created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 28. Depends on users
+		`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			token VARCHAR(255) NOT NULL UNIQUE,
+			expires_at DATETIME NOT NULL,
+			used_at DATETIME NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_password_reset_tokens_token (token),
+			INDEX idx_password_reset_tokens_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 29. Depends on users, posts
+		`CREATE TABLE IF NOT EXISTS post_shares (
+			id VARCHAR(36) PRIMARY KEY,
+			post_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 30. Chat_invite
+		`CREATE TABLE IF NOT EXISTS chat_invitations (
+			id VARCHAR(36) PRIMARY KEY,
+			requester_id VARCHAR(36) NOT NULL,
+			target_id VARCHAR(36) NOT NULL,
+			chat_id VARCHAR(36) NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (target_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 31. Message Security
+		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true`,
 	}
 
 	for _, stmt := range statements {

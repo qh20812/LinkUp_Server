@@ -7,15 +7,22 @@ import (
 type RoleName string
 
 const (
-	RoleSuperAdmin RoleName = "SUPER_ADMIN"
-	RoleAdmin      RoleName = "ADMIN"
-	RoleUser       RoleName = "USER"
+	RoleSuperAdmin      RoleName = "SUPER_ADMIN"
+	RoleAdmin           RoleName = "ADMIN"
+	RoleUser            RoleName = "USER"
+	RoleChatAdmin       RoleName = "CHAT_ADMIN"
+	RoleChatMember      RoleName = "CHAT_MEMBER"
+	RoleGroupAdmin      RoleName = "GROUP_ADMIN"
+	RoleGroupMod        RoleName = "GROUP_MOD"
+	RoleGroupMember     RoleName = "GROUP_MEMBER"
+	RoleCommunityAdmin  RoleName = "COMMUNITY_ADMIN"
+	RoleCommunityMember RoleName = "COMMUNITY_MEMBER"
 )
 
 type Role struct {
-	ID          string   `json:"id" db:"id"`
-	Name        RoleName `json:"name" db:"name"`
-	Description string   `json:"description" db:"description"`
+	ID          string   `json:"id"`
+	Name        RoleName `json:"name"`
+	Description string   `json:"description"`
 }
 
 func NewRole(name RoleName, description string) Role {
@@ -74,23 +81,3 @@ func ParseGroupRole(value string) GroupRole {
 	}
 }
 
-// CommunityRole — member roles within a community
-type CommunityRole string
-
-const (
-	CommunityRoleAdmin  CommunityRole = "COMMUNITY_ADMIN"
-	CommunityRoleMember CommunityRole = "COMMUNITY_MEMBER"
-)
-
-func (r CommunityRole) String() string {
-	return string(r)
-}
-
-func ParseCommunityRole(value string) CommunityRole {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(CommunityRoleAdmin):
-		return CommunityRoleAdmin
-	default:
-		return CommunityRoleMember
-	}
-}

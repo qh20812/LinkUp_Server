@@ -115,7 +115,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		assigned[key] = true
 		return internal.Exec(database,
-			`INSERT INTO user_roles (id, user_id, role_id, assigned_at) VALUES (?, ?, ?, ?)`,
+			`INSERT INTO user_roles (id, user_id, role_id, scope_id, scope_type, assigned_at) VALUES (?, ?, ?, NULL, NULL, ?)`,
 			internal.UUID(), userID, roleID, now,
 		)
 	}
@@ -134,6 +134,15 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		if err := addRole(uid, userRoleID); err != nil {
 			return fmt.Errorf("core: user_role user for %s: %w", uid, err)
+		}
+	}
+
+	for _, uid := range state.UserIDs {
+		if err := internal.Exec(database,
+			`INSERT INTO notification_preferences (user_id, like_enabled, comment_enabled, follow_enabled, message_enabled, friend_request_enabled) VALUES (?, 1, 1, 1, 1, 1)`,
+			uid,
+		); err != nil {
+			return fmt.Errorf("core: insert notification_preference for %s: %w", uid, err)
 		}
 	}
 

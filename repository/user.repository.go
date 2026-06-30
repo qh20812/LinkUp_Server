@@ -25,7 +25,7 @@ func (r *UserRepository) FindByEmail(email string) (*models.User, error) {
 	var user models.User
 	err := r.db.Where("email = ?", email).First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, errors.New("user not found")
+		return nil, errors.New("không tìm thấy người dùng")
 	}
 	if err != nil {
 		return nil, err

@@ -15,6 +15,11 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 		postGroup.GET("", ctrl.GetPosts)
 		postGroup.GET("/:id", ctrl.ViewPostDetail)
 		postGroup.POST("/:id/react", middlewares.AuthMiddleware(env), ctrl.ReactPost)
+
 		postGroup.POST("/:id/comments", middlewares.AuthMiddleware(env), ctrl.CreateComment)
+		postGroup.GET("/:id/comments", ctrl.GetComments) 
+
+		postGroup.POST("/:id/share", middlewares.AuthMiddleware(env), ctrl.SharePost)
+		postGroup.POST("/:id/save", middlewares.AuthMiddleware(env), ctrl.SavePost)
 	}
 }

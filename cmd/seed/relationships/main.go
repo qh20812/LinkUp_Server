@@ -27,15 +27,15 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	userRoleAssigned := map[string]bool{}
 
-	addUserRole := func(userID, roleID string) error {
-		key := userID + "|" + roleID
+	addUserRole := func(userID, roleID, scopeID string) error {
+		key := userID + "|" + roleID + "|" + scopeID
 		if userRoleAssigned[key] {
 			return nil
 		}
 		userRoleAssigned[key] = true
 		return internal.Exec(database,
-			`INSERT INTO user_roles (id, user_id, role_id, assigned_at) VALUES (?, ?, ?, ?)`,
-			internal.UUID(), userID, roleID, now,
+			`INSERT INTO user_roles (id, user_id, role_id, scope_id, scope_type, assigned_at) VALUES (?, ?, ?, ?, 'community', ?)`,
+			internal.UUID(), userID, roleID, scopeID, now,
 		)
 	}
 
@@ -48,7 +48,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	communities := []communityData{
 		{internal.UUID(), "Go Developers", "A community for Go programming enthusiasts", 2},
-		{internal.UUID(), "Cloud Architects", "Discussing cloud infrastructure and architecture", 1},
+		{internal.UUID(), "Cloud Architects", "Discussing cloud infrastructure and architecture", 4},
 		{internal.UUID(), "AI Enthusiasts", "Exploring artificial intelligence and machine learning", 3},
 		{internal.UUID(), "DevOps United", "Sharing DevOps best practices and tools", 5},
 		{internal.UUID(), "Open Source Contributors", "Collaborating on open source projects", 8},
@@ -56,8 +56,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i, c := range communities {
 		if err := internal.Exec(database,
-			`INSERT INTO communities (id, creator_id, name, role, description, avatar_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-			c.id, state.UserIDs[c.creatorIdx], c.name, "COMMUNITY_ADMIN", c.description,
+			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, background_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', ?, NULL)`,
+			c.id, state.UserIDs[c.creatorIdx], c.name, c.description,
 			fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
 			now,
 		); err != nil {
@@ -65,8 +65,30 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		state.CommunityIDs = append(state.CommunityIDs, c.id)
 
-		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID); err != nil {
+		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID, c.id); err != nil {
 			return fmt.Errorf("relationships: community_admin user_role for %s: %w", state.UserIDs[c.creatorIdx], err)
+		}
+
+		rules := []struct {
+			category string
+			title    string
+			content  string
+			position int
+		}{
+			{"conduct", "Tôn trọng lẫn nhau", "Hãy luôn giữ thái độ tôn trọng với các thành viên khác. Không công kích cá nhân, quấy rối hoặc phân biệt đối xử.", 1},
+			{"conduct", "Giữ văn minh", "Thảo luận lành mạnh, không spam, không flood tin nhắn.", 2},
+			{"prohibited", "Nội dung bất hợp pháp", "Không đăng tải nội dung vi phạm pháp luật, bao gồm bản quyền và sở hữu trí tuệ.", 1},
+			{"prohibited", "Quảng cáo trái phép", "Không đăng quảng cáo hoặc link giới thiệu khi chưa được cho phép.", 2},
+			{"guidelines", "Cách đăng bài", "Đăng bài đúng chủ đề, tiêu đề rõ ràng, sử dụng tag phù hợp.", 1},
+			{"guidelines", "Đóng góp tích cực", "Chia sẻ kiến thức, hỗ trợ thành viên mới, báo cáo nội dung vi phạm.", 2},
+		}
+		for _, rule := range rules {
+			if err := internal.Exec(database,
+				`INSERT INTO community_rules (id, community_id, category, title, content, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+				internal.UUID(), c.id, rule.category, rule.title, rule.content, rule.position, now,
+			); err != nil {
+				return fmt.Errorf("relationships: insert rule %s for community %s: %w", rule.title, c.name, err)
+			}
 		}
 	}
 
@@ -104,8 +126,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 
 		if err := internal.Exec(database,
-			`INSERT INTO group_members (id, community_id, user_id, role, points, joined_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			internal.UUID(), state.CommunityIDs[m.communityIdx], userID, m.role, points, now,
+			`INSERT INTO group_members (id, community_id, user_id, points, joined_at) VALUES (?, ?, ?, ?, ?)`,
+			internal.UUID(), state.CommunityIDs[m.communityIdx], userID, points, now,
 		); err != nil {
 			return fmt.Errorf("relationships: insert member for community %d user %d: %w", m.communityIdx, m.userIdx, err)
 		}
@@ -119,11 +141,13 @@ func Run(env config.Env, state *internal.SeedState) error {
 		default:
 			roleID = groupMemberRoleID
 		}
-		if err := addUserRole(userID, roleID); err != nil {
+		communityID := state.CommunityIDs[m.communityIdx]
+
+		if err := addUserRole(userID, roleID, communityID); err != nil {
 			return fmt.Errorf("relationships: user_role %s for user %s: %w", m.role, userID, err)
 		}
 
-		if err := addUserRole(userID, communityMemberRoleID); err != nil {
+		if err := addUserRole(userID, communityMemberRoleID, communityID); err != nil {
 			return fmt.Errorf("relationships: community_member user_role for %s: %w", userID, err)
 		}
 	}

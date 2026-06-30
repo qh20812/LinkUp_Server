@@ -24,6 +24,8 @@ type Env struct {
 	GmailUser        string
 	GmailPass        string
 	FrontendResetURL string
+
+	CloudinaryEnv string
 }
 
 var (
@@ -79,6 +81,8 @@ func LoadEnv() error {
 		GmailUser:        getString("GMAIL_USER", ""),
 		GmailPass:        getString("GMAIL_PASSWORD", ""),
 		FrontendResetURL: getString("FRONTEND_RESET_URL", "http://localhost:3000"),
+
+		CloudinaryEnv: getRequiredString("CLOUDINARY_URL"),
 	}
 
 	missing := validateRequired(env)
@@ -165,6 +169,9 @@ func validateRequired(e Env) []string {
 	// if e.DBSSL && e.DBCACertPath == "" {
 	// 	missing = append(missing, "DB_CA_CERT_PATH")
 	// }
+	if !e.DBSSL {
+		missing = append(missing, "DB_SSL")
+	}
 	if e.DBPort == 0 {
 		missing = append(missing, "DB_PORT")
 	}

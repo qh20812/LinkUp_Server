@@ -16,12 +16,13 @@ func Run(env config.Env) error {
 
 	tables := []string{
 		"ad_analytics", "moderation_logs", "bans", "reports",
-		"notifications", "calls", "messages", "chat_participants",
-		"chats", "group_members", "communities", "tags",
+		"notifications", "notification_preferences", "calls", "messages", "chat_participants", "chat_invitations",
+		"chats", "group_members", "community_rules", "communities", "tags",
 		"post_reactions", "bookmarks", "blocks", "friends",
 		"follows", "comments", "posts", "media", "stories",
-		"ads", "user_roles", "profiles", "violation_rules",
+		"ads", 		"user_roles", "profiles", "violation_rules",
 		"emojis", "roles", "users",
+		"password_histories", "password_reset_tokens", "post_shares",
 	}
 
 	if err := internal.Exec(database, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {
