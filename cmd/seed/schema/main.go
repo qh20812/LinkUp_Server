@@ -251,6 +251,19 @@ func Run(env config.Env) error {
 			UNIQUE INDEX idx_group_members_pair (community_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+		// 15b. Depends on communities, users
+		`CREATE TABLE IF NOT EXISTS community_join_requests (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL,
+			responded_at DATETIME NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_community_join_requests_pair (community_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		// 16. Depends on chats, users
 		`CREATE TABLE IF NOT EXISTS chat_participants (
 			id VARCHAR(36) PRIMARY KEY,
