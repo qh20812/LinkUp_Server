@@ -6,6 +6,7 @@ import (
 	"linkup/dto"
 	"linkup/models"
 	"linkup/utils"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -151,6 +152,13 @@ func (r *CommunityRepository) CreateJoinRequest(ctx context.Context, req *models
 	return r.db.WithContext(ctx).Create(req).Error
 }
 
+// DeleteNonPendingJoinRequests xóa các join request cũ (rejected/approved) để cho phép gửi lại.
+func (r *CommunityRepository) DeleteNonPendingJoinRequests(ctx context.Context, communityID, userID string) error {
+	return r.db.WithContext(ctx).
+		Where("community_id = ? AND user_id = ? AND status != ?", communityID, userID, models.JoinRequestStatusPending).
+		Delete(&models.CommunityJoinRequest{}).Error
+}
+
 // FindPendingJoinRequestByUserAndCommunity tìm yêu cầu pending của user trong community.
 func (r *CommunityRepository) FindPendingJoinRequestByUserAndCommunity(ctx context.Context, communityID, userID string) (*models.CommunityJoinRequest, error) {
 	var req models.CommunityJoinRequest
@@ -257,39 +265,77 @@ func (r *CommunityRepository) UpdateUserRole(ctx context.Context, communityID, u
 
 // FindMembersByCommunity lấy danh sách thành viên của community kèm profile và role.
 func (r *CommunityRepository) FindMembersByCommunity(ctx context.Context, communityID string) ([]dto.CommunityMemberItem, error) {
-	type memberResult struct {
-		UserID      string `gorm:"column:user_id"`
-		DisplayName string `gorm:"column:display_name"`
-		AvatarURI   string `gorm:"column:avatar_uri"`
-		RoleName    string `gorm:"column:role_name"`
-		JoinedAt    time.Time `gorm:"column:joined_at"`
-	}
-
-	var results []memberResult
-	scopeType := models.ScopeTypeCommunity
-	err := r.db.WithContext(ctx).
-		Table("group_members").
-		Select("group_members.user_id, profiles.display_name, profiles.avatar_uri, roles.name AS role_name, group_members.joined_at").
-		Joins("JOIN user_roles ON user_roles.user_id = group_members.user_id AND user_roles.scope_id = group_members.community_id AND user_roles.scope_type = ?", scopeType).
-		Joins("JOIN roles ON roles.id = user_roles.role_id").
-		Joins("LEFT JOIN profiles ON profiles.user_id = group_members.user_id").
-		Where("group_members.community_id = ?", communityID).
-		Order("CASE roles.name WHEN 'COMMUNITY_ADMIN' THEN 1 WHEN 'GROUP_ADMIN' THEN 2 WHEN 'GROUP_MOD' THEN 3 ELSE 4 END").
-		Find(&results).Error
-	if err != nil {
+	var groupMembers []models.GroupMember
+	if err := r.db.WithContext(ctx).
+		Where("community_id = ?", communityID).
+		Find(&groupMembers).Error; err != nil {
 		return nil, fmt.Errorf("lấy danh sách thành viên thất bại: %w", err)
 	}
-
-	members := make([]dto.CommunityMemberItem, 0, len(results))
-	for _, m := range results {
-		members = append(members, dto.CommunityMemberItem{
-			UserID:      m.UserID,
-			DisplayName: m.DisplayName,
-			AvatarURI:   m.AvatarURI,
-			Role:        m.RoleName,
-			JoinedAt:    m.JoinedAt,
-		})
+	if len(groupMembers) == 0 {
+		return []dto.CommunityMemberItem{}, nil
 	}
+
+	type userRoleRow struct {
+		UserID   string `gorm:"column:user_id"`
+		RoleName string `gorm:"column:role_name"`
+	}
+	var roleRows []userRoleRow
+	scopeType := models.ScopeTypeCommunity
+	if err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Select("user_roles.user_id, roles.name AS role_name").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.scope_id = ? AND user_roles.scope_type = ?", communityID, scopeType).
+		Find(&roleRows).Error; err != nil {
+		return nil, fmt.Errorf("lấy vai trò thành viên thất bại: %w", err)
+	}
+
+	rolePriority := map[string]int{
+		"COMMUNITY_ADMIN": 1,
+		"GROUP_ADMIN":     2,
+		"GROUP_MOD":       3,
+		"GROUP_MEMBER":    4,
+	}
+	bestRole := make(map[string]string)
+	for _, row := range roleRows {
+		if current, exists := bestRole[row.UserID]; !exists || rolePriority[row.RoleName] < rolePriority[current] {
+			bestRole[row.UserID] = row.RoleName
+		}
+	}
+
+	var profiles []models.Profile
+	userIDs := make([]string, 0, len(groupMembers))
+	for _, gm := range groupMembers {
+		userIDs = append(userIDs, gm.UserID)
+	}
+	if err := r.db.WithContext(ctx).
+		Where("user_id IN ?", userIDs).
+		Find(&profiles).Error; err != nil {
+		return nil, fmt.Errorf("lấy hồ sơ thành viên thất bại: %w", err)
+	}
+	profileMap := make(map[string]*models.Profile, len(profiles))
+	for i := range profiles {
+		profileMap[profiles[i].UserID] = &profiles[i]
+	}
+
+	members := make([]dto.CommunityMemberItem, 0, len(groupMembers))
+	for _, gm := range groupMembers {
+		item := dto.CommunityMemberItem{
+			UserID:   gm.UserID,
+			Role:     bestRole[gm.UserID],
+			JoinedAt: gm.JoinedAt,
+		}
+		if p, ok := profileMap[gm.UserID]; ok {
+			item.DisplayName = p.DisplayName
+			item.AvatarURI = p.AvatarURI
+		}
+		members = append(members, item)
+	}
+
+	sort.Slice(members, func(i, j int) bool {
+		return rolePriority[members[i].Role] < rolePriority[members[j].Role]
+	})
+
 	return members, nil
 }
 
@@ -325,7 +371,7 @@ func (r *CommunityRepository) FindCommunityAdmins(ctx context.Context, community
 	scopeType := models.ScopeTypeCommunity
 	err := r.db.WithContext(ctx).
 		Table("user_roles").
-		Select("user_roles.user_id").
+		Select("DISTINCT user_roles.user_id").
 		Joins("JOIN roles ON roles.id = user_roles.role_id").
 		Where("user_roles.scope_id = ? AND user_roles.scope_type = ?", communityID, scopeType).
 		Where("roles.name IN (?, ?)", models.RoleCommunityAdmin, models.RoleGroupAdmin).

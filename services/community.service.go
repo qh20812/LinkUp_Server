@@ -160,6 +160,8 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID 
 		return "", validations.ErrJoinRequestPending
 	}
 
+	s.repo.DeleteNonPendingJoinRequests(ctx, communityID, userID)
+
 	now := time.Now().UTC()
 	joinReq := models.NewCommunityJoinRequest(communityID, userID)
 	joinReq.ID = utils.GenerateUUID()
