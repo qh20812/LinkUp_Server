@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -18,15 +20,17 @@ type ChatService struct {
 	chatRepo     *repository.ChatRepository
 	friendRepo   *repository.FriendRepository
 	inviteRepo   *repository.ChatInvitationRepository
+	mediaRepo    *repository.MediaRepository
 	notifService *NotificationService
 	validation   *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
 		chatRepo:     chatRepo,
 		friendRepo:   friendRepo,
 		inviteRepo:   inviteRepo,
+		mediaRepo:    mediaRepo,
 		notifService: notifService,
 		validation:   validation,
 	}
@@ -299,4 +303,77 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 		return nil, err
 	}
 	return s.chatRepo.SearchMessages(ctx, chatID, userID, keyword)
+}
+
+func (s *ChatService) DownloadMessageMedia(ctx context.Context, userID, messageID string) (*models.Media, string, string, []byte, error) {
+	message, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, "", "", nil, validations.ErrMessageNotFound
+	}
+
+	isParticipant, err := s.chatRepo.IsUserParticipant(ctx, message.ChatID, userID)
+	if err != nil {
+		return nil, "", "", nil, err
+	}
+	if !isParticipant {
+		return nil, "", "", nil, validations.ErrMessageAccessDenied
+	}
+
+	if message.MediaID == nil || *message.MediaID == "" {
+		return nil, "", "", nil, validations.ErrMediaNotFound
+	}
+
+	media, err := s.mediaRepo.GetByID(ctx, *message.MediaID)
+	if err != nil {
+		return nil, "", "", nil, validations.ErrMediaNotFound
+	}
+
+	resp, err := http.Get(media.FileURI)
+	if err != nil {
+		return nil, "", "", nil, fmt.Errorf("download file from storage: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", "", nil, fmt.Errorf("download file failed: %s", resp.Status)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", "", nil, fmt.Errorf("read file content: %w", err)
+	}
+
+	contentType := media.FileType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	filename := fmt.Sprintf("%s%s", media.ID, extensionFromContentType(contentType))
+
+	return media, contentType, filename, data, nil
+}
+
+func extensionFromContentType(contentType string) string {
+	switch strings.ToLower(contentType) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "iamge/webp":
+		return ".webp"
+	case "video/mp4":
+		return ".mp4"
+	case "video/quicktime":
+		return ".mov"
+	case "video/x-msvideo":
+		return ".avi"
+	case "video/x-matroska":
+		return ".mkv"
+	case "video/webm":
+		return ".webm"
+	default:
+		return ".bin"
+	}
 }

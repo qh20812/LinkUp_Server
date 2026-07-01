@@ -29,6 +29,7 @@ type Client struct {
 	userID      string
 	send        chan []byte
 	joinedChats map[string]struct{}
+	typingChats map[string]bool
 }
 
 func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, userID string) *Client {
@@ -40,6 +41,7 @@ func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service Chat
 		userID:      userID,
 		send:        make(chan []byte, 256),
 		joinedChats: make(map[string]struct{}),
+		typingChats: make(map[string]bool),
 	}
 }
 
@@ -138,6 +140,21 @@ func (c *Client) ReadPump() {
 				c.sendError("dữ liệu gõ chữ không hợp lệ")
 				continue
 			}
+
+			isStart := event.Type == "typing:start"
+
+			if isStart {
+				if c.typingChats[payload.ChatID] {
+					continue
+				}
+				c.typingChats[payload.ChatID] = true
+			} else {
+				if !c.typingChats[payload.ChatID] {
+					continue
+				}
+				c.typingChats[payload.ChatID] = false
+			}
+
 			payload.UserID = c.userID
 			payload.IsTyping = event.Type == "typing:start"
 			resp, _ := json.Marshal(dto.WsEvent{
@@ -285,4 +302,23 @@ func toMessagePayloads(messages []models.Message) []dto.MessagePayload {
 		})
 	}
 	return result
+}
+
+func (c *Client) handleTypingEvent(chatID, eventType string) bool {
+	switch eventType {
+	case "typing:start":
+		if c.typingChats[chatID] {
+			return false
+		}
+		c.typingChats[chatID] = true
+		return true
+	case "typing:stop":
+		if !c.typingChats[chatID] {
+			return false
+		}
+		c.typingChats[chatID] = false
+		return true
+	default:
+		return false
+	}
 }

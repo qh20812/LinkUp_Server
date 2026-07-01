@@ -12,6 +12,9 @@ var (
 	ErrSelfInvite          = errors.New("không thể mời chính mình")
 	ErrSearchKeywordEmpty  = errors.New("từ khóa tìm kiếm là bắt buộc")
 	ErrDeleteModeInvalid   = errors.New("chế độ xóa phải là 'all' hoặc 'me'")
+
+	ErrMessageNotFound = errors.New("tin nhắn không tồn tại")
+	ErrMessageAccessDenied = errors.New("bạn không có quyền truy cập tin nhắn này")
 )
 
 type ChatValidation struct{}
