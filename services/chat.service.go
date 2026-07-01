@@ -65,12 +65,22 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, errors.New("bạn không phải thành viên của chat này")
 	}
 
-	if mediaID != nil {
-		isOwned, err := s.chatRepo.IsMediaOwnedByUser(ctx, *mediaID, userID)
+	if emojiID != nil && *emojiID != "" {
+		ok, err := s.chatRepo.IsEmojiExists(ctx, *emojiID)
 		if err != nil {
-			return nil, fmt.Errorf("check media ownership: %w", err)
+			return nil, fmt.Errorf("check emoji: %w", err)
 		}
-		if !isOwned {
+		if !ok {
+			return nil, errors.New("emoji không tồn tại")
+		}
+	}
+
+	if mediaID != nil && *mediaID != "" {
+		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
+		if err != nil {
+			return nil, errors.New("media không tồn tại")
+		}
+		if media.UserID != userID {
 			return nil, errors.New("media không thuộc về bạn")
 		}
 	}
@@ -281,8 +291,21 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 	deleteForAll := strings.EqualFold(mode, "all")
 
 	if deleteForAll {
+		if msg.DeletedForSender || msg.DeletedForReceiver || msg.DeletedAt != nil {
+			return nil, errors.New("tin nhắn đã bị thu hồi")
+		}
 		deletedAt := time.Now().UTC()
 		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	if msg.SenderID == userID {
+		if msg.DeletedForSender {
+			return nil, errors.New("tin nhắn đã bị xóa")
+		}
+	} else {
+		if msg.DeletedForReceiver {
+			return nil, errors.New("tin nhắn đã bị xóa")
+		}
 	}
 
 	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
@@ -376,4 +399,20 @@ func extensionFromContentType(contentType string) string {
 	default:
 		return ".bin"
 	}
+}
+
+func (s *ChatService) DeleteChat(ctx context.Context, userID, chatID string) error {
+	if _, err := s.chatRepo.FindChatByID(ctx, chatID); err != nil {
+		return err
+	}
+
+	participant, err := s.chatRepo.IsUserParticipant(ctx, chatID, userID)
+	if err != nil {
+		return err
+	}
+	if !participant {
+		return errors.New("bạn không phải là thành viên của chat này")
+	}
+
+	return s.chatRepo.DeleteChat(ctx, chatID)
 }

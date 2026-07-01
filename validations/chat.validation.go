@@ -13,7 +13,7 @@ var (
 	ErrSearchKeywordEmpty  = errors.New("từ khóa tìm kiếm là bắt buộc")
 	ErrDeleteModeInvalid   = errors.New("chế độ xóa phải là 'all' hoặc 'me'")
 
-	ErrMessageNotFound = errors.New("tin nhắn không tồn tại")
+	ErrMessageNotFound     = errors.New("tin nhắn không tồn tại")
 	ErrMessageAccessDenied = errors.New("bạn không có quyền truy cập tin nhắn này")
 )
 
@@ -58,9 +58,7 @@ func (v *ChatValidation) ValidateDeleteMessage(senderID, userID string, deletedF
 	if senderID != userID {
 		return errors.New("bạn không phải người gửi tin nhắn này")
 	}
-	if deletedForSender || deletedForReceiver {
-		return errors.New("tin nhắn đã bị xóa")
-	}
+
 	return nil
 }
 
