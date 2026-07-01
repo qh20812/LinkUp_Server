@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"linkup/config"
 	"linkup/dto"
+	"linkup/repository"
 	"linkup/services"
 	"linkup/validations"
 	"linkup/ws"
@@ -132,7 +133,7 @@ func (ctrl *ChatController) ResponseChatInvite(c *gin.Context) {
 	})
 }
 
-func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context)  {
+func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context) {
 	userID := fmt.Sprintf("%v", c.GetString("userID"))
 	messageID := c.Param("messageID")
 
@@ -141,7 +142,7 @@ func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context)  {
 		return
 	}
 
-	media , contentType, filename, data, err := ctrl.chatService.DownloadMessageMedia(c.Request.Context(), userID, messageID)
+	media, contentType, filename, data, err := ctrl.chatService.DownloadMessageMedia(c.Request.Context(), userID, messageID)
 	if err != nil {
 		switch {
 		case errors.Is(err, validations.ErrMessageNotFound):
@@ -162,4 +163,27 @@ func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context)  {
 	c.Data(http.StatusOK, contentType, data)
 
 	_ = media
+}
+
+func (ctrl *ChatController) DeleteChat(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+	chatID := c.Param("chatID")
+
+	if chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id là bắt buộc"})
+		return
+	}
+
+	err := ctrl.chatService.DeleteChat(c.Request.Context(), userID, chatID)
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrChatNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "không tìm thấy phòng chat"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"error": "Xóa phòng chat thành công"})
 }

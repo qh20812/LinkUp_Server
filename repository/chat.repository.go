@@ -181,14 +181,40 @@ func (r *ChatRepository) SearchMessages(ctx context.Context, chatID, userID, key
 	return messages, nil
 }
 
-func (r *ChatRepository) IsMediaOwnedByUser(ctx context.Context, mediaID, userID string) (bool, error) {
+func (r *ChatRepository) IsEmojiExists(ctx context.Context, emojiID string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
-		Table("media").
-		Where("id = ? AND user_id = ?", mediaID, userID).
+		Table("emojis").
+		Where("id = ?", emojiID).
 		Count(&count).Error
 	if err != nil {
-		return false, fmt.Errorf("check media ownership: %w", err)
+		return false, fmt.Errorf("check emoji exists: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (r *ChatRepository) DeleteChat(ctx context.Context, chatID string) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var chat models.Chat
+		if err := tx.Where("id = ?", chatID).First(&chat).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrChatNotFound
+			}
+			return fmt.Errorf("find chat for deletion: %w", err)
+		}
+
+		if err := tx.Where("chat_id = ?", chatID).Delete(&models.Message{}).Error; err != nil {
+			return fmt.Errorf("delete chat messages: %w", err)
+		}
+		if err := tx.Where("chat_id = ?", chatID).Delete(&models.ChatParticipant{}).Error; err != nil {
+			return fmt.Errorf("delete chat participants: %w", err)
+		}
+		if err := tx.Where("id = ?", chatID).Delete(&models.Chat{}).Error; err != nil {
+			return fmt.Errorf("delete chat: %w", &err)
+		}
+
+		return nil
+	})
+
+	return err
 }

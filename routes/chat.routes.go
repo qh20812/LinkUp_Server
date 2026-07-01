@@ -17,6 +17,7 @@ func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, en
 		chatGroup.POST("/invite/respond", ctrl.ResponseChatInvite)
 
 		chatGroup.GET("/messages/:messageID/download", ctrl.DownloadMessageMedia)
+		chatGroup.DELETE("/:chatID", ctrl.DeleteChat)
 
 		chatGroup.GET("/ws", ctrl.HandleWebsocket)
 	}
