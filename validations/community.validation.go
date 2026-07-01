@@ -26,6 +26,11 @@ var (
 	ErrCannotChangeOwnRole       = errors.New("không thể thay đổi vai trò của chính mình")
 	ErrCannotTargetAdmin          = errors.New("không thể thay đổi vai trò của quản trị viên")
 	ErrCreatorCannotLeave        = errors.New("người tạo cộng đồng không thể rời đi, vui lòng chuyển quyền trước")
+	ErrCannotKickCreator         = errors.New("không thể đuổi người tạo cộng đồng")
+	ErrCannotKickAdmin           = errors.New("chỉ người tạo cộng đồng mới có quyền đuổi quản trị viên")
+	ErrKickReasonRequired        = errors.New("lý do là bắt buộc")
+	ErrKickReasonTooShort        = errors.New("lý do phải có ít nhất 3 ký tự")
+	ErrKickReasonTooLong         = errors.New("lý do không được vượt quá 500 ký tự")
 )
 
 type CommunityValidation struct{}

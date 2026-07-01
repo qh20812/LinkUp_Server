@@ -3,13 +3,16 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
 	"mime/multipart"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type CommunityService struct {
@@ -288,6 +291,62 @@ func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, commun
 	}
 
 	s.notifService.Create(ctx, memberID, &adminID, models.NotificationTypeCommunityRoleChanged, "đã thay đổi vai trò của bạn trong cộng đồng", nil, &adminID, nil)
+
+	return nil
+}
+
+func (s *CommunityService) KickMember(ctx context.Context, adminID, communityID, memberID, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return validations.ErrKickReasonRequired
+	}
+	if utf8.RuneCountInString(reason) < 3 {
+		return validations.ErrKickReasonTooShort
+	}
+	if utf8.RuneCountInString(reason) > 500 {
+		return validations.ErrKickReasonTooLong
+	}
+
+	community, err := s.repo.FindByID(ctx, communityID)
+	if err != nil {
+		return validations.ErrCommunityNotFound
+	}
+
+	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+		return validations.ErrNotCommunityAdmin
+	}
+
+	if adminID == memberID {
+		return validations.ErrCannotChangeOwnRole
+	}
+
+	isMember, err := s.repo.IsUserMember(ctx, communityID, memberID)
+	if err != nil || !isMember {
+		return validations.ErrMemberNotFound
+	}
+
+	isCreator, err := s.repo.IsUserCreator(ctx, communityID, memberID)
+	if err != nil {
+		return errors.New("lỗi khi kiểm tra thông tin thành viên")
+	}
+	if isCreator {
+		return validations.ErrCannotKickCreator
+	}
+
+	isAdmin, err := s.repo.IsUserAdmin(ctx, communityID, memberID)
+	if err != nil {
+		return errors.New("lỗi khi kiểm tra quyền thành viên")
+	}
+	if isAdmin && adminID != community.CreatorID {
+		return validations.ErrCannotKickAdmin
+	}
+
+	if err := s.repo.RemoveMember(ctx, communityID, memberID); err != nil {
+		return errors.New("đuổi thành viên thất bại")
+	}
+
+	content := fmt.Sprintf("bạn đã bị đuổi khỏi cộng đồng %s với lý do: %s", community.Name, reason)
+	s.notifService.Create(ctx, memberID, &adminID, models.NotificationTypeCommunityMemberKicked, content, nil, nil, nil)
 
 	return nil
 }
