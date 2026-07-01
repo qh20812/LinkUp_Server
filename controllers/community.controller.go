@@ -203,6 +203,31 @@ func (ctrl *CommunityController) UpdateMemberRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật vai trò thành công!"})
 }
 
+func (ctrl *CommunityController) KickMember(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	adminID := val.(string)
+
+	communityID := c.Param("communityID")
+	memberID := c.Param("memberID")
+
+	var input dto.KickMemberInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	if err := ctrl.communityService.KickMember(c.Request.Context(), adminID, communityID, memberID, input.Reason); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đuổi thành viên thành công!"})
+}
+
 func (ctrl *CommunityController) GetCommunityMembers(c *gin.Context) {
 	communityID := c.Param("communityID")
 

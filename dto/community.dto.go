@@ -37,6 +37,10 @@ type CommunityMemberListResponse struct {
 	Members []CommunityMemberItem `json:"members"`
 }
 
+type KickMemberInput struct {
+	Reason string `json:"reason" binding:"required,min=3,max=500"`
+}
+
 type LeaveCommunityInput struct {
 	Quiet bool `json:"quiet" binding:"omitempty"`
 }

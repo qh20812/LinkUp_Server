@@ -20,6 +20,7 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 		communityGroup.PUT("/:communityID/join-requests/:requestID/reject", ctrl.RejectJoinRequest)
 		communityGroup.GET("/:communityID/members", ctrl.GetCommunityMembers)
 		communityGroup.PUT("/:communityID/members/:memberID/role", ctrl.UpdateMemberRole)
+		communityGroup.DELETE("/:communityID/members/:memberID", ctrl.KickMember)
 		communityGroup.DELETE("/:communityID/leave", ctrl.LeaveCommunity)
 	}
 }
