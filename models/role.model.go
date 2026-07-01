@@ -49,7 +49,7 @@ func (r ChatRole) String() string {
 }
 
 func ParseChatRole(value string) ChatRole {
-	switch strings.ToLower(strings.TrimSpace(value)) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case string(ChatRoleAdmin):
 		return ChatRoleAdmin
 	default:
@@ -71,7 +71,7 @@ func (r GroupRole) String() string {
 }
 
 func ParseGroupRole(value string) GroupRole {
-	switch strings.ToLower(strings.TrimSpace(value)) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case string(GroupRoleAdmin):
 		return GroupRoleAdmin
 	case string(GroupRoleMod):
@@ -80,4 +80,3 @@ func ParseGroupRole(value string) GroupRole {
 		return GroupRoleMember
 	}
 }
-
