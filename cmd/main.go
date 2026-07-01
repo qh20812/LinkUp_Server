@@ -145,7 +145,7 @@ func main() {
 		friendRepository = repository.NewFriendRepository(gormDB)
 		inviteRepository := repository.NewChatInvitationRepository(gormDB)
 		chatValidation := validations.NewChatValidation()
-		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, notificationService, chatValidation)
+		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, notificationService, chatValidation)
 		chatHub := ws.NewHub()
 		go chatHub.Run()
 		chatController := controllers.NewChatController(chatHub, chatService, env)

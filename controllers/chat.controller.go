@@ -1,10 +1,12 @@
 package controllers
 
 import (
+	"errors"
 	"fmt"
 	"linkup/config"
 	"linkup/dto"
 	"linkup/services"
+	"linkup/validations"
 	"linkup/ws"
 	"net/http"
 
@@ -128,4 +130,36 @@ func (ctrl *ChatController) ResponseChatInvite(c *gin.Context) {
 		ChatID:   &chat.ID,
 		Message:  "Chat đã được kích hoạt",
 	})
+}
+
+func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context)  {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+	messageID := c.Param("messageID")
+
+	if messageID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "message_id là bắt buộc"})
+		return
+	}
+
+	media , contentType, filename, data, err := ctrl.chatService.DownloadMessageMedia(c.Request.Context(), userID, messageID)
+	if err != nil {
+		switch {
+		case errors.Is(err, validations.ErrMessageNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "Tin nhắn không tồn tại"})
+		case errors.Is(err, validations.ErrMessageAccessDenied):
+			c.JSON(http.StatusForbidden, gin.H{"error": "Bạn không có quyền truy cập tin nhắn này"})
+		case errors.Is(err, validations.ErrMediaNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "Media không tồn tại"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+
+	c.Data(http.StatusOK, contentType, data)
+
+	_ = media
 }
