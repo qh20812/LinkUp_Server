@@ -9,6 +9,7 @@ type RoleName string
 const (
 	RoleSuperAdmin      RoleName = "SUPER_ADMIN"
 	RoleAdmin           RoleName = "ADMIN"
+	RolePartner         RoleName = "PARTNER"
 	RoleUser            RoleName = "USER"
 	RoleChatAdmin       RoleName = "CHAT_ADMIN"
 	RoleChatMember      RoleName = "CHAT_MEMBER"

@@ -26,6 +26,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 	roles := []roleEntry{
 		{internal.UUID(), "SUPER_ADMIN", "Full system access"},
 		{internal.UUID(), "ADMIN", "Administrative access"},
+		{internal.UUID(), "PARTNER", "Ads partner access"},
 		{internal.UUID(), "USER", "Standard user access"},
 		{internal.UUID(), "CHAT_ADMIN", "Chat administrator"},
 		{internal.UUID(), "CHAT_MEMBER", "Chat member"},
