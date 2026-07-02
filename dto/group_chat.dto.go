@@ -21,3 +21,20 @@ type SendGroupMessageInput struct {
 	EmojiID *string `json:"emoji_id"`
 	MediaID *string `json:"media_id"`
 }
+
+type GroupChatSettingsDTO struct {
+	NotificationsEnabled *bool   `json:"notifications_enabled,omitempty"`
+	AllowMemberAdd       *bool   `json:"allow_member_add,omitempty"`
+	Name                 *string `json:"name,omitempty"`
+	AvatarURI            *string `json:"avatar_uri,omitempty"`
+}
+
+type TransferAdminInput struct {
+	TargetUserID string `json:"target_user_id" binding:"required"`
+}
+
+type GroupChatSettingsResponse struct {
+	ChatID               string `json:"chat_id"`
+	NotificationsEnabled bool   `json:"notifications_enabled"`
+	AllowMemberAdd       bool   `json:"allow_member_add"`
+}

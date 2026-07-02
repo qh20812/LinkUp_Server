@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
 	"time"
+	"unicode/utf8"
 )
 
 type GroupChatService struct {
@@ -143,4 +145,161 @@ func (s *GroupChatService) AddMember(ctx context.Context, chatID, requesterID, n
 	participant.JoinedAt = time.Now().UTC()
 
 	return s.groupRepo.AddMember(ctx, &participant)
+}
+
+func (s *GroupChatService) GetSettings(ctx context.Context, chatID, userID string) (*dto.GroupChatSettingsResponse, error) {
+	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, errors.New("bạn không phải là thành viên của nhóm")
+	}
+
+	groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	memberSettings, err := s.groupRepo.GetMemberSettings(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.GroupChatSettingsResponse{
+		ChatID:               chatID,
+		NotificationsEnabled: memberSettings.NotificationsEnabled,
+		AllowMemberAdd:       groupSettings.AllowMemberAdd,
+	}, nil
+}
+
+func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID string, input *dto.GroupChatSettingsDTO) (*dto.GroupChatSettingsResponse, error) {
+	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, errors.New("bạn không phải là thành viên của nhóm")
+	}
+
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, requestID)
+	if err != nil {
+		return nil, err
+	}
+
+	if input.NotificationsEnabled != nil {
+		memberSettings, err := s.groupRepo.GetMemberSettings(ctx, chatID, requestID)
+		if err != nil {
+			return nil, err
+		}
+		memberSettings.NotificationsEnabled = *input.NotificationsEnabled
+		memberSettings.UpdatedAt = time.Now().UTC()
+
+		if err := s.groupRepo.UpsertMemberSettings(ctx, memberSettings); err != nil {
+			return nil, err
+		}
+	}
+
+	if input.Name != nil {
+		if !isAdmin {
+			return nil, errors.New("chỉ admin mới có quyền đổi tên nhóm")
+		}
+		if utf8.RuneCountInString(*input.Name) < 3 || utf8.RuneCountInString(*input.Name) > 50 {
+			return nil, errors.New("tên nhóm phải từ 3 đến 50 ký tự")
+		}
+	}
+
+	if input.AvatarURI != nil && !isAdmin {
+		return nil, errors.New("chỉ admin mới có quyền đổi avatar nhóm")
+	}
+
+	if input.AllowMemberAdd != nil && !isAdmin {
+		return nil, errors.New("chỉ admin mới có quyền cấu hình quyền thêm thành viên")
+	}
+
+	if input.AllowMemberAdd != nil || input.Name != nil || input.AvatarURI != nil {
+		if !isAdmin {
+			return nil, errors.New("chỉ admin mới có quyền cập nhật thiết lập toàn nhóm")
+		}
+
+		groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
+		if err != nil {
+			return nil, err
+		}
+
+		if input.AllowMemberAdd != nil {
+			groupSettings.AllowMemberAdd = *input.AllowMemberAdd
+		}
+
+		if err := s.groupRepo.UpsertSettings(ctx, groupSettings); err != nil {
+			return nil, err
+		}
+
+		if input.Name != nil || input.AvatarURI != nil {
+			chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+			if err != nil {
+				return nil, err
+			}
+			if input.Name != nil {
+				chat.Name = *input.Name
+			}
+			if input.AvatarURI != nil {
+				chat.AvatarURI = *input.AvatarURI
+			}
+			if err := s.chatRepo.UpdateChat(ctx, chat); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// trả về trạng thái hiện tại cho requester
+	memberSettings, err := s.groupRepo.GetMemberSettings(ctx, chatID, requestID)
+	if err != nil {
+		return nil, err
+	}
+	groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.GroupChatSettingsResponse{
+		ChatID:               chatID,
+		NotificationsEnabled: memberSettings.NotificationsEnabled,
+		AllowMemberAdd:       groupSettings.AllowMemberAdd,
+	}, nil
+}
+
+func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID, targetUserID string) error {
+	if requestID == targetUserID {
+		return errors.New("không thể chuyển quyền cho chính mình")
+	}
+
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, requestID)
+	if err != nil {
+		return err
+	}
+	if !isAdmin {
+		return errors.New("chỉ admin mới có thể chuyển quyền quản trị")
+	}
+
+	isTargetMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if !isTargetMember {
+		return errors.New("người nhận phải là thành viên của nhóm")
+	}
+
+	settings, err := s.groupRepo.GetSettings(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	if settings.LastAdminTransferAt != nil {
+		nextAllowed := settings.LastAdminTransferAt.AddDate(0, 1, 0) // +1 month
+		if time.Now().UTC().Before(nextAllowed) {
+			return fmt.Errorf("quyền admin chỉ có thể chuyển 1 lần mỗi tháng; lần chuyển trước: %s", settings.LastAdminTransferAt.UTC().Format(time.RFC3339))
+		}
+	}
+
+	return s.groupRepo.TransferAdmin(ctx, chatID, requestID, targetUserID, time.Now().UTC())
 }

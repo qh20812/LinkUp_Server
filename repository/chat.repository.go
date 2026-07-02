@@ -218,3 +218,7 @@ func (r *ChatRepository) DeleteChat(ctx context.Context, chatID string) error {
 
 	return err
 }
+
+func (r *ChatRepository) UpdateChat(ctx context.Context, chat *models.Chat) error {
+    return r.db.WithContext(ctx).Save(chat).Error
+}

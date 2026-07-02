@@ -153,3 +153,64 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		"data":    msg,
 	})
 }
+
+func (ctrl *GroupChatController) GetSettings(c *gin.Context) {
+	userIDVal, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	settings, err := ctrl.groupService.GetSettings(c.Request.Context(), chatID, userID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"error": settings})
+}
+
+func (ctrl *GroupChatController) UpdateSettings(c *gin.Context) {
+	userIDVal, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.GroupChatSettingsDTO
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSONP(http.StatusBadRequest, gin.H{"error": "Dữ liệu không hợp lệ"})
+		return
+	}
+
+	settings, err := ctrl.groupService.UpdateSettings(c.Request.Context(), chatID, userID, &input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"error": "Cập nhật cấu hình nhóm thành công", "data": settings})
+}
+
+func (ctrl *GroupChatController) TransferAdmin(c *gin.Context) {
+	userIDVal, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.TransferAdminInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp target_user_id"})
+		return
+	}
+
+	if err := ctrl.groupService.TransferAdmin(c.Request.Context(), chatID, userID, input.TargetUserID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền admin thành công"})
+}
