@@ -137,7 +137,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		userID,
 		chatID,
 		input.Content,
-		input.EmojiID, // Đảm bảo input.EmojiID và MediaID trong DTO đang để kiểu *string để khớp với validation
+		input.EmojiID,
 		input.MediaID,
 	)
 	if err != nil {
