@@ -123,6 +123,21 @@ func (s *GroupChatService) AddMember(ctx context.Context, chatID, requesterID, n
 		return errors.New("bạn không phải thành viên của nhóm này nên không có quyền mời người khác")
 	}
 
+	groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
+	if err != nil {
+		return err
+	}
+
+	if !groupSettings.AllowMemberAdd {
+		isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, requesterID)
+		if err != nil {
+			return err
+		}
+		if !isAdmin {
+			return errors.New("admin đã tắt quyền thêm thành viên; chỉ có admin mới có thể thêm")
+		}
+	}
+
 	// [BAN REJOIN SECURITY CHECK]: Ngăn chặn người bị Ban quay trở lại nhóm
 	isBanned, err := s.groupRepo.IsUserBanned(ctx, chatID, newMemberID)
 	if err != nil {
@@ -156,6 +171,11 @@ func (s *GroupChatService) GetSettings(ctx context.Context, chatID, userID strin
 		return nil, errors.New("bạn không phải là thành viên của nhóm")
 	}
 
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
 	groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
 	if err != nil {
 		return nil, err
@@ -167,9 +187,13 @@ func (s *GroupChatService) GetSettings(ctx context.Context, chatID, userID strin
 	}
 
 	return &dto.GroupChatSettingsResponse{
-		ChatID:               chatID,
-		NotificationsEnabled: memberSettings.NotificationsEnabled,
-		AllowMemberAdd:       groupSettings.AllowMemberAdd,
+		ChatID:         chatID,
+		Name:           chat.Name,
+		AvatarURI:      chat.AvatarURI,
+		AllowMemberAdd: groupSettings.AllowMemberAdd,
+		MemberSettings: dto.GroupChatMemberSettingsResponse{
+			NotificationsEnabled: memberSettings.NotificationsEnabled,
+		},
 	}, nil
 }
 
@@ -193,8 +217,6 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 			return nil, err
 		}
 		memberSettings.NotificationsEnabled = *input.NotificationsEnabled
-		memberSettings.UpdatedAt = time.Now().UTC()
-
 		if err := s.groupRepo.UpsertMemberSettings(ctx, memberSettings); err != nil {
 			return nil, err
 		}
@@ -219,7 +241,7 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 
 	if input.AllowMemberAdd != nil || input.Name != nil || input.AvatarURI != nil {
 		if !isAdmin {
-			return nil, errors.New("chỉ admin mới có quyền cập nhật thiết lập toàn nhóm")
+			return nil, errors.New("chỉ admin mới có quyền cập nhật cài đặt toàn nhóm")
 		}
 
 		groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
@@ -252,21 +274,7 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 		}
 	}
 
-	// trả về trạng thái hiện tại cho requester
-	memberSettings, err := s.groupRepo.GetMemberSettings(ctx, chatID, requestID)
-	if err != nil {
-		return nil, err
-	}
-	groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &dto.GroupChatSettingsResponse{
-		ChatID:               chatID,
-		NotificationsEnabled: memberSettings.NotificationsEnabled,
-		AllowMemberAdd:       groupSettings.AllowMemberAdd,
-	}, nil
+	return s.GetSettings(ctx, chatID, requestID)
 }
 
 func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID, targetUserID string) error {

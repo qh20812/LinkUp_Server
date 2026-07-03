@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"linkup/models"
 	"time"
@@ -98,7 +99,6 @@ func (r *GroupChatRepository) GetSettings(ctx context.Context, chatID string) (*
 		if err == gorm.ErrRecordNotFound {
 			return &models.GroupChatSettings{
 				ChatID:               chatID,
-				NotificationsEnabled: true,
 				AllowMemberAdd:       true,
 			}, nil
 		}
@@ -108,16 +108,29 @@ func (r *GroupChatRepository) GetSettings(ctx context.Context, chatID string) (*
 }
 
 func (r *GroupChatRepository) UpsertSettings(ctx context.Context, settings *models.GroupChatSettings) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// var existing models.GroupChatSettings
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "chat_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"notifications_enabled", "allow_member_add", "last_admin_transfer_at", "updated_at"}),
-		}).Create(settings).Error; err != nil {
-			return err
+	now := time.Now().UTC()
+
+	var existing models.GroupChatSettings
+	err := r.db.WithContext(ctx).First(&existing, "chat_id = ?", settings.ChatID).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			settings.CreatedAt = now
+			settings.UpdatedAt = now
+			return r.db.WithContext(ctx).Create(settings).Error
 		}
-		return nil
-	})
+		return err
+	}
+
+	updates := map[string]any{
+		"allow_member_add":       settings.AllowMemberAdd,
+		"last_admin_transfer_at": settings.LastAdminTransferAt,
+		"updated_at":             now,
+	}
+
+	return r.db.WithContext(ctx).
+		Model(&models.GroupChatSettings{}).
+		Where("chat_id = ?", settings.ChatID).
+		Updates(updates).Error
 }
 
 func (r *GroupChatRepository) SetLastAdminTransfer(ctx context.Context, chatID string, t *time.Time) error {
@@ -156,12 +169,34 @@ func (r *GroupChatRepository) TransferAdmin(ctx context.Context, chatID, request
 	})
 }
 
+func (r *GroupChatRepository) UpsertMemberSettings(ctx context.Context, settings *models.GroupChatMemberSettings) error {
+    now := time.Now().UTC()
+    settings.UpdatedAt = now
+
+    existing := &models.GroupChatMemberSettings{}
+    err := r.db.WithContext(ctx).
+        Where("chat_id = ? AND user_id = ?", settings.ChatID, settings.UserID).
+        First(existing).Error
+
+    if errors.Is(err, gorm.ErrRecordNotFound) {
+        return r.db.WithContext(ctx).Create(settings).Error
+    }
+    if err != nil {
+        return err
+    }
+
+    return r.db.WithContext(ctx).Model(existing).Updates(map[string]any{
+        "notifications_enabled": settings.NotificationsEnabled,
+        "updated_at":            now,
+    }).Error
+}
+
 func (r *GroupChatRepository) GetMemberSettings(ctx context.Context, chatID, userID string) (*models.GroupChatMemberSettings, error) {
 	var s models.GroupChatMemberSettings
 	err := r.db.WithContext(ctx).
 		First(&s, "chat_id = ? AND user_id = ?", chatID, userID).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &models.GroupChatMemberSettings{
 				ChatID:               chatID,
 				UserID:               userID,
@@ -171,11 +206,4 @@ func (r *GroupChatRepository) GetMemberSettings(ctx context.Context, chatID, use
 		return nil, err
 	}
 	return &s, nil
-}
-
-func (r *GroupChatRepository) UpsertMemberSettings(ctx context.Context, settings *models.GroupChatMemberSettings) error {
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "chat_id"}, {Name: "user_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"notifications_enabled", "updated_at"}),
-	}).Create(settings).Error
 }

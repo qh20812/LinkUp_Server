@@ -33,8 +33,14 @@ type TransferAdminInput struct {
 	TargetUserID string `json:"target_user_id" binding:"required"`
 }
 
+type GroupChatMemberSettingsResponse struct {
+	NotificationsEnabled bool `json:"notifications_enabled"`
+}
+
 type GroupChatSettingsResponse struct {
-	ChatID               string `json:"chat_id"`
-	NotificationsEnabled bool   `json:"notifications_enabled"`
-	AllowMemberAdd       bool   `json:"allow_member_add"`
+	ChatID               string                          `json:"chat_id"`
+	Name                 string                          `json:"name"`
+	AvatarURI            string                          `json:"avatar_uri"`
+	AllowMemberAdd       bool                            `json:"allow_member_add"`
+	MemberSettings       GroupChatMemberSettingsResponse `json:"member_settings"`
 }

@@ -158,6 +158,7 @@ func (ctrl *GroupChatController) GetSettings(c *gin.Context) {
 	userIDVal, ok := c.Get("userID")
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 	chatID := c.Param("chatID")
@@ -167,7 +168,7 @@ func (ctrl *GroupChatController) GetSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"error": settings})
+	c.JSON(http.StatusOK, gin.H{"data": settings})
 }
 
 func (ctrl *GroupChatController) UpdateSettings(c *gin.Context) {
