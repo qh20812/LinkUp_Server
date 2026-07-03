@@ -98,8 +98,8 @@ func (r *GroupChatRepository) GetSettings(ctx context.Context, chatID string) (*
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return &models.GroupChatSettings{
-				ChatID:               chatID,
-				AllowMemberAdd:       true,
+				ChatID:         chatID,
+				AllowMemberAdd: true,
 			}, nil
 		}
 		return nil, err
@@ -170,25 +170,25 @@ func (r *GroupChatRepository) TransferAdmin(ctx context.Context, chatID, request
 }
 
 func (r *GroupChatRepository) UpsertMemberSettings(ctx context.Context, settings *models.GroupChatMemberSettings) error {
-    now := time.Now().UTC()
-    settings.UpdatedAt = now
+	now := time.Now().UTC()
+	settings.UpdatedAt = now
 
-    existing := &models.GroupChatMemberSettings{}
-    err := r.db.WithContext(ctx).
-        Where("chat_id = ? AND user_id = ?", settings.ChatID, settings.UserID).
-        First(existing).Error
+	existing := &models.GroupChatMemberSettings{}
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ? AND user_id = ?", settings.ChatID, settings.UserID).
+		First(existing).Error
 
-    if errors.Is(err, gorm.ErrRecordNotFound) {
-        return r.db.WithContext(ctx).Create(settings).Error
-    }
-    if err != nil {
-        return err
-    }
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.db.WithContext(ctx).Create(settings).Error
+	}
+	if err != nil {
+		return err
+	}
 
-    return r.db.WithContext(ctx).Model(existing).Updates(map[string]any{
-        "notifications_enabled": settings.NotificationsEnabled,
-        "updated_at":            now,
-    }).Error
+	return r.db.WithContext(ctx).Model(existing).Updates(map[string]any{
+		"notifications_enabled": settings.NotificationsEnabled,
+		"updated_at":            now,
+	}).Error
 }
 
 func (r *GroupChatRepository) GetMemberSettings(ctx context.Context, chatID, userID string) (*models.GroupChatMemberSettings, error) {
@@ -206,4 +206,21 @@ func (r *GroupChatRepository) GetMemberSettings(ctx context.Context, chatID, use
 		return nil, err
 	}
 	return &s, nil
+}
+
+func (r *GroupChatRepository) MuteUser(ctx context.Context, mute *models.GroupChatMute) error {
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "chat_id"}, {Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"muted_by", "reason", "expires_at", "created_at"}),
+	}).Create(mute).Error
+}
+
+func (r *GroupChatRepository) UnmuteUser(ctx context.Context, chatID, userID string) error {
+	return r.db.WithContext(ctx).Where("chat_id = ? AND user_id = ?", chatID, userID).Delete(&models.GroupChatMute{}).Error
+}
+
+func (r *GroupChatRepository) GetMutesForChat(ctx context.Context, chatID string) ([]models.GroupChatMute, error) {
+	var mutes []models.GroupChatMute
+	err := r.db.WithContext(ctx).Where("chat_id = ?", chatID).Find(&mutes).Error
+	return mutes, err
 }

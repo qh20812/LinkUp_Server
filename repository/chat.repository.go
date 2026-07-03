@@ -220,5 +220,25 @@ func (r *ChatRepository) DeleteChat(ctx context.Context, chatID string) error {
 }
 
 func (r *ChatRepository) UpdateChat(ctx context.Context, chat *models.Chat) error {
-    return r.db.WithContext(ctx).Save(chat).Error
+	return r.db.WithContext(ctx).Save(chat).Error
+}
+
+func (r *ChatRepository) GetUserMute(ctx context.Context, chatID, userID string) (*models.GroupChatMute, error) {
+    var mute models.GroupChatMute
+    err := r.db.WithContext(ctx).Where("chat_id = ? AND user_id = ?", chatID, userID).First(&mute).Error
+    if errors.Is(err, gorm.ErrRecordNotFound) {
+        return nil, nil
+    }
+    if err != nil {
+        return nil, fmt.Errorf("get user mute: %w", err)
+    }
+
+    now := time.Now().UTC()
+    if mute.ExpiresAt != nil && mute.ExpiresAt.Before(now) {
+        if err := r.db.WithContext(ctx).Where("chat_id = ? AND user_id = ?", chatID, userID).Delete(&models.GroupChatMute{}).Error; err != nil {
+            return nil, fmt.Errorf("cleanup expired mute: %w", err)
+        }
+        return nil, nil
+    }
+    return &mute, nil
 }

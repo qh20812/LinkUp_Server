@@ -215,3 +215,50 @@ func (ctrl *GroupChatController) TransferAdmin(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền admin thành công"})
 }
+
+func (ctrl *GroupChatController) MuteMember(c *gin.Context) {
+	adminIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	adminID := fmt.Sprintf("%v", adminIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.MuteMemberInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	mute, err := ctrl.groupService.MuteMember(c.Request.Context(), chatID, adminID, input.UserID, input.Reason, input.DurationMins)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã tắt tiếng thành viên", "data": mute})
+}
+
+func (ctrl *GroupChatController) UnmuteMember(c *gin.Context) {
+	adminIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	adminID := fmt.Sprintf("%v", adminIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.UnmuteMemberInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := ctrl.groupService.UnmuteMember(c.Request.Context(), chatID, adminID, input.UserID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã mở lại quyền gửi tin nhắn cho thành viên"})
+}

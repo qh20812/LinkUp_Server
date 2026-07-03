@@ -38,9 +38,19 @@ type GroupChatMemberSettingsResponse struct {
 }
 
 type GroupChatSettingsResponse struct {
-	ChatID               string                          `json:"chat_id"`
-	Name                 string                          `json:"name"`
-	AvatarURI            string                          `json:"avatar_uri"`
-	AllowMemberAdd       bool                            `json:"allow_member_add"`
-	MemberSettings       GroupChatMemberSettingsResponse `json:"member_settings"`
+	ChatID         string                          `json:"chat_id"`
+	Name           string                          `json:"name"`
+	AvatarURI      string                          `json:"avatar_uri"`
+	AllowMemberAdd bool                            `json:"allow_member_add"`
+	MemberSettings GroupChatMemberSettingsResponse `json:"member_settings"`
+}
+
+type MuteMemberInput struct {
+    UserID       string `json:"user_id" binding:"required"`
+    Reason       string `json:"reason" binding:"required,oneof=spam abuse harassment violation other"`
+    DurationMins int    `json:"duration_minutes" binding:"required,oneof=1 30 60 1440 0"` // 0 = permanent
+}
+
+type UnmuteMemberInput struct {
+    UserID string `json:"user_id" binding:"required"`
 }

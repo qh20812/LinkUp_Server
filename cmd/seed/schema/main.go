@@ -491,6 +491,18 @@ func Run(env config.Env) error {
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 34. group_chat_mutes
+		`CREATE TABLE IF NOT EXISTS group_chat_mutes (
+			id VARCHAR(36) PRIMARY KEY,
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			muted_by VARCHAR(36) NOT NULL,
+			reason TEXT,
+			expires_at DATETIME NULL,
+			created_at DATETIME NOT NULL,
+			INDEX idx_group_chat_mutes_chat_user (chat_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {

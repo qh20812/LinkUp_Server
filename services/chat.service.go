@@ -48,11 +48,25 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 }
 
 func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID *string) (*models.Message, error) {
+	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if mute != nil {
+		var expiresStr string
+		if mute.ExpiresAt != nil {
+			expiresStr = mute.ExpiresAt.UTC().Format(time.RFC3339)
+		} else {
+			expiresStr = "vĩnh viễn"
+		}
+		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
+	}
+
 	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
 		return nil, err
 	}
 
-	_, err := s.chatRepo.FindChatByID(ctx, chatID)
+	_, err = s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
 		return nil, err
 	}

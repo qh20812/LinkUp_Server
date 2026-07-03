@@ -154,7 +154,7 @@ func main() {
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
 		// Tiêm thêm chatRepository để xử lý dữ liệu bảng chats chung
-		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository)
+		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, notificationService, validations.NewGroupChatValidation())
 		// Tiêm thêm chatService phục vụ tính năng gửi tin nhắn nhóm mã hóa bảo mật
 		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env)

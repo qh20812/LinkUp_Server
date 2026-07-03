@@ -8,19 +8,24 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 	"time"
 	"unicode/utf8"
 )
 
 type GroupChatService struct {
-	groupRepo *repository.GroupChatRepository
-	chatRepo  *repository.ChatRepository // Inject thêm để hỗ trợ một số kiểm tra chéo nếu cần
+	groupRepo    *repository.GroupChatRepository
+	chatRepo     *repository.ChatRepository // Inject thêm để hỗ trợ một số kiểm tra chéo nếu cần
+	notifService *NotificationService
+	validation   *validations.GroupChatValidation
 }
 
-func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *repository.ChatRepository) *GroupChatService {
+func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *repository.ChatRepository, notifService *NotificationService, validation *validations.GroupChatValidation) *GroupChatService {
 	return &GroupChatService{
-		groupRepo: groupRepo,
-		chatRepo:  chatRepo,
+		groupRepo:    groupRepo,
+		chatRepo:     chatRepo,
+		notifService: notifService,
+		validation:   validation,
 	}
 }
 
@@ -310,4 +315,81 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 	}
 
 	return s.groupRepo.TransferAdmin(ctx, chatID, requestID, targetUserID, time.Now().UTC())
+}
+
+func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targetUserID, reason string, durationMinutes int) (*models.GroupChatMute, error) {
+	if adminID == targetUserID {
+		return nil, errors.New("Không thể mute chính mình")
+	}
+
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, adminID)
+	if err != nil {
+		return nil, err
+	}
+	if !isAdmin {
+		return nil, errors.New("chỉ admin mới có quyền tắt tiếng thành viên")
+	}
+
+	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !isMember {
+		return nil, errors.New("Người dùng không phải thành viên của nhóm")
+	}
+
+	if err := s.validation.ValidateMuteInput(reason, durationMinutes); err != nil {
+		return nil, err
+	}
+
+	var expiresAt *time.Time
+	if durationMinutes > 0 {
+		t := time.Now().UTC().Add(time.Duration(durationMinutes) * time.Minute)
+		expiresAt = &t
+	}
+
+	mute := &models.GroupChatMute{
+		ID:        utils.GenerateUUID(),
+		ChatID:    chatID,
+		UserID:    targetUserID,
+		MutedBy:   adminID,
+		Reason:    reason,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	if err := s.groupRepo.MuteUser(ctx, mute); err != nil {
+		return nil, fmt.Errorf("lưu meta: %w", err)
+	}
+
+	// thông báo cho user bị mute
+	var expiresStr string
+	if expiresAt == nil {
+		expiresStr = "vĩnh viễn"
+	} else {
+		expiresStr = expiresAt.UTC().Format(time.RFC3339)
+	}
+	content := fmt.Sprintf("Bạn đã bị tắt tiếng trong nhóm (lý do: %s). Hết hạn: %s", reason, expiresStr)
+	_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+
+	return mute, nil
+}
+
+func (s *GroupChatService) UnmuteMember(ctx context.Context, chatID, adminID, targetUserID string) error {
+	// quyền admin
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, adminID)
+	if err != nil {
+		return err
+	}
+	if !isAdmin {
+		return errors.New("chỉ admin mới có quyền mở tắt tiếng")
+	}
+
+	if err := s.groupRepo.UnmuteUser(ctx, chatID, targetUserID); err != nil {
+		return fmt.Errorf("unmute: %w", err)
+	}
+
+	content := "Quyền gửi tin nhắn đã được mở lại trong nhóm."
+	_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+	return nil
 }
