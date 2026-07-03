@@ -471,6 +471,26 @@ func Run(env config.Env) error {
 
 		// 31. Message Security
 		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true`,
+
+		// 32. group_chat_settings
+		`CREATE TABLE IF NOT EXISTS group_chat_settings (
+			chat_id VARCHAR(64) PRIMARY KEY,
+			allow_member_add BOOLEAN NOT NULL DEFAULT TRUE,
+			last_admin_transfer_at DATETIME NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 33. group_chat_member_settings
+		`CREATE TABLE IF NOT EXISTS group_chat_member_settings (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			notifications_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			PRIMARY KEY (chat_id, user_id),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
