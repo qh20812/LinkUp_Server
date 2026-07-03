@@ -173,6 +173,14 @@ func main() {
 		communityRuleController := controllers.NewCommunityRuleController(communityRuleService)
 		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env)
 
+		// ===== KHỞI TẠO CONTRIBUTION POLICY (ĐIỂM ĐÓNG GÓP & CHALLENGE) =====
+		contributionRepository := repository.NewContributionRepository(gormDB)
+		contributionValidation := validations.NewContributionValidation()
+		contributionService := services.NewContributionService(contributionRepository, communityRepository, profileRepository, postRepository, contributionValidation)
+		postService.SetContributionService(contributionService)
+		contributionController := controllers.NewContributionController(contributionService)
+		routes.RegisterContributionRoutes(router, contributionController, env)
+
 		// ===== KHỞI TẠO TẦNG ADVERTISEMENT (QUẢNG CÁO & PHÂN QUYỀN PARTNER) =====
 		adRepository := repository.NewAdRepository(gormDB)
 		adService := services.NewAdService(adRepository)

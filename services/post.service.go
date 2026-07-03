@@ -23,14 +23,19 @@ type PostService interface {
 }
 
 type postService struct {
-	repo         *repository.PostRepository
-	notifService *NotificationService
-	tagService   *TagService
-	validation   *validations.PostValidation
+	repo                *repository.PostRepository
+	notifService        *NotificationService
+	tagService          *TagService
+	contributionService *ContributionService
+	validation          *validations.PostValidation
 }
 
-func NewPostService(repo *repository.PostRepository, notifService *NotificationService, tagService *TagService, validation *validations.PostValidation) PostService {
+func NewPostService(repo *repository.PostRepository, notifService *NotificationService, tagService *TagService, validation *validations.PostValidation) *postService {
 	return &postService{repo: repo, notifService: notifService, tagService: tagService, validation: validation}
+}
+
+func (s *postService) SetContributionService(contributionService *ContributionService) {
+	s.contributionService = contributionService
 }
 
 func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error) {
@@ -48,6 +53,14 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 	// Tự động tách và lưu hashtag từ bài viết mới
 	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
+	}
+
+	if s.contributionService != nil {
+		go func() {
+			if err := s.contributionService.ProcessChallengePost(ctx, post.ID, userID, content); err != nil {
+				log.Printf("[Contribution Error] không thể xử lý challenge cho post %s: %v", post.ID, err)
+			}
+		}()
 	}
 
 	return &post, nil

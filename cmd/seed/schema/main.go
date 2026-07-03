@@ -506,6 +506,78 @@ func Run(env config.Env) error {
 			created_at DATETIME NOT NULL,
 			INDEX idx_group_chat_mutes_chat_user (chat_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 35. Depends on communities - Community contribution policy
+		`CREATE TABLE IF NOT EXISTS community_policies (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL UNIQUE,
+			post_weight INT NOT NULL DEFAULT 10,
+			comment_weight INT NOT NULL DEFAULT 5,
+			reaction_weight INT NOT NULL DEFAULT 2,
+			event_weight INT NOT NULL DEFAULT 20,
+			top_contributor_threshold INT NOT NULL DEFAULT 2500,
+			moderator_promotion_threshold INT NOT NULL DEFAULT 5000,
+			auto_promote_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			badge_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			INDEX idx_community_policies_community (community_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 36. Depends on communities, users - Member contribution tracking
+		`CREATE TABLE IF NOT EXISTS member_contributions (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			valid_posts INT NOT NULL DEFAULT 0,
+			quality_comments INT NOT NULL DEFAULT 0,
+			positive_reactions INT NOT NULL DEFAULT 0,
+			event_participations INT NOT NULL DEFAULT 0,
+			contribution_score INT NOT NULL DEFAULT 0,
+			badge_type VARCHAR(50) NULL,
+			promoted_to_mod TINYINT(1) NOT NULL DEFAULT 0,
+			last_calculated_at DATETIME NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_member_contributions_pair (community_id, user_id),
+			INDEX idx_member_contributions_score (community_id, contribution_score DESC)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 37. Depends on communities, users - Community challenges
+		`CREATE TABLE IF NOT EXISTS community_challenges (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			creator_id VARCHAR(36) NOT NULL,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			hashtag VARCHAR(100) NOT NULL,
+			points_per_post INT NOT NULL DEFAULT 15,
+			start_date DATETIME NOT NULL,
+			end_date DATETIME NOT NULL,
+			max_participants INT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_community_challenges_community (community_id),
+			INDEX idx_community_challenges_status (status)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 38. Depends on community_challenges, users - Challenge participants
+		`CREATE TABLE IF NOT EXISTS challenge_participants (
+			id VARCHAR(36) PRIMARY KEY,
+			challenge_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			posts_count INT NOT NULL DEFAULT 0,
+			total_points_earned INT NOT NULL DEFAULT 0,
+			joined_at DATETIME NOT NULL,
+			FOREIGN KEY (challenge_id) REFERENCES community_challenges(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_challenge_participants_pair (challenge_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
