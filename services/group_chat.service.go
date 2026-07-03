@@ -45,7 +45,6 @@ func (s *GroupChatService) CreateGroup(ctx context.Context, userID string, name,
 	}
 	group.EncryptionKey = encKey
 
-	// 🔥 LƯU Ý: Đảm bảo models.ChatRoleAdmin dưới đây trả về đúng chuỗi "CHAT_ADMIN" của bạn
 	adminPart := models.NewChatParticipant(group.ID, userID, models.ChatRoleAdmin)
 	adminPart.ID = utils.GenerateUUID()
 	adminPart.JoinedAt = time.Now().UTC()

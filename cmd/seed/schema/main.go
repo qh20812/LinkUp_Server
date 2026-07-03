@@ -137,19 +137,22 @@ func Run(env config.Env) error {
 
 		// 7. Depends on media
 		`CREATE TABLE IF NOT EXISTS ads (
-			id VARCHAR(36) PRIMARY KEY,
-			title VARCHAR(255) NOT NULL,
-			content TEXT,
-			media_id VARCHAR(36) NULL,
-			target_url VARCHAR(512) NOT NULL DEFAULT '',
-			status VARCHAR(20) NOT NULL DEFAULT 'active',
-			budget DOUBLE NOT NULL DEFAULT 0,
-			started_at DATETIME NULL,
-			expires_at DATETIME NULL,
-			created_at DATETIME NOT NULL,
-			FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
-			INDEX idx_ads_status (status)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+            id VARCHAR(36) PRIMARY KEY,
+            partner_id VARCHAR(36) NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            content TEXT,
+            media_id VARCHAR(36) NULL,
+            target_url VARCHAR(512) NOT NULL DEFAULT '',
+            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            budget DOUBLE NOT NULL DEFAULT 0,
+            started_at DATETIME NULL,
+            expires_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
+            FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_ads_partner_id (partner_id),
+            INDEX idx_ads_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 8. Depends on users, posts
 		`CREATE TABLE IF NOT EXISTS comments (

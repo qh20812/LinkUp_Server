@@ -72,7 +72,6 @@ func (ctrl *GroupChatController) AddMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Thêm thành viên vào nhóm thành công!"})
 }
 
-// 1. API: Rời khỏi nhóm chat
 func (ctrl *GroupChatController) LeaveGroup(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
@@ -92,7 +91,6 @@ func (ctrl *GroupChatController) LeaveGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Bạn đã rời khỏi nhóm chat thành công"})
 }
 
-// 2. API: Chặn thành viên gia nhập lại (Ban Member)
 func (ctrl *GroupChatController) BanMember(c *gin.Context) {
 	adminIDVal, exists := c.Get("userID")
 	if !exists {
@@ -118,7 +116,6 @@ func (ctrl *GroupChatController) BanMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Đã trục xuất và chặn người dùng này tham gia lại nhóm thành công!"})
 }
 
-// 3. API: Gửi tin nhắn nhóm qua HTTP
 func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
@@ -140,7 +137,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		userID,
 		chatID,
 		input.Content,
-		input.EmojiID, // Đảm bảo input.EmojiID và MediaID trong DTO đang để kiểu *string để khớp với validation
+		input.EmojiID,
 		input.MediaID,
 	)
 	if err != nil {

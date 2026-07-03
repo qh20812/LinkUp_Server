@@ -172,6 +172,12 @@ func main() {
 		communityRuleService := services.NewCommunityRuleService(communityRuleRepository, communityRepository, communityRuleValidation)
 		communityRuleController := controllers.NewCommunityRuleController(communityRuleService)
 		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env)
+
+		// ===== KHỞI TẠO TẦNG ADVERTISEMENT (QUẢNG CÁO & PHÂN QUYỀN PARTNER) =====
+		adRepository := repository.NewAdRepository(gormDB)
+		adService := services.NewAdService(adRepository)
+		adController := controllers.NewAdController(adService)
+		routes.RegisterAdRoutes(router, adController, env, gormDB)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng
