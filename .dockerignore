@@ -1,0 +1,11 @@
+.env
+.git/
+.gitignore
+node_modules/
+tmp/
+*.exe
+AGENTS.md
+.claude/
+.agents/
+.codegraph/
+docs/
