@@ -25,22 +25,24 @@ var (
 )
 
 type ContributionService struct {
-	contributionRepo *repository.ContributionRepository
-	communityRepo    *repository.CommunityRepository
-	profileRepo      *repository.ProfileRepository
-	postRepo         *repository.PostRepository
-	validation       *validations.ContributionValidation
-	groupRole        *utils.GroupRoleChecker
+	contributionRepo   *repository.ContributionRepository
+	communityRepo      *repository.CommunityRepository
+	profileRepo        *repository.ProfileRepository
+	postRepo           *repository.PostRepository
+	notificationService *NotificationService
+	validation         *validations.ContributionValidation
+	groupRole          *utils.GroupRoleChecker
 }
 
-func NewContributionService(contributionRepo *repository.ContributionRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, postRepo *repository.PostRepository, validation *validations.ContributionValidation) *ContributionService {
+func NewContributionService(contributionRepo *repository.ContributionRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, postRepo *repository.PostRepository, notificationService *NotificationService, validation *validations.ContributionValidation) *ContributionService {
 	return &ContributionService{
-		contributionRepo: contributionRepo,
-		communityRepo:    communityRepo,
-		profileRepo:      profileRepo,
-		postRepo:         postRepo,
-		validation:       validation,
-		groupRole:        utils.NewGroupRoleChecker(communityRepo.GetUserRole),
+		contributionRepo:   contributionRepo,
+		communityRepo:      communityRepo,
+		profileRepo:        profileRepo,
+		postRepo:           postRepo,
+		notificationService: notificationService,
+		validation:         validation,
+		groupRole:          utils.NewGroupRoleChecker(communityRepo.GetUserRole),
 	}
 }
 
@@ -205,6 +207,7 @@ func (s *ContributionService) GetContributionResponse(ctx context.Context, commu
 		ContributionScore:   updated.ContributionScore,
 		BadgeType:           updated.BadgeType,
 		IsModerator:         isModerator,
+		PromotedToMod:       updated.PromotedToMod,
 	}, nil
 }
 
@@ -385,7 +388,6 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 		if _, exists := communityDeltas[challenge.CommunityID]; !exists {
 			communityDeltas[challenge.CommunityID] = &models.MemberContribution{CommunityID: challenge.CommunityID, UserID: userID}
 		}
-		communityDeltas[challenge.CommunityID].ValidPosts++
 		communityDeltas[challenge.CommunityID].EventParticipations++
 	}
 
@@ -394,7 +396,6 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 		if err != nil {
 			return err
 		}
-		contribution.ValidPosts += delta.ValidPosts
 		contribution.EventParticipations += delta.EventParticipations
 		policy, err := s.GetPolicy(ctx, communityID)
 		if err != nil {
@@ -406,6 +407,48 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 	}
 
 	return nil
+}
+
+func (s *ContributionService) IncrementValidPosts(ctx context.Context, communityID, userID string) error {
+	contribution, err := s.ensureContribution(ctx, communityID, userID)
+	if err != nil {
+		return err
+	}
+	contribution.ValidPosts++
+	policy, err := s.GetPolicy(ctx, communityID)
+	if err != nil {
+		return err
+	}
+	_, err = s.recalculateAndPersistContribution(ctx, contribution, policy)
+	return err
+}
+
+func (s *ContributionService) IncrementQualityComments(ctx context.Context, communityID, userID string) error {
+	contribution, err := s.ensureContribution(ctx, communityID, userID)
+	if err != nil {
+		return err
+	}
+	contribution.QualityComments++
+	policy, err := s.GetPolicy(ctx, communityID)
+	if err != nil {
+		return err
+	}
+	_, err = s.recalculateAndPersistContribution(ctx, contribution, policy)
+	return err
+}
+
+func (s *ContributionService) IncrementPositiveReactions(ctx context.Context, communityID, userID string) error {
+	contribution, err := s.ensureContribution(ctx, communityID, userID)
+	if err != nil {
+		return err
+	}
+	contribution.PositiveReactions++
+	policy, err := s.GetPolicy(ctx, communityID)
+	if err != nil {
+		return err
+	}
+	_, err = s.recalculateAndPersistContribution(ctx, contribution, policy)
+	return err
 }
 
 func (s *ContributionService) checkAndAssignBadge(contribution *models.MemberContribution, policy *models.CommunityPolicy) {
@@ -421,19 +464,40 @@ func (s *ContributionService) checkAndAssignBadge(contribution *models.MemberCon
 	contribution.BadgeType = nil
 }
 
-func (s *ContributionService) checkAndPromoteToMod(contribution *models.MemberContribution, policy *models.CommunityPolicy) {
+func (s *ContributionService) checkAndPromoteToMod(ctx context.Context, contribution *models.MemberContribution, policy *models.CommunityPolicy) error {
 	if !policy.AutoPromoteEnabled {
-		return
+		return nil
+	}
+	if contribution.PromotedToMod {
+		return nil
 	}
 	if contribution.ContributionScore >= policy.ModeratorPromotionThreshold {
+		if s.communityRepo == nil {
+			contribution.PromotedToMod = true
+			return nil
+		}
+		isMod, err := s.groupRole.IsModOrAbove(ctx, contribution.CommunityID, contribution.UserID)
+		if err != nil {
+			return err
+		}
+		if isMod {
+			return nil
+		}
+		if err := s.communityRepo.UpdateUserRole(ctx, contribution.CommunityID, contribution.UserID, models.RoleGroupMod); err != nil {
+			return err
+		}
+		s.notificationService.Create(ctx, contribution.UserID, nil, models.NotificationTypeCommunityRoleChanged, "bạn đã được thăng chức lên Moderator nhờ điểm đóng góp", nil, nil, nil)
 		contribution.PromotedToMod = true
 	}
+	return nil
 }
 
 func (s *ContributionService) recalculateAndPersistContribution(ctx context.Context, contribution *models.MemberContribution, policy *models.CommunityPolicy) (*models.MemberContribution, error) {
 	contribution.ContributionScore = s.calculateContributionScore(contribution, policy)
 	s.checkAndAssignBadge(contribution, policy)
-	s.checkAndPromoteToMod(contribution, policy)
+	if err := s.checkAndPromoteToMod(ctx, contribution, policy); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	contribution.LastCalculatedAt = now
 	contribution.UpdatedAt = &now

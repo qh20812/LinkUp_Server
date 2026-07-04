@@ -17,9 +17,10 @@ const (
 )
 
 type Post struct {
-	ID         string     `json:"id"`
-	UserID     string     `json:"user_id"`
-	Title      string     `json:"title"`
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id"`
+	CommunityID *string    `json:"community_id,omitempty"`
+	Title       string     `json:"title"`
 	Content    string     `json:"content"`
 	ViewsCount int        `json:"views_count"`
 	Status     PostStatus `json:"status"`

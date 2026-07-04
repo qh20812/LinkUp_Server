@@ -68,6 +68,7 @@ func Run(env config.Env) error {
 		`CREATE TABLE IF NOT EXISTS posts (
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
+			community_id VARCHAR(36) NULL,
 			title VARCHAR(255) NOT NULL,
 			content LONGTEXT,
 			views_count INT NOT NULL DEFAULT 0,
@@ -93,6 +94,10 @@ func Run(env config.Env) error {
 			FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_communities_creator (creator_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 4b. FK từ posts đến communities (posts đã có cột, thêm FK sau khi communities tồn tại)
+		`ALTER TABLE posts ADD INDEX idx_posts_community_id (community_id)`,
+		`ALTER TABLE posts ADD CONSTRAINT fk_posts_community FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE SET NULL`,
 
 		// 5. Depends on communities
 		`CREATE TABLE IF NOT EXISTS community_rules (

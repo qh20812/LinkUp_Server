@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"testing"
 
 	"linkup/dto"
@@ -39,7 +40,10 @@ func TestContributionScoreAndBadgeHelpers(t *testing.T) {
 	}
 
 	contribution.ContributionScore = 5000
-	svc.checkAndPromoteToMod(contribution, policy)
+	err := svc.checkAndPromoteToMod(context.Background(), contribution, policy)
+	if err != nil {
+		t.Fatalf("checkAndPromoteToMod failed: %v", err)
+	}
 	if !contribution.PromotedToMod {
 		t.Fatal("expected promoted_to_mod to be true")
 	}

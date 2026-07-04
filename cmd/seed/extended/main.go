@@ -81,6 +81,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		{"DevOps Conference 2026", "Early bird tickets available", "https://example.com/devops-conf", 3000.00, "completed", -1},
 	}
 
+	partnerUserID := state.UserIDs[2]
+
 	for _, a := range ads {
 		adID := internal.UUID()
 		var mediaID *string
@@ -91,8 +93,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		expiresAt := internal.PtrTime(now.Add(time.Duration(randRange(15, 60)) * 24 * time.Hour))
 
 		if err := internal.Exec(database,
-			`INSERT INTO ads (id, title, content, media_id, target_url, status, budget, started_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			adID, a.title, a.content, mediaID, a.targetURL, a.status, a.budget, startedAt, expiresAt, now.Add(-time.Duration(randRange(1, 60))*24*time.Hour),
+			`INSERT INTO ads (id, partner_id, title, content, media_id, target_url, status, budget, started_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			adID, partnerUserID, a.title, a.content, mediaID, a.targetURL, a.status, a.budget, startedAt, expiresAt, now.Add(-time.Duration(randRange(1, 60))*24*time.Hour),
 		); err != nil {
 			return fmt.Errorf("extended: insert ad %s: %w", a.title, err)
 		}

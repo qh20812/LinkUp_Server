@@ -12,7 +12,7 @@ import (
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error)
+	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string) (*models.Post, error)
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
@@ -38,19 +38,19 @@ func (s *postService) SetContributionService(contributionService *ContributionSe
 	s.contributionService = contributionService
 }
 
-func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string) (*models.Post, error) {
+func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string) (*models.Post, error) {
 	postStatus := models.ParsePostStatus(status)
 
 	post := models.NewPost(userID, title, content, postStatus)
 	post.ID = utils.GenerateUUID()
 	post.CreatedAt = time.Now()
 	post.ViewsCount = 0
+	post.CommunityID = communityID
 
 	if err := s.repo.Create(ctx, &post); err != nil {
 		return nil, err
 	}
 
-	// Tự động tách và lưu hashtag từ bài viết mới
 	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
 	}
@@ -59,6 +59,14 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		go func() {
 			if err := s.contributionService.ProcessChallengePost(ctx, post.ID, userID, content); err != nil {
 				log.Printf("[Contribution Error] không thể xử lý challenge cho post %s: %v", post.ID, err)
+			}
+		}()
+	}
+
+	if communityID != nil && s.contributionService != nil {
+		go func() {
+			if err := s.contributionService.IncrementValidPosts(ctx, *communityID, userID); err != nil {
+				log.Printf("[Contribution Error] không thể tăng valid_posts cho user %s trong community %s: %v", userID, *communityID, err)
 			}
 		}()
 	}
@@ -122,6 +130,14 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 
 	if post, err := s.repo.FindByID(ctx, postID); err == nil && post != nil && post.UserID != userID {
 		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeLike, "đã thích bài viết của bạn", &postID, nil, nil)
+
+		if s.contributionService != nil && post.CommunityID != nil {
+			go func() {
+				if err := s.contributionService.IncrementPositiveReactions(ctx, *post.CommunityID, post.UserID); err != nil {
+					log.Printf("[Contribution Error] không thể tăng positive_reactions cho user %s: %v", post.UserID, err)
+				}
+			}()
+		}
 	}
 
 	return "reacted", emoji.Code, nil
@@ -161,9 +177,16 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 		return nil, err
 	}
 
-	// Tự động tách và lưu hashtag từ bình luận mới
 	if err := s.tagService.ProcessCommentHashtags(ctx, nil, postID, comment.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho comment %s: %v", comment.ID, err)
+	}
+
+	if s.contributionService != nil && post.CommunityID != nil {
+		go func() {
+			if err := s.contributionService.IncrementQualityComments(ctx, *post.CommunityID, userID); err != nil {
+				log.Printf("[Contribution Error] không thể tăng quality_comments cho user %s: %v", userID, err)
+			}
+		}()
 	}
 
 	if post.UserID != userID {

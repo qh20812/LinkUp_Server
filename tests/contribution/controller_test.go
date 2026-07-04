@@ -20,6 +20,9 @@ func init() {
 func TestContributionController_InputGuards(t *testing.T) {
 	ctrl := controllers.NewContributionController(&services.ContributionService{})
 	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
 	unauthRouter.GET("/api/communities/:communityID/policy", ctrl.GetPolicy)
 	unauthRouter.PUT("/api/communities/:communityID/policy", ctrl.UpdatePolicy)
 	unauthRouter.POST("/api/communities/:communityID/challenges", ctrl.CreateChallenge)

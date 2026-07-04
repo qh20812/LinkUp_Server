@@ -46,6 +46,7 @@ type ContributionResponse struct {
 	ContributionScore   int     `json:"contribution_score"`
 	BadgeType           *string `json:"badge_type"`
 	IsModerator         bool    `json:"is_moderator"`
+	PromotedToMod       bool    `json:"promoted_to_mod"`
 }
 
 type LeaderboardItem struct {
