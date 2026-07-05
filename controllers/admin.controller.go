@@ -161,3 +161,57 @@ func (ctrl *AdminController) ChangePostStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật trạng thái bài viết thành công"})
 }
+
+func (ctrl *AdminController) ListReports(c *gin.Context) {
+	var input dto.AdminReportFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		return
+	}
+
+	superAdminID := c.GetString("userID")
+	result, err := ctrl.adminService.ListReports(c.Request.Context(), superAdminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *AdminController) GetReportDetail(c *gin.Context) {
+	reportID := c.Param("reportID")
+	if reportID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reportID không hợp lệ"})
+		return
+	}
+
+	superAdminID := c.GetString("userID")
+	result, err := ctrl.adminService.GetReportDetail(c.Request.Context(), superAdminID, reportID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *AdminController) ReviewReport(c *gin.Context) {
+	reportID := c.Param("reportID")
+	if reportID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reportID không hợp lệ"})
+		return
+	}
+
+	var input dto.AdminReportReviewInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	superAdminID := c.GetString("userID")
+	if err := ctrl.adminService.ReviewReport(c.Request.Context(), superAdminID, reportID, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "xử lý báo cáo thành công"})
+}

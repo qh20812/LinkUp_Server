@@ -73,3 +73,58 @@ type AdminHidePostInput struct {
 type AdminUpdatePostStatusInput struct {
 	Status string `json:"status" binding:"required"`
 }
+
+type AdminReportFilterInput struct {
+	Keyword    string `json:"keyword" form:"keyword"`
+	Status     string `json:"status" form:"status"`
+	TargetType string `json:"target_type" form:"target_type"`
+	SortBy     string `json:"sort_by" form:"sort_by"`
+	Order      string `json:"order" form:"order"`
+	Page       int    `json:"page" form:"page"`
+	PageSize   int    `json:"page_size" form:"page_size"`
+}
+
+type AdminReportListItem struct {
+	ID               string    `json:"id"`
+	ReporterID       string    `json:"reporter_id"`
+	ReporterUsername string    `json:"reporter_username"`
+	ReporterEmail    string    `json:"reporter_email"`
+	TargetType       string    `json:"target_type"`
+	TargetUserID     *string   `json:"target_user_id,omitempty"`
+	TargetPostID     *string   `json:"target_post_id,omitempty"`
+	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
+	ReportType       string    `json:"report_type"`
+	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
+	ReasonDetail     string    `json:"reason_detail"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+type AdminReportListResponse struct {
+	Reports  []AdminReportListItem `json:"reports"`
+	Total    int64                 `json:"total"`
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"page_size"`
+}
+
+type AdminReportDetailResponse struct {
+	ID               string    `json:"id"`
+	ReporterID       string    `json:"reporter_id"`
+	ReporterUsername string    `json:"reporter_username"`
+	ReporterEmail    string    `json:"reporter_email"`
+	TargetType       string    `json:"target_type"`
+	TargetUserID     *string   `json:"target_user_id,omitempty"`
+	TargetPostID     *string   `json:"target_post_id,omitempty"`
+	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
+	ReportType       string    `json:"report_type"`
+	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
+	ReasonDetail     string    `json:"reason_detail"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+	PostOwnerID      *string   `json:"post_owner_id,omitempty"`
+}
+
+type AdminReportReviewInput struct {
+	Action string `json:"action" binding:"required"`
+	Reason string `json:"reason,omitempty"`
+}

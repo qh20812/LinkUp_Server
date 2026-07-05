@@ -30,15 +30,17 @@ type AdminService struct {
 	authRepo            *repository.AuthRepository
 	banRepo             *repository.BanRepository
 	postRepo            *repository.PostRepository
+	reportRepo          *repository.ReportRepository
 	moderationRepo      *repository.ModerationRepository
 	notificationService *NotificationService
 }
 
-func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, moderationRepo *repository.ModerationRepository, notificationService *NotificationService) *AdminService {
+func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, notificationService *NotificationService) *AdminService {
 	return &AdminService{
 		authRepo:            authRepo,
 		banRepo:             banRepo,
 		postRepo:            postRepo,
+		reportRepo:          reportRepo,
 		moderationRepo:      moderationRepo,
 		notificationService: notificationService,
 	}
@@ -133,12 +135,8 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 }
 
 func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) error {
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
-	if err != nil {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
 		return err
-	}
-	if !isSuperAdmin {
-		return fmt.Errorf("chỉ superadmin mới có quyền")
 	}
 
 	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
@@ -178,12 +176,8 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 		return dto.AdminPostListResponse{}, errors.New("không có quyền truy cập")
 	}
 
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
-	if err != nil {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
 		return dto.AdminPostListResponse{}, err
-	}
-	if !isSuperAdmin {
-		return dto.AdminPostListResponse{}, errors.New("chỉ superadmin mới có quyền")
 	}
 
 	page := input.Page
@@ -252,16 +246,8 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 }
 
 func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string, input dto.AdminHidePostInput) error {
-	if superAdminID == "" {
-		return errors.New("không có quyền truy cập")
-	}
-
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
-	if err != nil {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
 		return err
-	}
-	if !isSuperAdmin {
-		return errors.New("chỉ superadmin mới có quyền")
 	}
 
 	post, err := s.postRepo.FindByID(ctx, postID)
@@ -305,12 +291,8 @@ func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string
 }
 
 func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postID string, input dto.AdminUpdatePostStatusInput) error {
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
-	if err != nil {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
 		return err
-	}
-	if !isSuperAdmin {
-		return fmt.Errorf("chỉ superadmin mới có quyền")
 	}
 
 	post, err := s.postRepo.FindByID(ctx, postID)
@@ -369,5 +351,176 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 		return err
 	}
 
+	return nil
+}
+
+func (s *AdminService) ListReports(ctx context.Context, superAdminID string, input dto.AdminReportFilterInput) (dto.AdminReportListResponse, error) {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return dto.AdminReportListResponse{}, err
+	}
+
+	page := input.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	status := strings.TrimSpace(strings.ToLower(input.Status))
+	if status != "" {
+		statusValue := models.ParseReportStatus(status)
+		status = statusValue.String()
+	}
+
+	sortBy := strings.TrimSpace(strings.ToLower(input.SortBy))
+	if sortBy != "created_at" && sortBy != "target_type" {
+		sortBy = "created_at"
+	}
+
+	order := strings.TrimSpace(strings.ToLower(input.Order))
+	if order != "asc" && order != "desc" {
+		order = "desc"
+	}
+
+	reports, err := s.reportRepo.ListAdminReports(ctx, input.Keyword, status, strings.TrimSpace(strings.ToLower(input.TargetType)), sortBy, order, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminReportListResponse{}, err
+	}
+
+	total, err := s.reportRepo.CountAdminReports(ctx, input.Keyword, status, strings.TrimSpace(strings.ToLower(input.TargetType)))
+	if err != nil {
+		return dto.AdminReportListResponse{}, err
+	}
+
+	return dto.AdminReportListResponse{
+		Reports:  reports,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+func (s *AdminService) GetReportDetail(ctx context.Context, superAdminID, reportID string) (dto.AdminReportDetailResponse, error) {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return dto.AdminReportDetailResponse{}, err
+	}
+
+	report, err := s.reportRepo.FindByID(ctx, reportID)
+	if err != nil {
+		return dto.AdminReportDetailResponse{}, err
+	}
+
+	reporter, err := s.authRepo.FindByID(ctx, report.ReporterID)
+	if err != nil {
+		return dto.AdminReportDetailResponse{}, err
+	}
+
+	detail := dto.AdminReportDetailResponse{
+		ID:               report.ID,
+		ReporterID:       report.ReporterID,
+		ReporterUsername: reporter.Username,
+		ReporterEmail:    reporter.Email,
+		TargetType:       "unknown",
+		TargetUserID:     report.TargetUserID,
+		TargetPostID:     report.TargetPostID,
+		TargetCommentID:  report.TargetCommentID,
+		ReportType:       report.ReportType,
+		ViolationRuleID:  report.ViolationRuleID,
+		ReasonDetail:     report.ReasonDetail,
+		Status:           report.Status.String(),
+		CreatedAt:        report.CreatedAt,
+	}
+
+	if report.TargetPostID != nil {
+		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
+		if err == nil {
+			detail.TargetType = "post"
+			detail.PostOwnerID = &post.UserID
+		} else {
+			detail.TargetType = "post"
+		}
+	} else if report.TargetUserID != nil {
+		detail.TargetType = "user"
+	} else if report.TargetCommentID != nil {
+		detail.TargetType = "comment"
+	}
+
+	return detail, nil
+}
+
+func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID string, input dto.AdminReportReviewInput) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	report, err := s.reportRepo.FindByID(ctx, reportID)
+	if err != nil {
+		return err
+	}
+
+	if report.Status != models.ReportStatusPending {
+		return errors.New("báo cáo đã được xử lý")
+	}
+
+	action := strings.TrimSpace(strings.ToLower(input.Action))
+	if action != "cancel" && action != "hide" {
+		return errors.New("action không hợp lệ, chỉ chấp nhận cancel hoặc hide")
+	}
+
+	status := models.ReportStatusRejected
+	if action == "hide" {
+		if report.TargetPostID == nil {
+			return errors.New("hide chỉ hỗ trợ với báo cáo bài viết")
+		}
+		if err := s.postRepo.UpdateStatus(ctx, *report.TargetPostID, models.PostStatusHidden); err != nil {
+			return fmt.Errorf("hide post: %w", err)
+		}
+		status = models.ReportStatusResolved
+
+		moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetPost, *report.TargetPostID, input.Reason)
+		moderation.ID = utils.GenerateUUID()
+		moderation.CreatedAt = time.Now().UTC()
+		if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+			return fmt.Errorf("create moderation log: %w", err)
+		}
+	}
+
+	if err := s.reportRepo.UpdateStatus(ctx, reportID, status); err != nil {
+		return err
+	}
+
+	reporterMessage := fmt.Sprintf("Báo cáo %s đã được xử lý bằng hành động: %s.", report.ID, action)
+	_, _ = s.notificationService.Create(ctx, report.ReporterID, &superAdminID, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
+
+	if report.TargetPostID != nil {
+		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
+		if err == nil {
+			targetMessage := fmt.Sprintf("Bài viết của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+			_, _ = s.notificationService.Create(ctx, post.UserID, &superAdminID, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
+		}
+	} else if report.TargetUserID != nil {
+		targetMessage := fmt.Sprintf("Tài khoản của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, &superAdminID, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+	}
+
+	return nil
+}
+
+func (s *AdminService) ensureSuperAdmin(ctx context.Context, userID string) error {
+	if userID == "" {
+		return errors.New("không có quyền truy cập")
+	}
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, userID, models.RoleSuperAdmin)
+	if err != nil {
+		return fmt.Errorf("check superadmin: %w", err)
+	}
+	if !isSuperAdmin {
+		return errors.New("chỉ có superadmin mới có được phép")
+	}
 	return nil
 }
