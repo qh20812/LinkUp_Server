@@ -63,7 +63,8 @@ func main() {
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
-		authService := services.NewAuthService(authRepository, profileRepository, env)
+		banRepository := repository.NewBanRepository(gormDB)
+		authService := services.NewAuthService(authRepository, profileRepository, banRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
 		routes.RegisterAuthRoutes(router, authController, env)
@@ -186,6 +187,12 @@ func main() {
 		adService := services.NewAdService(adRepository)
 		adController := controllers.NewAdController(adService)
 		routes.RegisterAdRoutes(router, adController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG ADMIN =====
+		moderationRepository := repository.NewModerationRepository(gormDB)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, moderationRepository, notificationService)
+		adminController := controllers.NewAdminController(adminService)
+		routes.RegisterAdminRoutes(router, adminController, env)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng

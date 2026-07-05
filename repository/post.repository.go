@@ -2,8 +2,9 @@ package repository
 
 import (
 	"context"
-	"gorm.io/gorm"
 	"linkup/models"
+
+	"gorm.io/gorm"
 )
 
 type PostRepository struct {
@@ -128,4 +129,48 @@ func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string
 		Order("created_at DESC").
 		Find(&comments).Error
 	return comments, err
+}
+
+func (r *PostRepository) ListPosts(ctx context.Context, keyword, status string, limit, offset int) ([]models.Post, error) {
+	var posts []models.Post
+
+	q := r.db.WithContext(ctx).
+		Table("posts").
+		Select(`posts.*,
+            (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
+            (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
+            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`)
+
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("posts.title LIKE ? OR posts.content LIKE ?", like, like)
+	}
+	if status != "" {
+		q = q.Where("posts.status = ?", status)
+	}
+
+	err := q.Order("posts.created_at DESC").Limit(limit).Offset(offset).Find(&posts).Error
+	return posts, err
+}
+
+func (r *PostRepository) CountPosts(ctx context.Context, keyword, status string) (int64, error) {
+	var count int64
+	q := r.db.WithContext(ctx).Model(&models.Post{})
+
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("title LIKE ? OR content LIKE ?", like, like)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+
+	if err := q.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *PostRepository) UpdateStatus(ctx context.Context, id string, status models.PostStatus) error {
+	return r.db.WithContext(ctx).Model(&models.Post{}).Where("id = ?", id).Update("status", status).Error
 }
