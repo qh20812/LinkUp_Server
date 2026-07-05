@@ -178,6 +178,11 @@ func main() {
 		adService := services.NewAdService(adRepository)
 		adController := controllers.NewAdController(adService)
 		routes.RegisterAdRoutes(router, adController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG ADMIN =====
+		adminService := services.NewAdminService(authRepository)
+		adminController := controllers.NewAdminController(adminService)
+		routes.RegisterAdminRoutes(router, adminController, env)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng

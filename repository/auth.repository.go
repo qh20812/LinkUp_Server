@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"linkup/dto"
 	"linkup/models"
 	"linkup/utils"
 
@@ -141,6 +142,62 @@ func (r *AuthRepository) AssignUserRole(ctx context.Context, userID string, role
 
 	if err := r.db.WithContext(ctx).Create(&userRole).Error; err != nil {
 		return fmt.Errorf("assign role %s: %w", roleName, err)
+	}
+	return nil
+}
+
+func (r *AuthRepository) CountUsers(ctx context.Context, keyword string, status string) (int64, error) {
+	var count int64
+	q := r.db.WithContext(ctx).Model(&models.User{}).
+		Joins("LEFT JOIN profiles ON profiles.user_id = users.id")
+
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("users.username LIKE ? OR users.email LIKE ? OR profiles.display_name LIKE ?", like, like, like)
+	}
+
+	if status != "" {
+		q = q.Where("users.status = ?", status)
+	}
+
+	if err := q.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count users: %w", err)
+	}
+	return count, nil
+}
+
+func (r *AuthRepository) ListUsers(ctx context.Context, keyword string, status string, limit, offset int) ([]dto.AdminUserListItem, error) {
+	var results []dto.AdminUserListItem
+	q := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Select("users.id, users.username, users.email, users.status, COALESCE(profiles.display_name, '') AS display_name, COALESCE(profiles.avatar_uri, '') AS avatar_uri, users.created_at, users.updated_at").
+		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Order("users.created_at DESC").
+		Limit(limit).
+		Offset(offset)
+
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("users.username LIKE ? OR users.email LIKE ? OR profiles.display_name LIKE ?", like, like, like)
+	}
+
+	if status != "" {
+		q = q.Where("users.status = ?", status)
+	}
+
+	if err := q.Scan(&results).Error; err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	return results, nil
+}
+
+func (r *AuthRepository) UpdateUserStatus(ctx context.Context, userID string, status models.UserStatus) error {
+	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Update("status", status)
+	if tx.Error != nil {
+		return fmt.Errorf("update user status: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return ErrUserNotFound
 	}
 	return nil
 }
