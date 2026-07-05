@@ -18,7 +18,7 @@ func NewAdminController(adminService *services.AdminService) *AdminController {
 
 func (ctrl *AdminController) ListUsers(c *gin.Context) {
 	var input dto.AdminUserFilterInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := c.ShouldBindQuery(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
 		return
 	}
@@ -57,4 +57,31 @@ func (ctrl *AdminController) UpdateUserStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "cập nhật trạng thái người dùng thành công"})
+}
+
+func (ctrl *AdminController) BanUser(c *gin.Context) {
+	superAdminID := c.GetString("userID")
+	if superAdminID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userID không hợp lệ"})
+		return
+	}
+
+	var input dto.AdminUserBanInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu vào không hợp lệ"})
+		return
+	}
+
+	if err := ctrl.adminService.BanUser(c.Request.Context(), superAdminID, targetUserID, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "ban user thành công"})
 }

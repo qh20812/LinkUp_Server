@@ -31,3 +31,8 @@ type AdminUserListResponse struct {
 type AdminUserUpdateStatusInput struct {
 	Status string `json:"status" binding:"required"`
 }
+
+type AdminUserBanInput struct {
+	Reason   string `json:"reason" binding:"required"`
+	Duration string `json:"duration" binding:"required"`
+}

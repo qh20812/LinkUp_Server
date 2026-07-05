@@ -6,15 +6,35 @@ import (
 	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 	"strings"
+	"time"
 )
+
+var banDurationMap = map[string]time.Duration{
+	"1m":  time.Minute,
+	"30m": 30 * time.Minute,
+	"1d":  24 * time.Hour,
+	"3d":  3 * 24 * time.Hour,
+	"1w":  7 * 24 * time.Hour,
+	"2w":  14 * 24 * time.Hour,
+	"1M":  30 * 24 * time.Hour,
+	"3M":  90 * 24 * time.Hour,
+	"6M":  180 * 24 * time.Hour,
+	"9M":  270 * 24 * time.Hour,
+	"1y":  365 * 24 * time.Hour,
+}
 
 type AdminService struct {
 	authRepo *repository.AuthRepository
+	banRepo  *repository.BanRepository
 }
 
-func NewAdminService(authRepo *repository.AuthRepository) *AdminService {
-	return &AdminService{authRepo: authRepo}
+func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository) *AdminService {
+	return &AdminService{
+		authRepo: authRepo,
+		banRepo:  banRepo,
+	}
 }
 
 func (s *AdminService) ListUsers(ctx context.Context, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
@@ -103,4 +123,45 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	}
 
 	return s.authRepo.UpdateUserStatus(ctx, targetUserID, status)
+}
+
+func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) error {
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
+	if err != nil {
+		return err
+	}
+	if !isSuperAdmin {
+		return fmt.Errorf("chỉ superadmin mới có quyền")
+	}
+
+	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
+	if err != nil {
+		return err
+	}
+
+	if targetUser.Status == models.UserStatusBanned {
+		return fmt.Errorf("người dùng đã bị ban")
+	}
+
+	var expiresAt *time.Time
+	durationKey := strings.TrimSpace(input.Duration)
+
+	if durationKey != "permanent" {
+		duration, ok := banDurationMap[durationKey]
+		if !ok {
+			return fmt.Errorf("thời hạn ban không hợp lệ")
+		}
+		t := time.Now().UTC().Add(duration)
+		expiresAt = &t
+	}
+
+	ban := models.NewBan(targetUserID, superAdminID, input.Reason, expiresAt)
+	ban.ID = utils.GenerateUUID()
+	ban.CreatedAt = time.Now().UTC()
+
+	if err := s.banRepo.CreateBan(ctx, &ban); err != nil {
+		return err
+	}
+
+	return s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned)
 }

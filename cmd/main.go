@@ -63,7 +63,8 @@ func main() {
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
-		authService := services.NewAuthService(authRepository, profileRepository, env)
+		banRepository := repository.NewBanRepository(gormDB)
+		authService := services.NewAuthService(authRepository, profileRepository, banRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
 		routes.RegisterAuthRoutes(router, authController, env)
@@ -180,7 +181,7 @@ func main() {
 		routes.RegisterAdRoutes(router, adController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
-		adminService := services.NewAdminService(authRepository)
+		adminService := services.NewAdminService(authRepository, banRepository)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
 	}

@@ -18,13 +18,15 @@ import (
 type AuthService struct {
 	authRepo    *repository.AuthRepository
 	profileRepo *repository.ProfileRepository
+	banRepo     *repository.BanRepository
 	env         config.Env
 }
 
-func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, env config.Env) *AuthService {
+func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, banRepo *repository.BanRepository, env config.Env) *AuthService {
 	return &AuthService{
 		authRepo:    authRepo,
 		profileRepo: profileRepo,
+		banRepo:     banRepo,
 		env:         env,
 	}
 }
@@ -51,13 +53,13 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	}
 
 	createdUser, err := s.authRepo.Create(ctx, &models.User{
-		ID:           utils.GenerateUUID(),
-		Username:     username,
-		Email:        email,
-		PasswordHash: hashedPassword,
-		Status:       models.UserStatusActive,
+		ID:                utils.GenerateUUID(),
+		Username:          username,
+		Email:             email,
+		PasswordHash:      hashedPassword,
+		Status:            models.UserStatusActive,
 		StorageQuotaBytes: models.DefaultStorageQuotaBytes,
-		StorageUsedBytes: 0,
+		StorageUsedBytes:  0,
 	})
 	if err != nil {
 		return dto.AuthResponse{}, err
@@ -94,6 +96,10 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
 		}
+		return dto.AuthResponse{}, err
+	}
+
+	if err := s.ensureBanStatus(ctx, user); err != nil {
 		return dto.AuthResponse{}, err
 	}
 
@@ -150,7 +156,7 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 		},
 		Storage: dto.StorageInfo{
 			QuotaBytes: user.StorageQuotaBytes,
-			UsedBytes: user.StorageUsedBytes,
+			UsedBytes:  user.StorageUsedBytes,
 			AvailBytes: user.AvailableStorageBytes(),
 		},
 	}
@@ -239,4 +245,32 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		ExpiresIn:    int64(s.accessTTL().Seconds()),
 		RefreshTTLIn: int64(s.refreshTTL().Seconds()),
 	}, nil
+}
+
+func (s *AuthService) ensureBanStatus(ctx context.Context, user *models.User) error {
+	if user.Status != models.UserStatusBanned {
+		return nil
+	}
+
+	ban, err := s.banRepo.GetLatestBanByUserID(ctx, user.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrBanNotFound) {
+			return fmt.Errorf("tài khoản đang bị ban")
+		}
+		return err
+	}
+
+	if ban.ExpiresAt != nil && ban.ExpiresAt.Before(time.Now().UTC()) {
+		if err := s.authRepo.UpdateUserStatus(ctx, user.ID, models.UserStatusActive); err != nil {
+			return err
+		}
+		user.Status = models.UserStatusActive
+		return nil
+	}
+
+	if ban.ExpiresAt != nil {
+		return fmt.Errorf("tài khoản đang bị ban đến %s", ban.ExpiresAt.Format("2006-01-02 15:04:05"))
+	}
+
+	return errors.New("tài khoản bị ban vô thời hạn")
 }
