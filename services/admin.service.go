@@ -415,6 +415,13 @@ func (s *AdminService) GetReportDetail(ctx context.Context, superAdminID, report
 		return dto.AdminReportDetailResponse{}, err
 	}
 
+	if report.Status == models.ReportStatusPending {
+		if err := s.reportRepo.UpdateStatus(ctx, reportID, models.ReportStatusReviewed); err != nil {
+			return dto.AdminReportDetailResponse{}, err
+		}
+		report.Status = models.ReportStatusReviewed
+	}
+
 	reporter, err := s.authRepo.FindByID(ctx, report.ReporterID)
 	if err != nil {
 		return dto.AdminReportDetailResponse{}, err
@@ -468,23 +475,54 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	}
 
 	action := strings.TrimSpace(strings.ToLower(input.Action))
-	if action != "cancel" && action != "hide" {
-		return errors.New("action không hợp lệ, chỉ chấp nhận cancel hoặc hide")
+	if action != "cancel" && action != "hide" && action != "ban" {
+		return errors.New("action không hợp lệ, chỉ chấp nhận cancel, hide hoặc ban")
 	}
 
 	status := models.ReportStatusRejected
 	if action == "hide" {
-		if report.TargetPostID == nil {
-			return errors.New("hide chỉ hỗ trợ với báo cáo bài viết")
+		if report.TargetPostID != nil {
+			if err := s.postRepo.UpdateStatus(ctx, *report.TargetPostID, models.PostStatusHidden); err != nil {
+				return fmt.Errorf("hide post: %w", err)
+			}
+			status = models.ReportStatusResolved
+
+			moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetPost, *report.TargetPostID, input.Reason)
+			moderation.ID = utils.GenerateUUID()
+			moderation.CreatedAt = time.Now().UTC()
+			if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+				return fmt.Errorf("create moderation log: %w", err)
+			}
+		} else if report.TargetUserID != nil {
+			return errors.New("hide chỉ hỗ trợ với báo cáo bài viết; báo cáo người dùng cần logic xử lý khác")
+		} else {
+			return errors.New("loại báo cáo không được hỗ trợ")
 		}
-		if err := s.postRepo.UpdateStatus(ctx, *report.TargetPostID, models.PostStatusHidden); err != nil {
-			return fmt.Errorf("hide post: %w", err)
+	}
+
+	if action == "ban" {
+		if report.TargetUserID == nil {
+			return errors.New("ban chỉ hỗ trợ cho báo cáo người dùng")
 		}
+
+		if err := s.authRepo.UpdateUserStatus(ctx, *report.TargetUserID, models.UserStatusBanned); err != nil {
+			return fmt.Errorf("ban user: %w", err)
+		}
+
+		ban := models.NewBan(*report.TargetUserID, superAdminID, input.Reason, nil)
+		ban.ID = utils.GenerateUUID()
+		ban.CreatedAt = time.Now().UTC()
+
+		if err := s.banRepo.CreateBan(ctx, &ban); err != nil {
+			return fmt.Errorf("create ban: %w", err)
+		}
+
 		status = models.ReportStatusResolved
 
-		moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetPost, *report.TargetPostID, input.Reason)
+		moderation := models.NewModerationLog(superAdminID, models.ModerationActionBan, models.ModerationTargetUser, *report.TargetUserID, input.Reason)
 		moderation.ID = utils.GenerateUUID()
 		moderation.CreatedAt = time.Now().UTC()
+
 		if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
 			return fmt.Errorf("create moderation log: %w", err)
 		}
@@ -508,6 +546,19 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, &superAdminID, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
 	}
 
+	if report.TargetUserID != nil && action == "ban" {
+		_, _ = s.notificationService.Create(
+			ctx,
+			*report.TargetUserID,
+			&superAdminID,
+			models.NotificationTypeMessage,
+			"Tài khoản của bạn đã bị cấm vì vi phạm báo cáo.",
+			nil,
+			report.TargetUserID,
+			nil,
+		)
+	}
+
 	return nil
 }
 
@@ -523,4 +574,17 @@ func (s *AdminService) ensureSuperAdmin(ctx context.Context, userID string) erro
 		return errors.New("chỉ có superadmin mới có được phép")
 	}
 	return nil
+}
+
+func reportTargetType(report *models.Report) string {
+	if report.TargetPostID != nil {
+		return "post"
+	}
+	if report.TargetUserID != nil {
+		return "user"
+	}
+	if report.TargetCommentID != nil {
+		return "comment"
+	}
+	return "unknown"
 }
