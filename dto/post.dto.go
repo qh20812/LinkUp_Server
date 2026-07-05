@@ -2,9 +2,10 @@ package dto
 
 // DTO tạo bài viết
 type CreatePostInput struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Status  string `json:"status"` // Cho phép điền: public, private, friend
+	Title       string  `json:"title"`
+	Content     string  `json:"content"`
+	Status      string  `json:"status"`
+	CommunityID *string `json:"community_id,omitempty"`
 }
 
 // DTO thả cảm xúc

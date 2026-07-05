@@ -105,7 +105,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	superAdminID := state.RoleIDs[0]
 	adminID := state.RoleIDs[1]
-	userRoleID := state.RoleIDs[2]
+	partnerID := state.RoleIDs[2]
+	userRoleID := state.RoleIDs[3]
 
 	assigned := map[string]bool{}
 
@@ -131,6 +132,11 @@ func Run(env config.Env, state *internal.SeedState) error {
 		if i == 1 {
 			if err := addRole(uid, adminID); err != nil {
 				return fmt.Errorf("core: user_role admin for %s: %w", uid, err)
+			}
+		}
+		if i == 2 {
+			if err := addRole(uid, partnerID); err != nil {
+				return fmt.Errorf("core: user_role partner for %s: %w", uid, err)
 			}
 		}
 		if err := addRole(uid, userRoleID); err != nil {
