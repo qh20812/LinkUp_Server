@@ -23,7 +23,7 @@ func RegisterContributionRoutes(router *gin.Engine, ctrl *controllers.Contributi
 		contributionGroup.GET("/:userID", ctrl.GetUserContribution)
 	}
 
-	membersGroup := router.Group("/api/communities/:communityID/members")
+	membersGroup := router.Group("/api/communities/:communityID/contributions/members")
 	{
 		membersGroup.GET("", ctrl.GetCommunityMembers)
 	}

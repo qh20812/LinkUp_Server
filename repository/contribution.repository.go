@@ -158,11 +158,13 @@ func (r *ContributionRepository) GetLeaderboard(ctx context.Context, communityID
 
 func (r *ContributionRepository) GetCommunityMembers(ctx context.Context, communityID string, offset, limit int) ([]dto.CommunityMemberItem, error) {
 		type memberRow struct {
-			UserID            string  `gorm:"column:user_id"`
-			DisplayName       string  `gorm:"column:display_name"`
-			AvatarURI         string  `gorm:"column:avatar_uri"`
-			ContributionScore int     `gorm:"column:contribution_score"`
-			BadgeType         *string `gorm:"column:badge_type"`
+			UserID            string    `gorm:"column:user_id"`
+			DisplayName       string    `gorm:"column:display_name"`
+			AvatarURI         string    `gorm:"column:avatar_uri"`
+			Role              string    `gorm:"column:role"`
+			JoinedAt          time.Time `gorm:"column:joined_at"`
+			ContributionScore int       `gorm:"column:contribution_score"`
+			BadgeType         *string   `gorm:"column:badge_type"`
 		}
 
 		if limit <= 0 {
@@ -178,6 +180,21 @@ func (r *ContributionRepository) GetCommunityMembers(ctx context.Context, commun
 			Select(`gm.user_id,
 				COALESCE(p.display_name, '') AS display_name,
 				COALESCE(p.avatar_uri, '') AS avatar_uri,
+				COALESCE((
+					SELECT r2.name FROM user_roles ur2
+					JOIN roles r2 ON r2.id = ur2.role_id
+					WHERE ur2.user_id = gm.user_id
+					  AND ur2.scope_id = gm.community_id
+					  AND ur2.scope_type = 'community'
+					  AND r2.name IN ('GROUP_ADMIN', 'GROUP_MOD', 'GROUP_MEMBER')
+					ORDER BY CASE r2.name
+						WHEN 'GROUP_ADMIN' THEN 1
+						WHEN 'GROUP_MOD' THEN 2
+						WHEN 'GROUP_MEMBER' THEN 3
+						ELSE 4 END
+					LIMIT 1
+				), '') AS role,
+				gm.joined_at,
 				COALESCE(mc.contribution_score, 0) AS contribution_score,
 				mc.badge_type`).
 			Joins("LEFT JOIN profiles p ON p.user_id = gm.user_id").
@@ -197,6 +214,8 @@ func (r *ContributionRepository) GetCommunityMembers(ctx context.Context, commun
 				UserID:            row.UserID,
 				DisplayName:       row.DisplayName,
 				AvatarURI:         row.AvatarURI,
+				Role:              row.Role,
+				JoinedAt:          row.JoinedAt,
 				ContributionScore: row.ContributionScore,
 				BadgeType:         row.BadgeType,
 			})
