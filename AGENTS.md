@@ -42,80 +42,38 @@ docs/         → admin/user function specification tables
 
 - `.env` loaded by `config.LoadEnv()` — **custom line parser** (not godotenv). Singleton guard prevents reloads.
 - Required: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
-- **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing. Always set `DB_SSL=true`.
+- **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing. Always set `DB_SSL=true`. Also, `DB_SSL` is not wired into the actual DSN (`db/mysql.go` ignores it). It was meant for TLS but never connected.
 - `PORT` defaults to `"8080"`. Optional: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
 - `config.GetEnv()` returns a **value copy** — mutations to the returned struct don't affect the singleton.
 - `CLOUDINARY_URL` is primary; `LoadCloudinaryEnv()` falls back to `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`.
 
 ## Routes
 
-All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS + health are outside). Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Authorization` header.
+All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS + health are outside). Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Authorization` header. `cmd/main.go` has Vietnamese comments throughout.
 
-| Path | Method | Auth | Registration file |
+| Path | Method | Auth | File |
 |---|---|---|---|
 | `/health` | GET | No | `cmd/main.go` inline |
 | `/ws` | GET | `?token=` query | `ws/handler.go` |
-| `/api/auth/register` | POST | No | `routes/auth.routes.go` |
-| `/api/auth/login` | POST | No | |
-| `/api/auth/refresh` | POST | No | |
-| `/api/auth/change-password` | POST | Auth | |
-| `/api/auth/forgot-password` | POST | No | `routes/password_reset.routes.go` |
-| `/api/auth/verify-reset-token` | POST | No | |
-| `/api/auth/reset-password` | POST | No | |
+| `/api/auth/*` | various | varies | `routes/auth.routes.go`, `routes/password_reset.routes.go` |
 | `/api/tags/:name/posts` | GET | No | `routes/tag.routes.go` |
 | `/posts` | GET/POST | POST=Auth | `routes/post.routes.go` |
 | `/posts/:id` | GET | No | |
-| `/posts/:id/react` | POST | Auth | |
-| `/posts/:id/comments` | GET/POST | POST=Auth | |
-| `/posts/:id/share` | POST | Auth | |
-| `/posts/:id/save` | POST | Auth | |
+| `/posts/:id/react\|comments\|share\|save` | POST | Auth | |
 | `/api/profile` | GET/PATCH | Auth | `routes/profile.routes.go` |
 | `/api/profile/:userID` | GET | No | |
-| `/api/follow/:userID` | POST | Auth | `routes/follow.routes.go` |
-| `/api/follow/stats/:userID` | GET | Auth | |
+| `/api/follow/*` | POST/GET | Auth | `routes/follow.routes.go` |
 | `/api/media/*` | all | Auth | `routes/media.routes.go` |
 | `/api/reports` | POST | Auth | `routes/report.routes.go` |
 | `/api/blocks` | POST/GET | Auth | `routes/block.routes.go` |
 | `/api/search` | GET | No | `routes/search.routes.go` |
 | `/api/notifications*` | all | Auth | `routes/notification.routes.go` |
-| `/api/friend-requests` | GET | Auth | `routes/friend.routes.go` |
-| `/api/friend-requests/:userID` | POST | Auth | |
-| `/api/friend-requests/:id/accept` | PUT | Auth | |
-| `/api/friend-requests/:id` | DELETE | Auth | |
-| `/api/chats/direct` | POST | Auth | `routes/chat.routes.go` |
-| `/api/chats/invite` | POST | Auth | |
-| `/api/chats/invite/respond` | POST | Auth | |
-| `/api/chats/ws` | GET | Auth (middleware) | |
-| `/api/chats/messages/:messageID/download` | GET | Auth | |
-| `/api/chats/:chatID` | DELETE | Auth | |
-| `/api/group-chats` | POST | Auth | `routes/group_chat.routes.go` |
-| `/api/group-chats/:chatID/add-member` | POST | Auth | |
-| `/api/group-chats/:chatID/leave` | POST | Auth | |
-| `/api/group-chats/:chatID/ban` | POST | Auth | |
-| `/api/group-chats/:chatID/messages` | POST | Auth | |
-| `/api/group-chats/:chatID/transfer-admin` | POST | Auth | |
-| `/api/group-chats/:chatID/settings` | GET/PUT | Auth | |
-| `/api/group-chats/:chatID/mute` | POST | Auth | |
-| `/api/group-chats/:chatID/unmute` | POST | Auth | |
-| `/api/communities` | POST | Auth | `routes/community.routes.go` |
-| `/api/communities/:communityID/background` | PUT | Auth | |
-| `/api/communities/:communityID/join` | POST | Auth | |
-| `/api/communities/:communityID/join-requests` | GET | Auth | |
-| `/api/communities/:communityID/join-requests/:requestID/approve\|reject` | PUT | Auth | |
-| `/api/communities/:communityID/members` | GET | Auth | |
-| `/api/communities/:communityID/members/:memberID/role` | PUT | Auth | |
-| `/api/communities/:communityID/members/:memberID` | DELETE | Auth | |
-| `/api/communities/:communityID/leave` | DELETE | Auth | |
-| `/api/communities/:communityID/rules` | GET/POST | POST=Auth | `routes/community_rule.routes.go` |
-| `/api/communities/:communityID/rules/:ruleID` | PUT/DELETE | Auth | |
-| `/api/communities/:communityID/policy` | GET/PUT | Auth | `routes/contribution.routes.go` |
-| `/api/communities/:communityID/contributions/*` | GET | GET me=Auth | |
-| `/api/communities/:communityID/challenges` | GET/POST | POST=Auth | |
-| `/api/communities/:communityID/challenges/:challengeID/join` | POST | Auth | |
-| `/api/communities/:communityID/challenges/:challengeID/participants` | GET | No | |
-| `/ads-management` | all | Auth + RBAC | `routes/ad.routes.go` |
-| `/customer/feed` | GET | Auth | |
-| `/customer/ads/:id/track` | POST | Auth | |
+| `/api/friend-requests*` | GET/POST/PUT/DELETE | Auth | `routes/friend.routes.go` |
+| `/api/chats/*` | POST/GET/DELETE | Auth | `routes/chat.routes.go` |
+| `/api/group-chats/*` | POST/GET/PUT/DELETE | Auth | `routes/group_chat.routes.go` |
+| `/api/communities*` | POST/GET/PUT/DELETE | Auth | `routes/community.routes.go`, `routes/community_rule.routes.go`, `routes/contribution.routes.go` |
+| `/ads-management` | all | Auth+RBAC | `routes/ad.routes.go` |
+| `/customer/feed\|/customer/ads/:id/track` | GET/POST | Auth | |
 
 ## Business logic conventions
 
@@ -167,9 +125,11 @@ Two endpoints, two separate Hub instances, one unified `ws.Hub` type:
 
 ## Quirks
 
-- **UUID divergence**: most services use `utils.GenerateUUID()` (crypto/rand), but `media.service.go` uses `github.com/google/uuid`.
+- **UUID divergence**: `utils.GenerateUUID()` (crypto/rand, RFC 9562) is used by most services. `ad.service.go` has its own local `uuidGenerate()` using crypto/rand. `github.com/google/uuid` is an indirect dep only (cloudinary-go transitive).
 - **`utils/email.go`** reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly — not from `config.Env` struct (which also stores them unused). New email features should follow the same `os.Getenv` pattern or reconcile both paths.
-- **`utils/encryption.go`** provides AES-256-GCM chat message encryption. Not wired through env config (no `ENCRYPTION_KEY` env var found — key is generated per-chat or passed at call sites).
-- **`gorm` tags** appear in only 4 models: `post` (computed `->`), `password_history`/`post_share`/`notification_preference` (`primaryKey`). Models use `json` tags; `db` tags are unused.
-- **`validations` package**: 13 validators (`auth`, `block`, `chat`, `comment`, `community`, `community_rule`, `contribution`, `friend`, `group_chat`, `media`, `post`, `report`, `search`) but not all services use them — some rely on `binding` tags or inline checks.
-- **Air config** (`air.toml`) builds `cmd/main.go` specifically (not `./cmd`), excludes `_test.go` via regex.
+- **Chat encryption**: AES-256-GCM (`utils/encryption.go`). Key stored per-chat in `chat.model.go:EncryptionKey` (generated via `GenerateEncryptionKey` at chat creation). No env var for it.
+- **`gorm` tags** appear in 10+ model files for indexes, computed columns (`->`), and primary keys. Models primarily use `json` tags; `db` tags are unused.
+- **`validations` package**: 13 validators (`auth`, `block`, `chat`, `comment`, `community`, `community_rule`, `contribution`, `friend`, `group_chat`, `media`, `post`, `report`, `search`) but not all services use them — some rely on `binding` tags or inline checks. `dto/auth.dto.go` has no `binding` tags except `RefreshTokenInput.binding:"required"`.
+- **Air config** (`air.toml`) builds `cmd/main.go` specifically (not `./cmd` — the Dockerfile builds `./cmd`), excludes `_test.go` via regex.
+- **No Makefile, Taskfile, or script runner**. Everything is manual `go` commands.
+- **Build artifacts committed**: `cmd.exe`, `seed.exe`, `cloudinary-check.exe` in repo root.

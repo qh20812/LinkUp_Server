@@ -9,26 +9,37 @@ import (
 )
 
 var (
-	ErrPostWeightInvalid      = errors.New("trọng số bài viết phải từ 0 đến 100")
-	ErrCommentWeightInvalid   = errors.New("trọng số bình luận phải từ 0 đến 100")
-	ErrReactionWeightInvalid  = errors.New("trọng số phản hồi phải từ 0 đến 100")
-	ErrEventWeightInvalid     = errors.New("trọng số sự kiện phải từ 0 đến 100")
-	ErrThresholdInvalid       = errors.New("ngưỡng điểm phải lớn hơn 0")
-	ErrThresholdOrderInvalid  = errors.New("ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor")
-	ErrHashtagRequired        = errors.New("hashtag là bắt buộc")
-	ErrHashtagInvalidFormat   = errors.New("hashtag phải bắt đầu bằng #")
-	ErrEndDateBeforeStart     = errors.New("ngày kết thúc phải sau ngày bắt đầu")
-	ErrChallengeTitleRequired = errors.New("tên challenge là bắt buộc")
-	ErrChallengeTitleTooShort = errors.New("tên challenge phải có ít nhất 5 ký tự")
-	ErrChallengeTitleTooLong  = errors.New("tên challenge không được vượt quá 255 ký tự")
-	ErrDescriptionTooLong     = errors.New("mô tả challenge không được vượt quá 2000 ký tự")
-	ErrDateFormatInvalid      = errors.New("định dạng ngày không hợp lệ, cần dùng RFC3339")
+	ErrPostWeightInvalid          = errors.New("trọng số bài viết phải từ 0 đến 100")
+	ErrCommentWeightInvalid       = errors.New("trọng số bình luận phải từ 0 đến 100")
+	ErrReactionWeightInvalid      = errors.New("trọng số phản hồi phải từ 0 đến 100")
+	ErrEventWeightInvalid         = errors.New("trọng số sự kiện phải từ 0 đến 100")
+	ErrThresholdInvalid           = errors.New("ngưỡng điểm phải lớn hơn 0")
+	ErrThresholdOrderInvalid      = errors.New("ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor")
+	ErrHashtagRequired            = errors.New("hashtag là bắt buộc")
+	ErrHashtagInvalidFormat       = errors.New("hashtag phải bắt đầu bằng #")
+	ErrEndDateBeforeStart         = errors.New("ngày kết thúc phải sau ngày bắt đầu")
+	ErrChallengeStartDateInPast   = errors.New("ngày bắt đầu phải ở tương lai")
+	ErrChallengeTitleRequired     = errors.New("tên challenge là bắt buộc")
+	ErrChallengeTitleTooShort     = errors.New("tên challenge phải có ít nhất 5 ký tự")
+	ErrChallengeTitleTooLong      = errors.New("tên challenge không được vượt quá 255 ký tự")
+	ErrDescriptionTooLong         = errors.New("mô tả challenge không được vượt quá 2000 ký tự")
+	ErrDateFormatInvalid          = errors.New("định dạng ngày không hợp lệ, cần dùng RFC3339")
 )
 
 type ContributionValidation struct{}
 
 func NewContributionValidation() *ContributionValidation {
 	return &ContributionValidation{}
+}
+
+func (v *ContributionValidation) NormalizePagination(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+	return page, pageSize
 }
 
 func (v *ContributionValidation) ValidatePolicyInput(input dto.CreatePolicyInput) error {
@@ -66,20 +77,21 @@ func (v *ContributionValidation) ValidateUpdatePolicyInput(input dto.UpdatePolic
 	})
 }
 
-func (v *ContributionValidation) ValidateCreateChallenge(input dto.CreateChallengeInput) error {
+func (v *ContributionValidation) ValidateCreateChallenge(input dto.CreateChallengeInput) (time.Time, time.Time, error) {
 	if err := v.ValidateChallengeTitle(input.Title); err != nil {
-		return err
+		return time.Time{}, time.Time{}, err
 	}
 	if err := v.ValidateChallengeDescription(input.Description); err != nil {
-		return err
+		return time.Time{}, time.Time{}, err
 	}
 	if err := v.ValidateHashtag(input.Hashtag); err != nil {
-		return err
+		return time.Time{}, time.Time{}, err
 	}
-	if err := v.ValidateChallengeDates(input.StartDate, input.EndDate); err != nil {
-		return err
+	start, end, err := v.ValidateChallengeDates(input.StartDate, input.EndDate)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
 	}
-	return nil
+	return start, end, nil
 }
 
 func (v *ContributionValidation) ValidateChallengeTitle(title string) error {
@@ -117,17 +129,20 @@ func (v *ContributionValidation) ValidateHashtag(hashtag string) error {
 	return nil
 }
 
-func (v *ContributionValidation) ValidateChallengeDates(startDate, endDate string) error {
+func (v *ContributionValidation) ValidateChallengeDates(startDate, endDate string) (time.Time, time.Time, error) {
 	start, err := time.Parse(time.RFC3339, strings.TrimSpace(startDate))
 	if err != nil {
-		return ErrDateFormatInvalid
+		return time.Time{}, time.Time{}, ErrDateFormatInvalid
 	}
 	end, err := time.Parse(time.RFC3339, strings.TrimSpace(endDate))
 	if err != nil {
-		return ErrDateFormatInvalid
+		return time.Time{}, time.Time{}, ErrDateFormatInvalid
+	}
+	if start.Before(time.Now()) {
+		return time.Time{}, time.Time{}, ErrChallengeStartDateInPast
 	}
 	if !end.After(start) {
-		return ErrEndDateBeforeStart
+		return time.Time{}, time.Time{}, ErrEndDateBeforeStart
 	}
-	return nil
+	return start, end, nil
 }

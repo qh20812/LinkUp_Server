@@ -26,11 +26,13 @@ type UpdateMemberRoleInput struct {
 }
 
 type CommunityMemberItem struct {
-	UserID      string    `json:"user_id"`
-	DisplayName string    `json:"display_name"`
-	AvatarURI   string    `json:"avatar_uri"`
-	Role        string    `json:"role"`
-	JoinedAt    time.Time `json:"joined_at"`
+	UserID            string    `json:"user_id"`
+	DisplayName       string    `json:"display_name"`
+	AvatarURI         string    `json:"avatar_uri"`
+	Role              string    `json:"role"`
+	JoinedAt          time.Time `json:"joined_at"`
+	ContributionScore int       `json:"contribution_score"`
+	BadgeType         *string   `json:"badge_type,omitempty"`
 }
 
 type CommunityMemberListResponse struct {

@@ -39,6 +39,15 @@ func (s *postService) SetContributionService(contributionService *ContributionSe
 }
 
 func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string) (*models.Post, error) {
+	if communityID != nil {
+		if s.contributionService == nil {
+			return nil, errors.New("dịch vụ contribution chưa được khởi tạo")
+		}
+		if err := s.contributionService.RequireMember(ctx, *communityID, userID); err != nil {
+			return nil, err
+		}
+	}
+
 	postStatus := models.ParsePostStatus(status)
 
 	post := models.NewPost(userID, title, content, postStatus)
@@ -55,9 +64,9 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
 	}
 
-	if s.contributionService != nil {
+	if s.contributionService != nil && communityID != nil {
 		go func() {
-			if err := s.contributionService.ProcessChallengePost(ctx, post.ID, userID, content); err != nil {
+			if err := s.contributionService.ProcessChallengePost(ctx, *communityID, userID, content); err != nil {
 				log.Printf("[Contribution Error] không thể xử lý challenge cho post %s: %v", post.ID, err)
 			}
 		}()
@@ -113,6 +122,18 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 		if errDelete := s.repo.DeleteReaction(ctx, existingReaction.ID); errDelete != nil {
 			return "", "", errDelete
 		}
+
+		// Decrement positive_reactions when removing a reaction from another user's post.
+		if post, err := s.repo.FindByID(ctx, postID); err == nil && post != nil && post.UserID != userID {
+			if s.contributionService != nil && post.CommunityID != nil {
+				go func() {
+					if err := s.contributionService.DecrementPositiveReactions(ctx, *post.CommunityID, post.UserID); err != nil {
+						log.Printf("[Contribution Error] không thể giảm positive_reactions cho user %s: %v", post.UserID, err)
+					}
+				}()
+			}
+		}
+
 		return "removed", emoji.Code, nil
 	}
 

@@ -20,6 +20,7 @@ var (
 	ErrJoinRequestNotFound        = errors.New("yêu cầu tham gia không tồn tại")
 	ErrJoinRequestAlreadyHandled  = errors.New("yêu cầu tham gia đã được xử lý")
 	ErrNotCommunityAdmin          = errors.New("bạn không phải quản trị viên của cộng đồng này")
+	ErrNotCommunityMember         = errors.New("bạn không phải thành viên của cộng đồng này")
 	ErrCommunityNotFound          = errors.New("cộng đồng không tồn tại")
 	ErrMemberNotFound             = errors.New("thành viên không tồn tại trong cộng đồng")
 	ErrInvalidRole                = errors.New("vai trò không hợp lệ")

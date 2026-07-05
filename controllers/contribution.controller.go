@@ -26,11 +26,20 @@ func (ctrl *ContributionController) GetPolicy(c *gin.Context) {
 		return
 	}
 
-	policy, err := ctrl.contributionService.GetPolicy(c.Request.Context(), communityID)
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	userID := fmt.Sprintf("%v", val)
+
+	policy, err := ctrl.contributionService.GetPolicy(c.Request.Context(), communityID, userID)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
+		} else if err == validations.ErrNotCommunityMember {
+			status = http.StatusForbidden
 		}
 		c.JSON(status, gin.H{"error": err.Error()})
 		return
@@ -84,6 +93,15 @@ func (ctrl *ContributionController) GetMyContribution(c *gin.Context) {
 	userID := fmt.Sprintf("%v", val)
 	communityID := c.Param("communityID")
 
+	if err := ctrl.contributionService.RequireMember(c.Request.Context(), communityID, userID); err != nil {
+		status := http.StatusBadRequest
+		if err == validations.ErrCommunityNotFound {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
 	response, err := ctrl.contributionService.GetContributionResponse(c.Request.Context(), communityID, userID)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -123,7 +141,39 @@ func (ctrl *ContributionController) GetLeaderboard(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
+	if page < 1 || pageSize < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page và page_size phải lớn hơn 0"})
+		return
+	}
+
 	items, err := ctrl.contributionService.GetLeaderboard(c.Request.Context(), communityID, page, pageSize)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err == validations.ErrCommunityNotFound {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"page":      page,
+		"page_size": pageSize,
+		"data":      items,
+	})
+}
+
+func (ctrl *ContributionController) GetCommunityMembers(c *gin.Context) {
+	communityID := c.Param("communityID")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	if page < 1 || pageSize < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page và page_size phải lớn hơn 0"})
+		return
+	}
+
+	items, err := ctrl.contributionService.GetCommunityMembers(c.Request.Context(), communityID, page, pageSize)
 	if err != nil {
 		status := http.StatusBadRequest
 		if err == validations.ErrCommunityNotFound {
@@ -197,7 +247,15 @@ func (ctrl *ContributionController) JoinChallenge(c *gin.Context) {
 	}
 
 	if err := ctrl.contributionService.JoinChallenge(c.Request.Context(), userID, challengeID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if err == validations.ErrNotCommunityMember {
+			status = http.StatusForbidden
+		} else if err == services.ErrChallengeNotFound {
+			status = http.StatusNotFound
+		} else if err == services.ErrChallengeAlreadyJoined || err == services.ErrChallengeParticipantLimitHit {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -213,7 +271,11 @@ func (ctrl *ContributionController) GetChallengeParticipants(c *gin.Context) {
 
 	participants, err := ctrl.contributionService.GetChallengeParticipants(c.Request.Context(), challengeID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		status := http.StatusBadRequest
+		if err == services.ErrChallengeNotFound {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

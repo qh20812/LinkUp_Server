@@ -87,8 +87,8 @@ func TestValidateCreateChallenge(t *testing.T) {
 				Description:     "Share your best photo",
 				Hashtag:         "#LinkUpPhoto",
 				PointsPerPost:   15,
-				StartDate:       "2026-07-03T00:00:00Z",
-				EndDate:         "2026-07-10T00:00:00Z",
+				StartDate:       "2026-07-10T00:00:00Z",
+				EndDate:         "2026-07-17T00:00:00Z",
 				MaxParticipants: nil,
 			},
 			wantErr: "",
@@ -121,7 +121,7 @@ func TestValidateCreateChallenge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidateCreateChallenge(tt.input)
+			_, _, err := v.ValidateCreateChallenge(tt.input)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
