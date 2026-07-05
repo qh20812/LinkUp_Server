@@ -36,3 +36,40 @@ type AdminUserBanInput struct {
 	Reason   string `json:"reason" binding:"required"`
 	Duration string `json:"duration" binding:"required"`
 }
+
+type AdminPostFilterInput struct {
+	Keyword  string `json:"keyword" form:"keyword"`
+	Status   string `json:"status" form:"status"`
+	Page     int    `json:"page" form:"page"`
+	PageSize int    `json:"page_size" form:"page_size"`
+}
+
+type AdminPostListItem struct {
+	ID            string     `json:"id"`
+	UserID        string     `json:"user_id"`
+	Title         string     `json:"title"`
+	Content       string     `json:"content"`
+	Status        string     `json:"status"`
+	ViewsCount    int        `json:"views_count"`
+	LikesCount    int        `json:"likes_count"`
+	CommentsCount int        `json:"comments_count"`
+	SharesCount   int        `json:"shares_count"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+}
+
+type AdminPostListResponse struct {
+	Posts    []AdminPostListItem `json:"posts"`
+	Total    int64               `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
+	Message  string              `json:"message,omitempty"`
+}
+
+type AdminHidePostInput struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+type AdminUpdatePostStatusInput struct {
+	Status string `json:"status" binding:"required"`
+}

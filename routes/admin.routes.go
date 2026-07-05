@@ -15,4 +15,8 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.GET("/users", adminController.ListUsers)
 	adminGroup.PUT("/users/:userID/status", adminController.UpdateUserStatus)
 	adminGroup.POST("/users/:userID/ban", adminController.BanUser)
+
+	adminGroup.GET("/posts", adminController.ListPosts)
+	adminGroup.PUT("/posts/:postID/hide", adminController.HidePost)
+	adminGroup.PUT("/posts/:postID/status", adminController.ChangePostStatus)
 }

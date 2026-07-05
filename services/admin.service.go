@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"linkup/dto"
 	"linkup/models"
@@ -26,14 +27,20 @@ var banDurationMap = map[string]time.Duration{
 }
 
 type AdminService struct {
-	authRepo *repository.AuthRepository
-	banRepo  *repository.BanRepository
+	authRepo            *repository.AuthRepository
+	banRepo             *repository.BanRepository
+	postRepo            *repository.PostRepository
+	moderationRepo      *repository.ModerationRepository
+	notificationService *NotificationService
 }
 
-func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository) *AdminService {
+func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, moderationRepo *repository.ModerationRepository, notificationService *NotificationService) *AdminService {
 	return &AdminService{
-		authRepo: authRepo,
-		banRepo:  banRepo,
+		authRepo:            authRepo,
+		banRepo:             banRepo,
+		postRepo:            postRepo,
+		moderationRepo:      moderationRepo,
+		notificationService: notificationService,
 	}
 }
 
@@ -164,4 +171,203 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	}
 
 	return s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned)
+}
+
+func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input dto.AdminPostFilterInput) (dto.AdminPostListResponse, error) {
+	if superAdminID == "" {
+		return dto.AdminPostListResponse{}, errors.New("không có quyền truy cập")
+	}
+
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
+	if err != nil {
+		return dto.AdminPostListResponse{}, err
+	}
+	if !isSuperAdmin {
+		return dto.AdminPostListResponse{}, errors.New("chỉ superadmin mới có quyền")
+	}
+
+	page := input.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	status := strings.TrimSpace(strings.ToLower(input.Status))
+	if status != "" {
+		switch status {
+		case string(models.PostStatusActive),
+			string(models.PostStatusPublic),
+			string(models.PostStatusPrivate),
+			string(models.PostStatusHidden),
+			string(models.PostStatusFriend),
+			string(models.PostStatusDeleted):
+		default:
+			return dto.AdminPostListResponse{}, fmt.Errorf("trạng thái bài viết không hợp lệ")
+		}
+	}
+
+	posts, err := s.postRepo.ListPosts(ctx, input.Keyword, status, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminPostListResponse{}, err
+	}
+
+	total, err := s.postRepo.CountPosts(ctx, input.Keyword, status)
+	if err != nil {
+		return dto.AdminPostListResponse{}, err
+	}
+
+	items := make([]dto.AdminPostListItem, 0, len(posts))
+	for _, p := range posts {
+		items = append(items, dto.AdminPostListItem{
+			ID:            p.ID,
+			UserID:        p.UserID,
+			Title:         p.Title,
+			Content:       p.Content,
+			Status:        string(p.Status),
+			ViewsCount:    p.ViewsCount,
+			LikesCount:    p.LikesCount,
+			CommentsCount: p.CommentsCount,
+			SharesCount:   p.SharesCount,
+			CreatedAt:     p.CreatedAt,
+			UpdatedAt:     p.UpdatedAt,
+		})
+	}
+
+	resp := dto.AdminPostListResponse{
+		Posts:    items,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if len(items) == 0 {
+		resp.Message = "Không tìm thấy bài viết"
+	}
+	return resp, nil
+}
+
+func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string, input dto.AdminHidePostInput) error {
+	if superAdminID == "" {
+		return errors.New("không có quyền truy cập")
+	}
+
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
+	if err != nil {
+		return err
+	}
+	if !isSuperAdmin {
+		return errors.New("chỉ superadmin mới có quyền")
+	}
+
+	post, err := s.postRepo.FindByID(ctx, postID)
+	if err != nil {
+		return fmt.Errorf("bài viết không tồn tại")
+	}
+
+	if post.Status == models.PostStatusHidden {
+		return errors.New("bài viết đã ở trạng thái ẩn")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetPost, postID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if err := s.postRepo.UpdateStatus(ctx, postID, models.PostStatusHidden); err != nil {
+		return err
+	}
+
+	senderID := superAdminID
+	postIDPtr := postID
+	_, err = s.notificationService.Create(
+		ctx,
+		post.UserID,
+		&senderID,
+		models.NotificationTypeMessage,
+		"Bài viết của bạn đã bị ẩn vì: "+input.Reason,
+		&postIDPtr,
+		nil,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postID string, input dto.AdminUpdatePostStatusInput) error {
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, superAdminID, models.RoleSuperAdmin)
+	if err != nil {
+		return err
+	}
+	if !isSuperAdmin {
+		return fmt.Errorf("chỉ superadmin mới có quyền")
+	}
+
+	post, err := s.postRepo.FindByID(ctx, postID)
+	if err != nil {
+		return fmt.Errorf("bài viết không tồn tại")
+	}
+
+	statusValue := strings.TrimSpace(strings.ToLower(input.Status))
+	switch statusValue {
+	case string(models.PostStatusActive),
+		string(models.PostStatusPublic),
+		string(models.PostStatusPrivate),
+		string(models.PostStatusHidden),
+		string(models.PostStatusFriend),
+		string(models.PostStatusDeleted):
+	default:
+		return fmt.Errorf("trạng thái bài viết không hợp lệ")
+	}
+
+	newStatus := models.ParsePostStatus(statusValue)
+	if post.Status == newStatus {
+		return nil
+	}
+
+	moderation := models.NewModerationLog(
+		superAdminID,
+		models.ModerationActionUpdate,
+		models.ModerationTargetPost,
+		postID,
+		fmt.Sprintf("Cập nhật trạng thái thành %s", newStatus),
+	)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if err := s.postRepo.UpdateStatus(ctx, postID, newStatus); err != nil {
+		return err
+	}
+
+	senderID := superAdminID
+	postIDPtr := postID
+	_, err = s.notificationService.Create(
+		ctx,
+		post.UserID,
+		&senderID,
+		models.NotificationTypeMessage,
+		fmt.Sprintf("Bài viết của bạn đã được cập nhật trạng thái thành %s", newStatus),
+		&postIDPtr,
+		nil,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
