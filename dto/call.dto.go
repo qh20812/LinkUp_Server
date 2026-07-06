@@ -1,6 +1,18 @@
 package dto
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
+
+type IceServer struct {
+	URLs       string `json:"urls"`
+	Username   string `json:"username,omitempty"`
+	Credential string `json:"credential,omitempty"`
+}
+
+type IceServersResponse struct {
+	IceServers []IceServer `json:"ice_servers"`
+}
 
 type CallInitiatePayload struct {
 	CalleeID string `json:"callee_id"`
@@ -20,14 +32,16 @@ type CallIncomingPayload struct {
 }
 
 type CallStatusPayload struct {
-	CallID    string  `json:"call_id"`
-	Status    string  `json:"status"`
-	CallerID  string  `json:"caller_id"`
-	CalleeID  string  `json:"callee_id"`
-	CallType  string  `json:"call_type"`
-	StartedAt *int64  `json:"started_at,omitempty"`
-	EndedAt   *int64  `json:"ended_at,omitempty"`
-	Duration  int     `json:"duration,omitempty"`
+	CallID             string  `json:"call_id"`
+	Status             string  `json:"status"`
+	CallerID           string  `json:"caller_id"`
+	CalleeID           string  `json:"callee_id"`
+	CallType           string  `json:"call_type"`
+	VideoEnabledCaller bool    `json:"video_enabled_caller"`
+	VideoEnabledCallee bool    `json:"video_enabled_callee"`
+	StartedAt          *int64  `json:"started_at,omitempty"`
+	EndedAt            *int64  `json:"ended_at,omitempty"`
+	Duration           int     `json:"duration,omitempty"`
 }
 
 type CallBusyPayload struct {
@@ -42,4 +56,8 @@ type CallSignalPayload struct {
 
 type ToggleMuteRequest struct {
 	Muted bool `json:"muted"`
+}
+
+type ToggleVideoRequest struct {
+	VideoEnabled bool `json:"video_enabled"`
 }

@@ -16,6 +16,8 @@ Tạo một **Environment** mới trong Postman với các biến sau:
 | `userA_id` | *(empty)* | UUID của user A |
 | `userB_id` | *(empty)* | UUID của user B |
 | `userC_id` | *(empty)* | UUID của user C |
+| `video_call_id` | *(empty)* | ID của video call (type=video) |
+| `ice_servers` | *(empty)* | Danh sách ICE servers (GET /ice-servers) |
 
 ### 1.2. Seed database
 
@@ -49,6 +51,31 @@ pm.collectionVariables.set('userA_id', json.data.user.id);
 ```
 
 > Thay `seed_user_A@example.com` bằng email user có sẵn trong seed data.
+
+### 2.3. Get ICE servers
+
+Trước khi test video call, lấy danh sách ICE server (cần auth — giống như WS call):
+
+| Field | Value |
+|-------|-------|
+| **Method** | `GET` |
+| **URL** | `{{base_url}}/api/calls/ice-servers` |
+| **Headers** | `Authorization: Bearer {{token_A}}` |
+
+**Script — Tests** tab:
+```javascript
+const json = pm.response.json();
+pm.collectionVariables.set('ice_servers', JSON.stringify(json.ice_servers));
+```
+
+Response mẫu:
+```json
+{
+  "ice_servers": [
+    {"urls": "stun:stun.l.google.com:19302"}
+  ]
+}
+```
 
 ### 2.2. Login user B (callee)
 
@@ -580,9 +607,134 @@ Sau khi call đã connected, gửi message:
 | 2 | B reject | B | status=rejected |
 | 3 | B không thể accept lại | B | error "cuộc gọi không ở trạng thái chờ" |
 
+### 12.5. Video call flow
+
+1. Khởi tạo video call riêng (dùng `video_call_id` để không ảnh hưởng voice call test):
+
+| Step | Action | Token | API | Expected |
+|------|--------|-------|-----|----------|
+| 1 | A gọi B video | A | POST `/api/calls/initiate` `{"callee_id":"{{userB_id}}","call_type":"video"}` | `200`, DB: `call_type=video` |
+| 2 | Lưu `video_call_id` | — | — | Script: `pm.collectionVariables.set('video_call_id', json.data.id)` |
+| 3 | B chấp nhận | B | POST `/api/calls/{{video_call_id}}/accept` | `200` |
+| 4 | A bật video | A | POST `/api/calls/{{video_call_id}}/video` `{"video_enabled":true}` | `200`, DB: `video_enabled_caller=true` |
+| 5 | B bật video | B | POST `/api/calls/{{video_call_id}}/video` `{"video_enabled":true}` | `200`, DB: `video_enabled_callee=true` |
+| 6 | A tắt video | A | POST `/api/calls/{{video_call_id}}/video` `{"video_enabled":false}` | `200`, DB: `video_enabled_caller=false` |
+| 7 | A kết thúc | A | WS `call:end` | status=ended |
+
+2. Lỗi — toggle video trên voice call:
+
+| Step | Action | Token | API | Expected |
+|------|--------|-------|-----|----------|
+| 1 | Dùng `{{call_id}}` (voice call) | A | POST `/api/calls/{{call_id}}/video` `{"video_enabled":true}` | `400` "cuộc gọi không phải video call" |
+
 ---
 
-## 13. Kiểm tra Database
+## 13. GetIceServers
+
+Test endpoint public lấy cấu hình ICE server cho WebRTC.
+
+### 13.1. Lấy danh sách ICE servers
+
+| Field | Value |
+|-------|-------|
+| **Method** | `GET` |
+| **URL** | `{{base_url}}/api/calls/ice-servers` |
+| **Headers** | `Authorization: Bearer {{token_A}}` |
+
+**Expected** (`200 OK`):
+```json
+{
+    "ice_servers": [
+        {"urls": "stun:stun.l.google.com:19302"}
+    ]
+}
+```
+
+### 13.2. Verify yêu cầu token
+
+Gọi không có `Authorization` header → `401 Unauthorized`.
+
+---
+
+## 14. Test ToggleVideo
+
+> **Prerequisite**: video call đang `connected` (section 12.5).
+
+### 14.1. Caller bật video
+
+| Field | Value |
+|-------|-------|
+| **Method** | `POST` |
+| **URL** | `{{base_url}}/api/calls/{{video_call_id}}/video` |
+| **Headers** | `Authorization: Bearer {{token_A}}`, `Content-Type: application/json` |
+| **Body** | `{"video_enabled": true}` |
+
+**Expected**:
+```json
+{"message": "đã cập nhật trạng thái video"}
+```
+DB: `video_enabled_caller = true`.
+
+### 14.2. Caller tắt video
+
+| Field | Value |
+|-------|-------|
+| **Body** | `{"video_enabled": false}` |
+
+**Expected**: DB `video_enabled_caller = false`.
+
+### 14.3. Callee bật video
+
+| Field | Value |
+|-------|-------|
+| **Headers** | `Authorization: Bearer {{token_B}}` |
+| **Body** | `{"video_enabled": true}` |
+
+**Expected**: DB `video_enabled_callee = true`.
+
+### 14.4. Lỗi — user không phải participant
+
+| Field | Value |
+|-------|-------|
+| **Headers** | `Authorization: Bearer {{token_C}}` |
+
+**Expected**:
+```json
+{"error": "không phải người tham gia cuộc gọi"}
+```
+
+### 14.5. Lỗi — call chưa connected
+
+> **Prerequisite**: tạo video call mới, chưa accept.
+
+**Expected**:
+```json
+{"error": "cuộc gọi không ở trạng thái kết nối"}
+```
+
+### 14.6. Lỗi — voice call (call_type=voice)
+
+Dùng `{{call_id}}` (voice call đã connected):
+
+**Expected**:
+```json
+{"error": "cuộc gọi không phải video call"}
+```
+
+### 14.7. Lỗi — thiếu video_enabled
+
+| Field | Value |
+|-------|-------|
+| **Body** | `{}` |
+
+**Expected**:
+```json
+{"error": "video_enabled là bắt buộc"}
+```
+
+---
+
+## 15. Kiểm tra Database
 
 Sau mỗi test, kiểm tra database để verify:
 
@@ -590,18 +742,27 @@ Sau mỗi test, kiểm tra database để verify:
 -- Xem tất cả cuộc gọi
 SELECT id, caller_id, callee_id, call_type, status, 
        started_at, ended_at, duration,
-       muted_caller, muted_callee, created_at
+       muted_caller, muted_callee, 
+       video_enabled_caller, video_enabled_callee,
+       created_at
 FROM calls ORDER BY created_at DESC;
 
 -- Đếm số cuộc gọi active của 1 user
 SELECT COUNT(*) FROM calls 
 WHERE (caller_id = '<user_id>' OR callee_id = '<user_id>')
   AND status IN ('calling', 'ringing', 'connected');
+
+-- Kiểm tra video fields
+SELECT id, call_type, video_enabled_caller, video_enabled_callee
+FROM calls WHERE call_type = 'video';
+
+-- Kiểm tra cột mới không bị NULL
+SELECT COUNT(*) FROM calls WHERE video_enabled_caller IS NULL;
 ```
 
 ---
 
-## 14. Troubleshooting
+## 16. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
@@ -612,10 +773,13 @@ WHERE (caller_id = '<user_id>' OR callee_id = '<user_id>')
 | `"dịch vụ gọi không khả dụng"` | callService nil trong WS client | Connect qua `/api/calls/ws` (không phải `/ws`) |
 | Call không được tạo | Friend check fail | Kiểm tra bảng `friends` |
 | `"bạn đang có cuộc gọi khác"` | Caller đã có active call | End call cũ trước |
+| `"cuộc gọi không phải video call"` | ToggleVideo trên call_type=voice | Dùng video call để test |
+| `{"ice_servers":[]}` | Chưa cấu hình ICE_SERVER_URLS trong .env | Set biến môi trường |
+| `401` trên `/ice-servers` | Thiếu Authorization header | Gửi kèm token |
 
 ---
 
-## 15. Postman Collection Export
+## 17. Postman Collection Export
 
 Để import nhanh, tạo Collection với cấu trúc:
 
@@ -647,6 +811,24 @@ Voice Call Tests
 │   ├── B mute
 │   ├── Lỗi — không phải participant
 │   └── Lỗi — call chưa connected
+├── GetIceServers
+│   ├── Lấy danh sách
+│   └── Yêu cầu token → 401
+├── Video Call Flow
+│   ├── A gọi B (video)
+│   ├── B chấp nhận
+│   ├── A bật video
+│   ├── B bật video
+│   ├── A tắt video
+│   └── Lỗi — toggle trên voice call
+├── ToggleVideo
+│   ├── A bật
+│   ├── A tắt
+│   ├── B bật
+│   ├── Lỗi — không phải participant
+│   ├── Lỗi — call chưa connected
+│   ├── Lỗi — voice call
+│   └── Lỗi — thiếu video_enabled
 ├── GetCallDetail
 │   ├── A xem detail
 │   └── Lỗi — C xem detail

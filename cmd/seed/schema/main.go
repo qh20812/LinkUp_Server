@@ -395,6 +395,8 @@ func Run(env config.Env) error {
 			duration INT NOT NULL DEFAULT 0,
 			muted_caller TINYINT(1) NOT NULL DEFAULT 0,
 			muted_callee TINYINT(1) NOT NULL DEFAULT 0,
+			video_enabled_caller TINYINT(1) NOT NULL DEFAULT 0,
+			video_enabled_callee TINYINT(1) NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (caller_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (callee_id) REFERENCES users(id) ON DELETE CASCADE,

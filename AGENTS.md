@@ -1,6 +1,6 @@
 # LinkUp Server — AGENTS.md
 
-> `.gitignore`d (line 61). Local-only.
+> `.gitignore`d (line 61). Local-only. No README, no CI, no Makefile.
 
 ## Build & run
 
@@ -11,34 +11,30 @@ go build ./cmd/seed && ./seed.exe          # full seed (drops & recreates all ta
 go build ./... && go vet ./...              # verify & vet all packages
 ```
 
-**Tests** (no CI — `go build && go vet` is the gate):
+**Tests**:
 ```bash
-# Validation-only (no DB needed)
-go test ./tests/community/... -v
-go test ./tests/contribution/... -v
-
-# Internal service tests (some need TEST_DSN, see source for guard)
-go test ./services/...
+go test ./tests/community/... -v           # validation-only, no DB
+go test ./tests/contribution/... -v        # validation-only, no DB
+go test ./services/...                     # some need TEST_DSN env var
 ```
-
-`tests/chat/`, `tests/friend/`, `tests/post/` are empty. No linter configured.
+`tests/chat/`, `tests/friend/`, `tests/post/` are empty dirs. No linter configured.
 
 ## Architecture
 
 ```
 cmd/main.go → controller → service → repository (GORM)
-middlewares/  → auth.middleware.go + rbac.middleware.go (RequireRoles, CheckAdOwnership, RequireContributionLevel)
+middlewares/  → auth.middleware.go + rbac.middleware.go
 cmd/seed/     → raw database/sql (10 ordered steps)
 ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 ```
 
 - **Module `linkup`** (Go 1.26.3, Gin). Run from repo root.
-- **DB**: `db/mysql.go` returns `*sql.DB`; `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
+- **DB**: `db/mysql.go` returns `*sql.DB`; `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`. All code inside `if database != nil { ... }` guard — WS + health endpoint run without DB.
 - **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
 - **Validation split**: DTOs use `binding` tags (community, group_chat, post:`ReactPostInput`, chat). Others use `validations` package (13 validators, sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
 - **RBAC**: `RequireRoles` checks platform roles (`user_roles` JOIN, scope_id IS NULL). `CheckAdOwnership` guards ads for PARTNERs. `RequireContributionLevel` checks community contribution score threshold.
 - **Contribution system**: `PostService.SetContributionService` wired after `ContributionService` init in `cmd/main.go`.
-- **`PostService`, `MediaService`, and `AdService` are interfaces** in `services/`. All other services use concrete structs.
+- **`PostService`, `MediaService`, `AdService` are interfaces** in `services/`. All other services use concrete structs.
 - **Toggle pattern**: BlockService.ToggleBlock, FollowService.FollowToggle, FriendService.ToggleFriendRequest, postService.ReactPost: check existing → delete or create.
 - **Error languages**: All services return Vietnamese. RBAC middleware returns English.
 
@@ -54,7 +50,7 @@ ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 
 ## Routes
 
-All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS + health are outside). Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Authorization` header. `cmd/main.go` has Vietnamese comments.
+Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Authorization` header. `cmd/main.go` has Vietnamese comments.
 
 | Path | Auth | File(s) |
 |---|---|---|
@@ -78,6 +74,7 @@ All wired in `cmd/main.go` inside `if database != nil { ... }` guard (WS + healt
 | `/ads-management*` | Auth+RBAC | `ad.routes.go` |
 | `/customer/*` | Auth | `ad.routes.go` |
 | `/api/admin/*` | Auth | `admin.routes.go` |
+| `/api/calls/*` | Auth | `call.routes.go` |
 
 \* Contribution GET /leaderboard and /:userID are public (no Auth).
 
@@ -94,6 +91,10 @@ Two endpoints, two Hub instances, one unified `ws.Hub` type:
 - WS events: `chat:join`, `message:send`, `typing:start/stop`, `message:delete`, `message:search`.
 - **Chat messages** use AES-256-GCM encryption (`utils/encryption.go`). Key stored per-chat (`chat.model.go:EncryptionKey`).
 
+## Voice/Video calls
+
+Wired in `cmd/main.go` under `/api/calls/*` (all Auth). Uses the notification `hub` for signaling over WebSocket (`/api/calls/ws`). Separate `VoiceCallService` in `services/voice_call.service.go`.
+
 ## Seed system
 
 10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all 34+ tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`. Relationships step also seeds `community_rules` for each community.
@@ -106,21 +107,16 @@ Two endpoints, two Hub instances, one unified `ws.Hub` type:
 
 `utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). Separate `utils.GenerateToken` for single tokens (reset). Auth has `/api/auth/refresh` endpoint.
 
-## Skills
-
-`.claude/skills/golang-patterns` and `golang-testing` are installed and available as code-generation and testing references.
-
 ## Stubs / not wired
 
 - `controllers/user.controller.go` — empty. `repository/user.repository.go` has `Create`, `FindByEmail` but not wired in `cmd/main.go`.
 - `cmd/cloudinary-check/` — standalone binary, not part of the app.
-- `dto/auth.dto.go` — no `binding` tags (auth validation delegated to `validations.AuthValidation`).
-- `docs/` — admin/user function spec tables (prose, not wired code).
+- `dto/auth.dto.go` — no `binding` tags (auth validation delegated to `validations.AuthValidation`). Only `RefreshTokenInput` has `binding:"required"`.
+- `docs/` — 5 prose files (admin/user function specs, voice-call docs, community plan). Not wired code.
 
 ## Quirks
 
-- **UUID divergence**: `utils.GenerateUUID()` (crypto/rand, RFC 9562) used by most services. `ad.service.go` has `uuidGenerate()` using crypto/rand. `github.com/google/uuid` is indirect dep only.
+- **UUID divergence**: `utils.GenerateUUID()` (crypto/rand, RFC 9562) used by most services. `ad.service.go` has `uuidGenerate()` using crypto/rand with `ad_` prefix. `github.com/google/uuid` is indirect dep only.
 - **Air config** (`.air.toml`) builds `cmd/main.go` specifically (not `./cmd` — the Dockerfile builds `./cmd`).
-- **No Makefile/Taskfile** — all manual `go` commands.
 - **Build artifacts committed**: `cmd.exe`, `seed.exe`, `cloudinary-check.exe` in repo root.
 - **gorm tags**: 10+ model files use them for indexes, computed columns (`->`), PKs. Models primarily use `json` tags; `db` tags unused.

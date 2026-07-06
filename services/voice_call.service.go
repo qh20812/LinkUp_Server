@@ -53,16 +53,18 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 
 	now := time.Now().UTC()
 	call := &models.Call{
-		ID:        utils.GenerateUUID(),
-		CallerID:  callerID,
-		CalleeID:  payload.CalleeID,
-		CallType:  callType,
-		IsGroup:   false,
-		Status:    models.CallStatusCalling,
-		StartedAt: nil,
-		EndedAt:   nil,
-		Duration:  0,
-		CreatedAt: now,
+		ID:                 utils.GenerateUUID(),
+		CallerID:           callerID,
+		CalleeID:           payload.CalleeID,
+		CallType:           callType,
+		IsGroup:            false,
+		Status:             models.CallStatusCalling,
+		StartedAt:          nil,
+		EndedAt:            nil,
+		Duration:           0,
+		VideoEnabledCaller: false,
+		VideoEnabledCallee: false,
+		CreatedAt:          now,
 	}
 
 	isBusy, err := s.callRepo.CreateIfNotBusy(ctx, call)
@@ -92,11 +94,13 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 	s.hub.SendToUser(callerID, ws.OutgoingMessage{
 		Type: "call:status",
 		Data: dto.CallStatusPayload{
-			CallID:   call.ID,
-			Status:   string(models.CallStatusCalling),
-			CallerID: callerID,
-			CalleeID: payload.CalleeID,
-			CallType: string(callType),
+			CallID:             call.ID,
+			Status:             string(models.CallStatusCalling),
+			CallerID:           callerID,
+			CalleeID:           payload.CalleeID,
+			CallType:           string(callType),
+			VideoEnabledCaller: false,
+			VideoEnabledCallee: false,
 		},
 	})
 
@@ -124,12 +128,14 @@ func (s *VoiceCallService) AcceptCall(ctx context.Context, userID string, callID
 	}
 
 	payload := dto.CallStatusPayload{
-		CallID:    call.ID,
-		Status:    string(models.CallStatusConnected),
-		CallerID:  call.CallerID,
-		CalleeID:  call.CalleeID,
-		CallType:  string(call.CallType),
-		StartedAt: ptr(now.UnixMilli()),
+		CallID:             call.ID,
+		Status:             string(models.CallStatusConnected),
+		CallerID:           call.CallerID,
+		CalleeID:           call.CalleeID,
+		CallType:           string(call.CallType),
+		VideoEnabledCaller: call.VideoEnabledCaller,
+		VideoEnabledCallee: call.VideoEnabledCallee,
+		StartedAt:          ptr(now.UnixMilli()),
 	}
 
 	s.hub.SendToUsers([]string{call.CallerID, call.CalleeID}, ws.OutgoingMessage{
@@ -161,12 +167,14 @@ func (s *VoiceCallService) RejectCall(ctx context.Context, userID string, callID
 	}
 
 	payload := dto.CallStatusPayload{
-		CallID:   call.ID,
-		Status:   string(models.CallStatusRejected),
-		CallerID: call.CallerID,
-		CalleeID: call.CalleeID,
-		CallType: string(call.CallType),
-		EndedAt:  ptr(now.UnixMilli()),
+		CallID:             call.ID,
+		Status:             string(models.CallStatusRejected),
+		CallerID:           call.CallerID,
+		CalleeID:           call.CalleeID,
+		CallType:           string(call.CallType),
+		VideoEnabledCaller: call.VideoEnabledCaller,
+		VideoEnabledCallee: call.VideoEnabledCallee,
+		EndedAt:            ptr(now.UnixMilli()),
 	}
 
 	s.hub.SendToUsers([]string{call.CallerID, call.CalleeID}, ws.OutgoingMessage{
@@ -208,13 +216,15 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 	}
 
 	payload := dto.CallStatusPayload{
-		CallID:   call.ID,
-		Status:   string(newStatus),
-		CallerID: call.CallerID,
-		CalleeID: call.CalleeID,
-		CallType: string(call.CallType),
-		EndedAt:  ptr(now.UnixMilli()),
-		Duration: duration,
+		CallID:             call.ID,
+		Status:             string(newStatus),
+		CallerID:           call.CallerID,
+		CalleeID:           call.CalleeID,
+		CallType:           string(call.CallType),
+		VideoEnabledCaller: call.VideoEnabledCaller,
+		VideoEnabledCallee: call.VideoEnabledCallee,
+		EndedAt:            ptr(now.UnixMilli()),
+		Duration:           duration,
 	}
 
 	s.hub.SendToUsers([]string{call.CallerID, call.CalleeID}, ws.OutgoingMessage{
@@ -268,6 +278,46 @@ func (s *VoiceCallService) ToggleMute(ctx context.Context, userID string, callID
 			"call_id": callID,
 			"user_id": userID,
 			"muted":   muted,
+		},
+	})
+
+	return nil
+}
+
+func (s *VoiceCallService) ToggleVideo(ctx context.Context, userID string, callID string, videoEnabled bool) error {
+	call, err := s.callRepo.FindByID(ctx, callID)
+	if err != nil {
+		return fmt.Errorf("tìm cuộc gọi: %w", err)
+	}
+	if call == nil {
+		return errors.New("cuộc gọi không tồn tại")
+	}
+	if call.CallType != models.CallTypeVideo {
+		return errors.New("cuộc gọi không phải video call")
+	}
+	if call.Status != models.CallStatusConnected {
+		return errors.New("cuộc gọi không ở trạng thái kết nối")
+	}
+
+	switch userID {
+	case call.CallerID:
+		if err := s.callRepo.UpdateVideoEnabled(ctx, callID, &videoEnabled, nil); err != nil {
+			return fmt.Errorf("cập nhật video: %w", err)
+		}
+	case call.CalleeID:
+		if err := s.callRepo.UpdateVideoEnabled(ctx, callID, nil, &videoEnabled); err != nil {
+			return fmt.Errorf("cập nhật video: %w", err)
+		}
+	default:
+		return errors.New("không phải người tham gia cuộc gọi")
+	}
+
+	s.hub.SendToUsers([]string{call.CallerID, call.CalleeID}, ws.OutgoingMessage{
+		Type: "call:video",
+		Data: map[string]interface{}{
+			"call_id":       callID,
+			"user_id":       userID,
+			"video_enabled": videoEnabled,
 		},
 	})
 

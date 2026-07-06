@@ -68,14 +68,18 @@ func (c *Client) ReadPump() {
 			return
 		}
 
-		if c.service == nil {
-			continue
-		}
-
 		var event dto.WsEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			c.sendError("định dạng tin nhắn không hợp lệ")
 			continue
+		}
+
+		// Chat events cần ChatService. Call events có nil check riêng.
+		if c.service == nil {
+			switch event.Type {
+			case "chat:join", "message:send", "typing:start", "typing:stop", "message:delete", "message:search":
+				continue
+			}
 		}
 
 		switch event.Type {
@@ -303,6 +307,24 @@ func (c *Client) ReadPump() {
 				continue
 			}
 			if err := c.callService.HandleSignal(c.ctx, c.userID, payload.CallID, payload.Signal); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:video_toggle":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload struct {
+				CallID       string `json:"call_id"`
+				VideoEnabled bool   `json:"video_enabled"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu video toggle không hợp lệ")
+				continue
+			}
+			if err := c.callService.ToggleVideo(c.ctx, c.userID, payload.CallID, payload.VideoEnabled); err != nil {
 				c.sendError(err.Error())
 				continue
 			}

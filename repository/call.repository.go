@@ -150,6 +150,24 @@ func (r *CallRepository) UpdateMuted(ctx context.Context, id string, mutedCaller
 	return nil
 }
 
+func (r *CallRepository) UpdateVideoEnabled(ctx context.Context, id string, videoCaller, videoCallee *bool) error {
+	updates := map[string]interface{}{}
+	if videoCaller != nil {
+		updates["video_enabled_caller"] = *videoCaller
+	}
+	if videoCallee != nil {
+		updates["video_enabled_callee"] = *videoCallee
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	tx := r.db.WithContext(ctx).Model(&models.Call{}).Where("id = ?", id).Updates(updates)
+	if tx.Error != nil {
+		return fmt.Errorf("update call video: %w", tx.Error)
+	}
+	return nil
+}
+
 func (r *CallRepository) GetHistory(ctx context.Context, userID string, limit, offset int) ([]models.Call, error) {
 	var calls []models.Call
 	err := r.db.WithContext(ctx).

@@ -13,4 +13,5 @@ type CallService interface {
 	RejectCall(ctx context.Context, userID string, callID string) error
 	EndCall(ctx context.Context, userID string, callID string) error
 	HandleSignal(ctx context.Context, senderID string, callID string, signal json.RawMessage) error
+	ToggleVideo(ctx context.Context, userID string, callID string, videoEnabled bool) error
 }

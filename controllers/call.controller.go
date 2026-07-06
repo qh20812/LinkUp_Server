@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"linkup/config"
 	"linkup/dto"
@@ -25,6 +26,32 @@ func NewVoiceCallController(hub *ws.Hub, callService *services.VoiceCallService,
 		callService: callService,
 		env:         env,
 	}
+}
+
+func (ctrl *VoiceCallController) GetIceServers(c *gin.Context) {
+	servers := make([]dto.IceServer, 0)
+
+	// Parse STUN server URLs từ env (comma-separated)
+	if ctrl.env.IceServerUrls != "" {
+		urls := strings.Split(ctrl.env.IceServerUrls, ",")
+		for _, url := range urls {
+			url = strings.TrimSpace(url)
+			if url != "" {
+				servers = append(servers, dto.IceServer{URLs: url})
+			}
+		}
+	}
+
+	// Nếu có TURN server config, append vào danh sách
+	if ctrl.env.TurnServerUrl != "" {
+		servers = append(servers, dto.IceServer{
+			URLs:       ctrl.env.TurnServerUrl,
+			Username:   ctrl.env.TurnUsername,
+			Credential: ctrl.env.TurnCredential,
+		})
+	}
+
+	c.JSON(http.StatusOK, dto.IceServersResponse{IceServers: servers})
 }
 
 func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
@@ -149,6 +176,29 @@ func (ctrl *VoiceCallController) RejectCall(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "cuộc gọi đã bị từ chối"})
+}
+
+func (ctrl *VoiceCallController) ToggleVideo(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+	callID := c.Param("callID")
+
+	if callID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		return
+	}
+
+	var req dto.ToggleVideoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "video_enabled là bắt buộc"})
+		return
+	}
+
+	if err := ctrl.callService.ToggleVideo(c.Request.Context(), userID, callID, req.VideoEnabled); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "đã cập nhật trạng thái video"})
 }
 
 func (ctrl *VoiceCallController) ToggleMute(c *gin.Context) {

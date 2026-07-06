@@ -26,6 +26,11 @@ type Env struct {
 	FrontendResetURL string
 
 	CloudinaryEnv string
+
+	IceServerUrls  string
+	TurnServerUrl  string
+	TurnUsername   string
+	TurnCredential string
 }
 
 var (
@@ -83,6 +88,11 @@ func LoadEnv() error {
 		FrontendResetURL: getString("FRONTEND_RESET_URL", "http://localhost:3000"),
 
 		CloudinaryEnv: getRequiredString("CLOUDINARY_URL"),
+
+		IceServerUrls:  getString("ICE_SERVER_URLS", ""),
+		TurnServerUrl:  getString("TURN_SERVER_URL", ""),
+		TurnUsername:   getString("TURN_USERNAME", ""),
+		TurnCredential: getString("TURN_CREDENTIAL", ""),
 	}
 
 	missing := validateRequired(env)

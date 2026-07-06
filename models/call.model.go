@@ -34,9 +34,11 @@ type Call struct {
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
 	Duration    int        `json:"duration"`
-	MutedCaller bool       `json:"muted_caller"`
-	MutedCallee bool       `json:"muted_callee"`
-	CreatedAt   time.Time  `json:"created_at"`
+	MutedCaller        bool       `json:"muted_caller"`
+	MutedCallee        bool       `json:"muted_callee"`
+	VideoEnabledCaller bool       `json:"video_enabled_caller"`
+	VideoEnabledCallee bool       `json:"video_enabled_callee"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 func NewCall(callerID, calleeID string, callType CallType, isGroup bool) Call {
@@ -44,12 +46,14 @@ func NewCall(callerID, calleeID string, callType CallType, isGroup bool) Call {
 		callType = CallTypeVoice
 	}
 	return Call{
-		CallerID:  callerID,
-		CalleeID:  calleeID,
-		CallType:  callType,
-		IsGroup:   isGroup,
-		Status:    CallStatusCalling,
-		CreatedAt: time.Now().UTC(),
+		CallerID:           callerID,
+		CalleeID:           calleeID,
+		CallType:           callType,
+		IsGroup:            isGroup,
+		Status:             CallStatusCalling,
+		VideoEnabledCaller: false,
+		VideoEnabledCallee: false,
+		CreatedAt:          time.Now().UTC(),
 	}
 }
 

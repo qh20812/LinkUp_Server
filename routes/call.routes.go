@@ -12,6 +12,7 @@ func RegisterCallRoutes(router *gin.Engine, ctrl *controllers.VoiceCallControlle
 	callGroup := router.Group("/api/calls")
 	callGroup.Use(middlewares.AuthMiddleware(env))
 	{
+		callGroup.GET("/ice-servers", ctrl.GetIceServers)
 		callGroup.GET("/ws", ctrl.HandleWebsocket)
 		callGroup.GET("/history", ctrl.GetCallHistory)
 		callGroup.GET("/:callID", ctrl.GetCallDetail)
@@ -19,5 +20,6 @@ func RegisterCallRoutes(router *gin.Engine, ctrl *controllers.VoiceCallControlle
 		callGroup.POST("/:callID/accept", ctrl.AcceptCall)
 		callGroup.POST("/:callID/reject", ctrl.RejectCall)
 		callGroup.POST("/:callID/mute", ctrl.ToggleMute)
+		callGroup.POST("/:callID/video", ctrl.ToggleVideo)
 	}
 }
