@@ -129,3 +129,15 @@ func (h *Hub) SendToUser(userID string, msg OutgoingMessage) {
 		}
 	}
 }
+
+func (h *Hub) IsUserOnline(userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[userID]) > 0
+}
+
+func (h *Hub) SendToUsers(userIDs []string, msg OutgoingMessage) {
+	for _, uid := range userIDs {
+		h.SendToUser(uid, msg)
+	}
+}

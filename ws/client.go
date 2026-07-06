@@ -26,18 +26,20 @@ type Client struct {
 	conn        *websocket.Conn
 	hub         *Hub
 	service     ChatService
+	callService CallService
 	userID      string
 	send        chan []byte
 	joinedChats map[string]struct{}
 	typingChats map[string]bool
 }
 
-func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, userID string) *Client {
+func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, callService CallService, userID string) *Client {
 	return &Client{
 		ctx:         ctx,
 		conn:        conn,
 		hub:         hub,
 		service:     service,
+		callService: callService,
 		userID:      userID,
 		send:        make(chan []byte, 256),
 		joinedChats: make(map[string]struct{}),
@@ -216,6 +218,94 @@ func (c *Client) ReadPump() {
 				}),
 			})
 			c.send <- resp
+
+		case "call:busy":
+			// Client xác nhận đã nhận được thông báo busy — bỏ qua, không cần xử lý thêm
+			continue
+
+		case "call:initiate":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallInitiatePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu khởi tạo cuộc gọi không hợp lệ")
+				continue
+			}
+			call, err := c.callService.InitiateCall(c.ctx, c.userID, payload)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if call == nil {
+				continue
+			}
+			resp, _ := json.Marshal(dto.WsEvent{
+				Type:    "call:initiated",
+				Payload: mustMarshal(map[string]string{"call_id": call.ID}),
+			})
+			c.send <- resp
+
+		case "call:accept":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallActionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu chấp nhận không hợp lệ")
+				continue
+			}
+			if err := c.callService.AcceptCall(c.ctx, c.userID, payload.CallID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:reject":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallActionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu từ chối không hợp lệ")
+				continue
+			}
+			if err := c.callService.RejectCall(c.ctx, c.userID, payload.CallID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:end":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallActionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu kết thúc không hợp lệ")
+				continue
+			}
+			if err := c.callService.EndCall(c.ctx, c.userID, payload.CallID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:signal":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallSignalPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tín hiệu không hợp lệ")
+				continue
+			}
+			if err := c.callService.HandleSignal(c.ctx, c.userID, payload.CallID, payload.Signal); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
 
 		default:
 			c.sendError("loại sự kiện không xác định")
