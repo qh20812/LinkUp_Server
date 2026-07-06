@@ -20,6 +20,89 @@ func NewCommunityRepository(db *gorm.DB) *CommunityRepository {
 	return &CommunityRepository{db: db}
 }
 
+// CreateCommunityWithDefaultGroupChat tạo community, group_member, user_roles, chat và participant trong 1 transaction.
+func (r *CommunityRepository) CreateCommunityWithDefaultGroupChat(
+	ctx context.Context,
+	community *models.Community,
+	member *models.GroupMember,
+	userRoles []models.UserRole,
+	chat *models.Chat,
+	participants []models.ChatParticipant,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(community).Error; err != nil {
+			return fmt.Errorf("lỗi khi lưu thông tin cộng đồng: %w", err)
+		}
+		if err := tx.Create(member).Error; err != nil {
+			return fmt.Errorf("lỗi khi lưu thông tin thành viên: %w", err)
+		}
+		for i := range userRoles {
+			userRoles[i].ID = utils.GenerateUUID()
+			userRoles[i].AssignedAt = time.Now().UTC()
+			if err := tx.Create(&userRoles[i]).Error; err != nil {
+				return fmt.Errorf("lỗi khi gán role cho người tạo: %w", err)
+			}
+		}
+		if err := tx.Create(chat).Error; err != nil {
+			return fmt.Errorf("lỗi khi tạo group chat mặc định: %w", err)
+		}
+		for i := range participants {
+			if err := tx.Create(&participants[i]).Error; err != nil {
+				return fmt.Errorf("lỗi khi thêm participant vào group chat: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+// FindDefaultGroupChatByCommunity tìm group chat mặc định của community.
+func (r *CommunityRepository) FindDefaultGroupChatByCommunity(ctx context.Context, communityID string) (*models.Chat, error) {
+	var chat models.Chat
+	err := r.db.WithContext(ctx).
+		Where("community_id = ? AND type = ?", communityID, models.ChatTypeGroup).
+		First(&chat).Error
+	if err != nil {
+		return nil, err
+	}
+	return &chat, nil
+}
+
+// AddCommunityMemberAndGroupChat thêm member vào community và group chat trong 1 transaction.
+func (r *CommunityRepository) AddCommunityMemberAndGroupChat(ctx context.Context, communityID, userID, chatID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+
+		member := models.NewGroupMember(communityID, userID)
+		member.ID = utils.GenerateUUID()
+		member.JoinedAt = now
+		member.Points = 0
+		if err := tx.Create(&member).Error; err != nil {
+			return fmt.Errorf("thêm thành viên thất bại: %w", err)
+		}
+
+		var groupMemberRole models.Role
+		if err := tx.Where("name = ?", models.RoleGroupMember).First(&groupMemberRole).Error; err != nil {
+			return fmt.Errorf("không tìm thấy role GROUP_MEMBER: %w", err)
+		}
+
+		userRole := models.NewScopedUserRole(userID, groupMemberRole.ID, communityID, models.ScopeTypeCommunity)
+		userRole.ID = utils.GenerateUUID()
+		userRole.AssignedAt = now
+		if err := tx.Create(&userRole).Error; err != nil {
+			return fmt.Errorf("gán role thành viên thất bại: %w", err)
+		}
+
+		participant := models.NewChatParticipant(chatID, userID, models.ChatRoleMember)
+		participant.ID = utils.GenerateUUID()
+		participant.JoinedAt = now
+		if err := tx.Create(&participant).Error; err != nil {
+			return fmt.Errorf("thêm participant vào group chat thất bại: %w", err)
+		}
+
+		return nil
+	})
+}
+
 // CreateWithRoles tạo community, group_member, và user_roles trong 1 transaction.
 func (r *CommunityRepository) CreateWithRoles(ctx context.Context, community *models.Community, member *models.GroupMember, userRoles []models.UserRole) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -192,7 +275,8 @@ func (r *CommunityRepository) FindPendingJoinRequestsByCommunity(ctx context.Con
 }
 
 // ApproveJoinRequest transaction: cập nhật status = approved + tạo group_member + gán GROUP_MEMBER role.
-func (r *CommunityRepository) ApproveJoinRequest(ctx context.Context, requestID string) error {
+// Nếu chatID != nil, thêm user vào chat_participants của group chat.
+func (r *CommunityRepository) ApproveJoinRequest(ctx context.Context, requestID string, chatID *string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var req models.CommunityJoinRequest
 		if err := tx.Where("id = ? AND status = ?", requestID, models.JoinRequestStatusPending).First(&req).Error; err != nil {
@@ -224,6 +308,15 @@ func (r *CommunityRepository) ApproveJoinRequest(ctx context.Context, requestID 
 		userRole.AssignedAt = now
 		if err := tx.Create(&userRole).Error; err != nil {
 			return fmt.Errorf("gán role thành viên thất bại: %w", err)
+		}
+
+		if chatID != nil {
+			participant := models.NewChatParticipant(*chatID, req.UserID, models.ChatRoleMember)
+			participant.ID = utils.GenerateUUID()
+			participant.JoinedAt = now
+			if err := tx.Create(&participant).Error; err != nil {
+				return fmt.Errorf("thêm participant vào group chat thất bại: %w", err)
+			}
 		}
 
 		return nil

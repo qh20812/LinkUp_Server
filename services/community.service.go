@@ -37,42 +37,43 @@ func NewCommunityService(repo *repository.CommunityRepository, validation *valid
 	}
 }
 
-func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI string) (*models.Community, error) {
+func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI string, autoApprove bool) (*models.Community, *models.Chat, error) {
 	if err := s.validation.ValidateCreateCommunity(name, description, avatarURI); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	isAdmin, err := s.authRepo.HasRole(ctx, creatorID, models.RoleAdmin)
 	if err != nil {
-		return nil, errors.New("lỗi khi kiểm tra quyền người dùng")
+		return nil, nil, errors.New("lỗi khi kiểm tra quyền người dùng")
 	}
 	isSuperAdmin, err := s.authRepo.HasRole(ctx, creatorID, models.RoleSuperAdmin)
 	if err != nil {
-		return nil, errors.New("lỗi khi kiểm tra quyền người dùng")
+		return nil, nil, errors.New("lỗi khi kiểm tra quyền người dùng")
 	}
 	if isAdmin || isSuperAdmin {
-		return nil, errors.New("quản trị viên không được tạo cộng đồng")
+		return nil, nil, errors.New("quản trị viên không được tạo cộng đồng")
 	}
 
 	creator, err := s.authRepo.FindByID(ctx, creatorID)
 	if err != nil {
-		return nil, errors.New("người dùng không tồn tại")
+		return nil, nil, errors.New("người dùng không tồn tại")
 	}
 	if !creator.IsActive() {
-		return nil, errors.New("tài khoản chưa được kích hoạt, không thể tạo cộng đồng")
+		return nil, nil, errors.New("tài khoản chưa được kích hoạt, không thể tạo cộng đồng")
 	}
 
 	taken, err := s.repo.IsNameTaken(ctx, name)
 	if err != nil {
-		return nil, errors.New("lỗi khi kiểm tra tên cộng đồng")
+		return nil, nil, errors.New("lỗi khi kiểm tra tên cộng đồng")
 	}
 	if taken {
-		return nil, validations.ErrCommunityNameExists
+		return nil, nil, validations.ErrCommunityNameExists
 	}
 
 	now := time.Now().UTC()
 	community := models.NewCommunity(creatorID, name, description, avatarURI)
 	community.ID = utils.GenerateUUID()
+	community.AutoApprove = autoApprove
 	community.CreatedAt = now
 
 	adminMember := models.NewGroupMember(community.ID, creatorID)
@@ -88,18 +89,39 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 
 	var communityAdminRole, groupAdminRole models.Role
 	if err := s.repo.FindRoleByName(ctx, models.RoleCommunityAdmin, &communityAdminRole); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := s.repo.FindRoleByName(ctx, models.RoleGroupAdmin, &groupAdminRole); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	userRoles[0].RoleID = communityAdminRole.ID
 	userRoles[1].RoleID = groupAdminRole.ID
 
-	if err := s.repo.CreateWithRoles(ctx, &community, &adminMember, userRoles); err != nil {
-		return nil, err
+	encKey, err := utils.GenerateEncryptionKey()
+	if err != nil {
+		return nil, nil, errors.New("lỗi khi tạo mã khóa mã hóa cho group chat")
 	}
-	return &community, nil
+
+	chat := models.NewChat(models.ChatTypeGroup, community.Name, community.AvatarURI)
+	chat.ID = utils.GenerateUUID()
+	chat.EncryptionKey = encKey
+	chat.CommunityID = &community.ID
+	chat.CreatedAt = now
+
+	adminParticipant := models.NewChatParticipant(chat.ID, creatorID, models.ChatRoleAdmin)
+	adminParticipant.ID = utils.GenerateUUID()
+	adminParticipant.JoinedAt = now
+
+	if err := s.repo.CreateCommunityWithDefaultGroupChat(ctx, &community, &adminMember, userRoles, &chat, []models.ChatParticipant{adminParticipant}); err != nil {
+		return nil, nil, err
+	}
+
+	s.notifService.Create(ctx, creatorID, nil,
+		models.NotificationTypeCommunityGroupChatAdded,
+		"Tạo cộng đồng thành công! Group chat mặc định đã sẵn sàng",
+		nil, nil, nil)
+
+	return &community, &chat, nil
 }
 
 func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, communityID string, file *multipart.FileHeader) error {
@@ -136,31 +158,49 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 	return nil
 }
 
-func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID string) (string, error) {
+func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID string) (*dto.JoinResult, error) {
 	user, err := s.authRepo.FindByID(ctx, userID)
 	if err != nil {
-		return "", errors.New("người dùng không tồn tại")
+		return nil, errors.New("người dùng không tồn tại")
 	}
 	if !user.IsActive() {
-		return "", errors.New("tài khoản chưa được kích hoạt")
+		return nil, errors.New("tài khoản chưa được kích hoạt")
 	}
 
 	community, err := s.repo.FindByID(ctx, communityID)
 	if err != nil {
-		return "", validations.ErrCommunityNotFound
+		return nil, validations.ErrCommunityNotFound
 	}
 
 	isMember, err := s.repo.IsUserMember(ctx, communityID, userID)
 	if err != nil {
-		return "", errors.New("lỗi khi kiểm tra thành viên")
+		return nil, errors.New("lỗi khi kiểm tra thành viên")
 	}
 	if isMember {
-		return "", validations.ErrAlreadyMember
+		return nil, validations.ErrAlreadyMember
+	}
+
+	if community.AutoApprove {
+		groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, communityID)
+		if err != nil {
+			return nil, errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+		}
+
+		if err := s.repo.AddCommunityMemberAndGroupChat(ctx, communityID, userID, groupChat.ID); err != nil {
+			return nil, err
+		}
+
+		s.notifService.Create(ctx, userID, &community.CreatorID,
+			models.NotificationTypeCommunityGroupChatAdded,
+			"Bạn đã tham gia cộng đồng và group chat mặc định",
+			nil, &communityID, nil)
+
+		return &dto.JoinResult{AutoApproved: true}, nil
 	}
 
 	existing, err := s.repo.FindPendingJoinRequestByUserAndCommunity(ctx, communityID, userID)
 	if err == nil && existing != nil {
-		return "", validations.ErrJoinRequestPending
+		return nil, validations.ErrJoinRequestPending
 	}
 
 	s.repo.DeleteNonPendingJoinRequests(ctx, communityID, userID)
@@ -171,12 +211,12 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID 
 	joinReq.CreatedAt = now
 
 	if err := s.repo.CreateJoinRequest(ctx, &joinReq); err != nil {
-		return "", errors.New("gửi yêu cầu tham gia thất bại")
+		return nil, errors.New("gửi yêu cầu tham gia thất bại")
 	}
 
 	s.notifService.Create(ctx, community.CreatorID, &userID, models.NotificationTypeCommunityJoinRequest, "đã gửi yêu cầu tham gia cộng đồng", nil, &userID, nil)
 
-	return joinReq.ID, nil
+	return &dto.JoinResult{RequestID: joinReq.ID, AutoApproved: false}, nil
 }
 
 func (s *CommunityService) ListPendingRequests(ctx context.Context, adminID, communityID string) (dto.JoinRequestListResponse, error) {
@@ -224,11 +264,19 @@ func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requ
 		return validations.ErrNotCommunityAdmin
 	}
 
-	if err := s.repo.ApproveJoinRequest(ctx, requestID); err != nil {
+	groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, req.CommunityID)
+	if err != nil {
+		return errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+	}
+
+	if err := s.repo.ApproveJoinRequest(ctx, requestID, &groupChat.ID); err != nil {
 		return err
 	}
 
-	s.notifService.Create(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinApproved, "đã chấp nhận yêu cầu tham gia cộng đồng", nil, &adminID, nil)
+	s.notifService.Create(ctx, req.UserID, &adminID,
+		models.NotificationTypeCommunityGroupChatAdded,
+		"Bạn đã được duyệt vào cộng đồng và thêm vào group chat",
+		nil, &req.CommunityID, nil)
 
 	return nil
 }

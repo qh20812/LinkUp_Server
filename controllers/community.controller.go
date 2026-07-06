@@ -26,6 +26,7 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 
 	name := c.PostForm("name")
 	description := c.PostForm("description")
+	autoApprove := c.PostForm("auto_approve") == "true"
 
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
@@ -43,7 +44,7 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 		avatarURI = media.FileURI
 	}
 
-	community, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI)
+	community, groupChat, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, autoApprove)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -52,6 +53,11 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "Tạo cộng đồng thành công!",
 		"community_id": community.ID,
+		"auto_approve": community.AutoApprove,
+		"default_group_chat": gin.H{
+			"id":   groupChat.ID,
+			"name": groupChat.Name,
+		},
 	})
 }
 
@@ -99,16 +105,22 @@ func (ctrl *CommunityController) RequestJoin(c *gin.Context) {
 		return
 	}
 
-	requestID, err := ctrl.communityService.RequestJoin(c.Request.Context(), userID, communityID)
+	result, err := ctrl.communityService.RequestJoin(c.Request.Context(), userID, communityID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":    "Gửi yêu cầu tham gia cộng đồng thành công!",
-		"request_id": requestID,
-	})
+	if result.AutoApproved {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Tham gia cộng đồng thành công!",
+		})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"message":    "Gửi yêu cầu tham gia cộng đồng thành công!",
+			"request_id": result.RequestID,
+		})
+	}
 }
 
 func (ctrl *CommunityController) ListPendingJoinRequests(c *gin.Context) {

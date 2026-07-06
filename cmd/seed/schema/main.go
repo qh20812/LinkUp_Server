@@ -89,6 +89,7 @@ func Run(env config.Env) error {
 			description TEXT,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
 			background_uri VARCHAR(512) NOT NULL DEFAULT '',
+			auto_approve TINYINT(1) NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -121,7 +122,10 @@ func Run(env config.Env) error {
 			name VARCHAR(255) NOT NULL DEFAULT '',
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
 			encryption_key VARCHAR(255) NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL
+			community_id VARCHAR(36) NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_chats_community (community_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 6. Depends on users, posts

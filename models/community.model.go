@@ -9,6 +9,7 @@ type Community struct {
 	Description   string     `json:"description"`
 	AvatarURI     string     `json:"avatar_uri"`
 	BackgroundURI string     `json:"background_uri"`
+	AutoApprove   bool       `json:"auto_approve"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }

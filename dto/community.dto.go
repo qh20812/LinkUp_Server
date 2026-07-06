@@ -43,6 +43,11 @@ type KickMemberInput struct {
 	Reason string `json:"reason" binding:"required,min=3,max=500"`
 }
 
+type JoinResult struct {
+	RequestID    string `json:"request_id,omitempty"`
+	AutoApproved bool   `json:"auto_approved"`
+}
+
 type LeaveCommunityInput struct {
 	Quiet bool `json:"quiet" binding:"omitempty"`
 }
