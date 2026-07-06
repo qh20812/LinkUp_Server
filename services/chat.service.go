@@ -316,13 +316,13 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 		if msg.DeletedForSender {
 			return nil, errors.New("tin nhắn đã bị xóa")
 		}
-	} else {
-		if msg.DeletedForReceiver {
-			return nil, errors.New("tin nhắn đã bị xóa")
-		}
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
 	}
 
-	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+	if msg.DeletedForReceiver {
+		return nil, errors.New("tin nhắn đã bị xóa")
+	}
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, false, true, nil)
 }
 
 func (s *ChatService) GetAllMessages(ctx context.Context, userID, chatID string) ([]models.Message, error) {

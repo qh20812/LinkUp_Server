@@ -207,6 +207,12 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, notificationService)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
+
+		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
+		callRepository := repository.NewCallRepository(gormDB)
+		callService := services.NewVoiceCallService(callRepository, friendRepository, hub)
+		callController := controllers.NewVoiceCallController(hub, callService, env)
+		routes.RegisterCallRoutes(router, callController, env)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng

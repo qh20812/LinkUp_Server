@@ -385,16 +385,23 @@ func Run(env config.Env) error {
 		// 23. Depends on chats, users
 		`CREATE TABLE IF NOT EXISTS calls (
 			id VARCHAR(36) PRIMARY KEY,
-			chat_id VARCHAR(36) NULL,
 			caller_id VARCHAR(36) NOT NULL,
+			callee_id VARCHAR(36) NOT NULL,
 			call_type VARCHAR(20) NOT NULL DEFAULT 'voice',
 			is_group TINYINT(1) NOT NULL DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'completed',
-			started_at DATETIME NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'calling',
+			started_at DATETIME NULL,
 			ended_at DATETIME NULL,
-			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL,
+			duration INT NOT NULL DEFAULT 0,
+			muted_caller TINYINT(1) NOT NULL DEFAULT 0,
+			muted_callee TINYINT(1) NOT NULL DEFAULT 0,
+			video_enabled_caller TINYINT(1) NOT NULL DEFAULT 0,
+			video_enabled_callee TINYINT(1) NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (caller_id) REFERENCES users(id) ON DELETE CASCADE,
-			INDEX idx_calls_caller (caller_id)
+			FOREIGN KEY (callee_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_calls_caller (caller_id),
+			INDEX idx_calls_callee (callee_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 24. Depends on ads, users

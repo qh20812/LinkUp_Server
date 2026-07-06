@@ -167,22 +167,22 @@ func Run(env config.Env, state *internal.SeedState) error {
 	}
 
 	callTypes := []string{"voice", "video"}
-	callStatuses := []string{"completed", "completed", "missed", "declined"}
+	callStatuses := []string{"ended", "ended", "missed", "rejected"}
 
 	for i := 0; i < 5; i++ {
 		callerID := state.UserIDs[i%len(state.UserIDs)]
-		chatID := internal.Ptr(state.ChatIDs[i%len(state.ChatIDs)])
+		calleeID := state.UserIDs[(i+1)%len(state.UserIDs)]
 		callType := pick(callTypes)
 		status := pick(callStatuses)
 		startedAt := now.Add(-time.Duration(randRange(1, 48)) * time.Hour)
 		var endedAt *time.Time
-		if status == "completed" {
+		if status == "ended" {
 			endedAt = internal.PtrTime(startedAt.Add(time.Duration(randRange(60, 3600)) * time.Second))
 		}
 
 		if err := internal.Exec(database,
-			`INSERT INTO calls (id, chat_id, caller_id, call_type, is_group, status, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			internal.UUID(), chatID, callerID, callType, false, status, startedAt, endedAt,
+			`INSERT INTO calls (id, caller_id, callee_id, call_type, is_group, status, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			internal.UUID(), callerID, calleeID, callType, false, status, startedAt, endedAt,
 		); err != nil {
 			return fmt.Errorf("extended: insert call %d: %w", i, err)
 		}

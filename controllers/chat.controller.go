@@ -49,7 +49,7 @@ func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
 		return
 	}
 
-	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, userID)
+	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, userID)
 	ctrl.hub.RegisterClient(client)
 
 	go client.WritePump()
