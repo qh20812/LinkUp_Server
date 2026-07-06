@@ -1,6 +1,6 @@
 # LinkUp Server
 
-Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, tin nhắn real-time (WebSocket), voice/video call, nhóm cộng đồng, quảng cáo, và hệ thống điểm đóng góp.
+Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, tin nhắn real-time (WebSocket), voice/video call (WebRTC + ICE), nhóm cộng đồng, quảng cáo, và hệ thống điểm đóng góp.
 
 ## Tech Stack
 
@@ -19,7 +19,7 @@ Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, tin nhắn r
 - **Profile:** Quản lý thông tin cá nhân, avatar, storage quota
 - **Follow & Bạn bè:** Theo dõi, kết bạn, chặn người dùng
 - **Real-time Chat:** Tin nhắn trực tiếp & nhóm, mã hóa đầu cuối, typing indicator
-- **Voice/Video Call:** Signaling qua WebSocket, quản lý cuộc gọi
+- **Voice/Video Call:** WebRTC signaling qua WebSocket, ICE server config (STUN/TURN), quản lý cuộc gọi (initiate, accept, reject, end, mute, video toggle)
 - **Cộng đồng:** Nhóm bài viết, quy tắc, lời mời, mã mời
 - **Điểm đóng góp:** Policy, challenge, leaderboard
 - **Quảng cáo:** Quản lý quảng cáo cho đối tác (RBAC)
@@ -69,9 +69,17 @@ JWT_EXPIRES_IN=15
 # Cloudinary
 CLOUDINARY_URL=cloudinary://api_key:api_secret@cloud_name
 
-# Email (SMTP Gmail - tùy chọn)
+# Email (SMTP Gmail — tùy chọn)
 GMAIL_USER=your-email@gmail.com
 GMAIL_PASSWORD=your-app-password
+
+# ICE Servers (WebRTC — tùy chọn)
+# STUN: comma-separated URLs
+ICE_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
+# TURN: để trống nếu chưa dùng
+TURN_SERVER_URL=
+TURN_USERNAME=
+TURN_CREDENTIAL=
 
 # Server
 PORT=8080
@@ -120,7 +128,7 @@ go build -o ./tmp/main.exe ./cmd
 ├── repository/                 # Database access layer
 ├── routes/                     # Route registration (20 files)
 ├── services/                   # Business logic
-├── tests/                      # Integration tests
+├── tests/                      # Validation tests (community, contribution, call)
 ├── utils/                      # JWT, encryption, hash, UUID...
 ├── validations/                # Input validation (13 validators)
 └── ws/                         # WebSocket hub & client
@@ -174,7 +182,15 @@ Tất cả các endpoint dưới đây yêu cầu `Authorization: Bearer <token>
 | GET/POST/PUT/DELETE | `/ads-management*` | Quản lý quảng cáo (RBAC: PARTNER) |
 | GET/POST | `/customer/*` | Quảng cáo (RBAC: PARTNER) |
 | GET/POST | `/api/admin/*` | Admin |
-| GET/POST | `/api/calls/*` | Voice/Video call |
+| GET | `/api/calls/ice-servers` | ICE server config (STUN/TURN) |
+| GET | `/api/calls/history` | Lịch sử cuộc gọi |
+| GET | `/api/calls/:callID` | Chi tiết cuộc gọi |
+| POST | `/api/calls/initiate` | Tạo cuộc gọi (body: `callee_id`, `call_type`) |
+| POST | `/api/calls/:callID/accept` | Chấp nhận cuộc gọi |
+| POST | `/api/calls/:callID/reject` | Từ chối cuộc gọi |
+| POST | `/api/calls/:callID/mute` | Bật/tắt mic |
+| POST | `/api/calls/:callID/video` | Bật/tắt camera |
+| GET | `/api/calls/ws` | WebSocket (call signaling) |
 
 ## WebSocket
 
@@ -194,12 +210,31 @@ Tất cả các endpoint dưới đây yêu cầu `Authorization: Bearer <token>
   - `message:search` — tìm kiếm tin nhắn
   - `typing:start` / `typing:stop` — đang gõ
 
+### Call Hub (`GET /api/calls/ws`)
+
+- Auth: `Authorization: Bearer <token>`
+- Xử lý các event từ client:
+  - `call:initiate` — tạo cuộc gọi
+  - `call:accept` — chấp nhận
+  - `call:reject` — từ chối
+  - `call:end` — kết thúc
+  - `call:signal` — WebRTC signaling (SDP, ICE candidate)
+  - `call:video_toggle` — bật/tắt camera
+- Server gửi các event:
+  - `call:incoming` — có cuộc gọi đến
+  - `call:status` — cập nhật trạng thái (connected, ended, ...)
+  - `call:busy` — người dùng bận
+  - `call:mute` — bật/tắt mic
+  - `call:video` — bật/tắt camera (`{call_id, user_id, video_enabled}`)
+  - `call:signal` — chuyển tiếp WebRTC signal
+
 ## Testing
 
 ```bash
 # Validation tests (không cần DB)
 go test ./tests/community/... -v
 go test ./tests/contribution/... -v
+go test ./tests/call/... -v
 
 # Service tests (một số cần TEST_DSN)
 go test ./services/... -v
@@ -230,10 +265,10 @@ Client → Router (Gin) → Middleware (Auth/RBAC) → Controller → Service �
 
 ### Ghi chú kiến trúc
 
-- `PostService`, `MediaService`, `AdService` là interfaces; các service còn lại dùng concrete structs
+- `PostService`, `MediaService`, `AdService`, `CallService` (ws) là interfaces; các service còn lại dùng concrete structs
 - Tất cả ID là UUID dạng string
 - Service trả về lỗi tiếng Việt; middleware RBAC trả về tiếng Anh
-- Pattern toggle: BlockService.ToggleBlock, FollowService.FollowToggle, FriendService.ToggleFriendRequest, postService.ReactPost (check tồn tại → xóa hoặc tạo)
+- Pattern toggle: BlockService.ToggleBlock, FollowService.FollowToggle, FriendService.ToggleFriendRequest, postService.ReactPost, VoiceCallService.ToggleMute/ToggleVideo (check tồn tại → xóa hoặc tạo)
 
 ## Giấy phép
 
