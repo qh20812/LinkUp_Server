@@ -81,12 +81,24 @@ func (r *ReportRepository) ListAdminReports(ctx context.Context, keyword, status
 		order = "desc"
 	}
 
-	orderBy := "reports.created_at desc"
+	orderBy := "reports.created_at DESC"
 	switch sortBy {
 	case "created_at":
-		orderBy = "reports.created_at " + order
+		switch order {
+		case "asc":
+			orderBy = "reports.created_at ASC"
+		default:
+			orderBy = "reports.created_at DESC"
+		}
 	case "target_type":
-		orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END " + order
+		switch order {
+		case "asc":
+			orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END ASC"
+		default:
+			orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END DESC"
+		}
+	default:
+		orderBy = "reports.created_at DESC"
 	}
 
 	q := r.db.WithContext(ctx).
