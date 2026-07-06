@@ -27,7 +27,7 @@ go test ./services/...
 
 ```
 cmd/main.go → controller → service → repository (GORM)
-middlewares/  → auth.middleware.go + rbac.middleware.go (RequireRoles, CheckAdOwnership)
+middlewares/  → auth.middleware.go + rbac.middleware.go (RequireRoles, CheckAdOwnership, RequireContributionLevel)
 cmd/seed/     → raw database/sql (10 ordered steps)
 ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 ```
@@ -36,11 +36,11 @@ ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 - **DB**: `db/mysql.go` returns `*sql.DB`; `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
 - **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
 - **Validation split**: DTOs use `binding` tags (community, group_chat, post:`ReactPostInput`, chat). Others use `validations` package (13 validators, sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
-- **RBAC**: `RequireRoles` checks platform roles (`user_roles` JOIN). `CheckAdOwnership` guards ads for PARTNERs.
+- **RBAC**: `RequireRoles` checks platform roles (`user_roles` JOIN, scope_id IS NULL). `CheckAdOwnership` guards ads for PARTNERs. `RequireContributionLevel` checks community contribution score threshold.
 - **Contribution system**: `PostService.SetContributionService` wired after `ContributionService` init in `cmd/main.go`.
-- **`PostService` and `MediaService` are interfaces** in `services/`. All other services use concrete structs.
+- **`PostService`, `MediaService`, and `AdService` are interfaces** in `services/`. All other services use concrete structs.
 - **Toggle pattern**: BlockService.ToggleBlock, FollowService.FollowToggle, FriendService.ToggleFriendRequest, postService.ReactPost: check existing → delete or create.
-- **Error languages**: post/friend/chat/community services return Vietnamese. Auth service returns English.
+- **Error languages**: All services return Vietnamese. RBAC middleware returns English.
 
 ## Config quirks
 
@@ -49,7 +49,7 @@ ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 - **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing (`env.go:172`: `if !e.DBSSL`). Always set `DB_SSL=true`. Also not wired into the actual DSN (`db/mysql.go` ignores it).
 - `PORT` defaults to `"8080"`. Optional: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
 - `config.GetEnv()` returns a **value copy** — mutations don't affect the singleton.
-- `utils/email.go` reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly (not from `config.Env`). New email features should follow the same pattern.
+- `utils/email.go` reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly (not from `config.Env`). New email features should follow the same pattern. `password_reset.service.go` also reads `FRONTEND_RESET_URL` via `os.Getenv`.
 - `CLOUDINARY_URL` is primary; `LoadCloudinaryEnv()` falls back to `CLOUDINARY_CLOUD_NAME`/`API_KEY`/`API_SECRET`.
 
 ## Routes

@@ -210,7 +210,7 @@ func (r *ChatRepository) DeleteChat(ctx context.Context, chatID string) error {
 			return fmt.Errorf("delete chat participants: %w", err)
 		}
 		if err := tx.Where("id = ?", chatID).Delete(&models.Chat{}).Error; err != nil {
-			return fmt.Errorf("delete chat: %w", &err)
+			return fmt.Errorf("delete chat: %w", err)
 		}
 
 		return nil
