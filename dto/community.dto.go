@@ -51,3 +51,46 @@ type JoinResult struct {
 type LeaveCommunityInput struct {
 	Quiet bool `json:"quiet" binding:"omitempty"`
 }
+
+// ── Invite Code ──
+
+type CreateInviteCodeInput struct {
+	MaxUses   int        `json:"max_uses" binding:"omitempty,min=0"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty" binding:"omitempty"`
+}
+
+type InviteCodeResponse struct {
+	ID        string     `json:"id"`
+	Code      string     `json:"code"`
+	MaxUses   int        `json:"max_uses"`
+	UsedCount int        `json:"used_count"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	IsActive  bool       `json:"is_active"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+// ── Invitation ──
+
+type SendInvitationInput struct {
+	InviteeID string `json:"invitee_id" binding:"required,uuid"`
+}
+
+type InvitationItem struct {
+	ID            string    `json:"id"`
+	CommunityID   string    `json:"community_id"`
+	CommunityName string    `json:"community_name"`
+	InviterID     string    `json:"inviter_id"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type RespondInvitationInput struct {
+	Accept bool `json:"accept" binding:"required"`
+}
+
+// ── Join Community (mở rộng) ──
+
+type JoinCommunityInput struct {
+	InviteCode   string `json:"code,omitempty" binding:"omitempty,min=6,max=6"`
+	InvitationID string `json:"invitation_id,omitempty" binding:"omitempty,uuid"`
+}

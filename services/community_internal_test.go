@@ -40,10 +40,14 @@ func connectAndMigrateCommunity(t *testing.T) *gorm.DB {
 		&models.CommunityJoinRequest{},
 		&models.Notification{},
 		&models.NotificationPreference{},
+		&models.CommunityInviteCode{},
+		&models.CommunityInvitation{},
 	); err != nil {
 		t.Fatalf("auto-migrate: %v", err)
 	}
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM community_invitations")
+		db.Exec("DELETE FROM community_invite_codes")
 		db.Exec("DELETE FROM notifications")
 		db.Exec("DELETE FROM notification_preferences")
 		db.Exec("DELETE FROM community_join_requests")
@@ -431,7 +435,7 @@ func TestRequestJoin_AutoApprove_Success(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -469,12 +473,12 @@ func TestRequestJoin_AutoApprove_AlreadyMember(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("first RequestJoin: %v", err)
 	}
 
-	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err == nil {
 		t.Fatal("expected error for already member, got nil")
 	}
@@ -495,7 +499,7 @@ func TestRequestJoin_AutoApprove_NoChat(t *testing.T) {
 	// Delete the default group chat to simulate missing chat
 	seed.DB.Where("community_id = ?", community.ID).Delete(&models.Chat{})
 
-	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err == nil {
 		t.Fatal("expected error when default chat missing, got nil")
 	}
@@ -510,7 +514,7 @@ func TestRequestJoin_JoinRequest_Success(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -546,12 +550,12 @@ func TestRequestJoin_JoinRequest_Duplicate(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("first RequestJoin: %v", err)
 	}
 
-	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err == nil {
 		t.Fatal("expected error for duplicate request, got nil")
 	}
@@ -564,12 +568,39 @@ func TestRequestJoin_CommunityNotFound(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	_, err := seed.Service.RequestJoin(ctx, seed.MemberID, "non-existent-community-id")
+	_, err := seed.Service.RequestJoin(ctx, seed.MemberID, "non-existent-community-id", "", "")
 	if err == nil {
 		t.Fatal("expected error for non-existent community, got nil")
 	}
 	if !errors.Is(err, validations.ErrCommunityNotFound) {
 		t.Errorf("error = %v, want ErrCommunityNotFound", err)
+	}
+}
+
+func TestRequestJoin_DeactivatedCode_Fails(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Deactivated Code", "", "", true)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	result, err := seed.Service.CreateInviteCode(ctx, seed.CreatorID, community.ID, 0, nil)
+	if err != nil {
+		t.Fatalf("CreateInviteCode: %v", err)
+	}
+
+	if err := seed.Service.DeactivateInviteCode(ctx, seed.CreatorID, result.ID); err != nil {
+		t.Fatalf("DeactivateInviteCode: %v", err)
+	}
+
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, result.Code, "")
+	if err == nil {
+		t.Fatal("expected error when using deactivated code, got nil")
+	}
+	if !errors.Is(err, validations.ErrInviteCodeInactive) {
+		t.Errorf("error = %v, want ErrInviteCodeInactive", err)
 	}
 }
 
@@ -584,7 +615,7 @@ func TestApproveJoinRequest_Success(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -632,7 +663,7 @@ func TestApproveJoinRequest_AlreadyHandled(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -657,7 +688,7 @@ func TestApproveJoinRequest_NotAdmin(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -750,7 +781,7 @@ func TestRequestJoin_AutoApprove_SendsNotification(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -776,7 +807,7 @@ func TestApproveJoinRequest_SendsNotification(t *testing.T) {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
 
-	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID)
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
 	if err != nil {
 		t.Fatalf("RequestJoin: %v", err)
 	}
@@ -805,5 +836,412 @@ func assertChatParticipantExists(t *testing.T, db *gorm.DB, chatID, userID strin
 	}
 	if p.Role != role {
 		t.Errorf("chat_participant role = %q, want %q", p.Role, role)
+	}
+}
+
+// ─── CreateInviteCode integration tests ──────────────────────────────
+
+func TestCreateInviteCode_HappyPath(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.CreateInviteCode(ctx, seed.CreatorID, seed.CommunityID, 0, nil)
+	if err != nil {
+		t.Fatalf("CreateInviteCode: %v", err)
+	}
+	if result.ID == "" {
+		t.Fatal("result.ID is empty")
+	}
+	if result.Code == "" {
+		t.Fatal("result.Code is empty")
+	}
+	if len(result.Code) != 6 {
+		t.Errorf("result.Code length = %d, want 6", len(result.Code))
+	}
+	if !result.IsActive {
+		t.Error("IsActive = false, want true")
+	}
+	if result.UsedCount != 0 {
+		t.Errorf("UsedCount = %d, want 0", result.UsedCount)
+	}
+
+	var code models.CommunityInviteCode
+	if err := seed.DB.Where("id = ?", result.ID).First(&code).Error; err != nil {
+		t.Fatalf("invite code not found in DB: %v", err)
+	}
+	if code.CommunityID != seed.CommunityID {
+		t.Errorf("code.CommunityID = %q, want %q", code.CommunityID, seed.CommunityID)
+	}
+	if code.CreatedBy != seed.CreatorID {
+		t.Errorf("code.CreatedBy = %q, want %q", code.CreatedBy, seed.CreatorID)
+	}
+}
+
+func TestCreateInviteCode_NotAdmin(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.CreateInviteCode(ctx, seed.MemberID, seed.CommunityID, 0, nil)
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+// ─── ListInviteCodes integration tests ───────────────────────────────
+
+func TestListInviteCodes_HasCodes(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	r1, err := seed.Service.CreateInviteCode(ctx, seed.CreatorID, seed.CommunityID, 0, nil)
+	if err != nil {
+		t.Fatalf("CreateInviteCode 1: %v", err)
+	}
+	r2, err := seed.Service.CreateInviteCode(ctx, seed.CreatorID, seed.CommunityID, 5, nil)
+	if err != nil {
+		t.Fatalf("CreateInviteCode 2: %v", err)
+	}
+
+	items, err := seed.Service.ListInviteCodes(ctx, seed.CreatorID, seed.CommunityID)
+	if err != nil {
+		t.Fatalf("ListInviteCodes: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2", len(items))
+	}
+	if items[0].ID != r1.ID && items[0].ID != r2.ID {
+		t.Error("returned items do not match created codes")
+	}
+}
+
+func TestListInviteCodes_Empty(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	items, err := seed.Service.ListInviteCodes(ctx, seed.CreatorID, seed.CommunityID)
+	if err != nil {
+		t.Fatalf("ListInviteCodes: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("got %d items, want 0", len(items))
+	}
+}
+
+func TestListInviteCodes_NotAdmin(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.ListInviteCodes(ctx, seed.MemberID, seed.CommunityID)
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+// ─── DeactivateInviteCode integration tests ──────────────────────────
+
+func TestDeactivateInviteCode_HappyPath(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.CreateInviteCode(ctx, seed.CreatorID, seed.CommunityID, 0, nil)
+	if err != nil {
+		t.Fatalf("CreateInviteCode: %v", err)
+	}
+
+	if err := seed.Service.DeactivateInviteCode(ctx, seed.CreatorID, result.ID); err != nil {
+		t.Fatalf("DeactivateInviteCode: %v", err)
+	}
+
+	var code models.CommunityInviteCode
+	if err := seed.DB.Where("id = ?", result.ID).First(&code).Error; err != nil {
+		t.Fatalf("invite code not found: %v", err)
+	}
+	if code.IsActive {
+		t.Error("IsActive = true after deactivate, want false")
+	}
+}
+
+func TestDeactivateInviteCode_NotFound(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	err := seed.Service.DeactivateInviteCode(ctx, seed.CreatorID, "non-existent-code-id")
+	if err == nil {
+		t.Fatal("expected error for non-existent code, got nil")
+	}
+	if !errors.Is(err, validations.ErrInviteCodeNotFound) {
+		t.Errorf("error = %v, want ErrInviteCodeNotFound", err)
+	}
+}
+
+func TestDeactivateInviteCode_NotAdmin(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.CreateInviteCode(ctx, seed.CreatorID, seed.CommunityID, 0, nil)
+	if err != nil {
+		t.Fatalf("CreateInviteCode: %v", err)
+	}
+
+	err = seed.Service.DeactivateInviteCode(ctx, seed.MemberID, result.ID)
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+// ─── SendInvitation integration tests ────────────────────────────────
+
+func TestSendInvitation_HappyPath(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+	if result.ID == "" {
+		t.Fatal("result.ID is empty")
+	}
+	if result.Status != string(models.InvitationStatusPending) {
+		t.Errorf("Status = %q, want %q", result.Status, string(models.InvitationStatusPending))
+	}
+
+	var inv models.CommunityInvitation
+	if err := seed.DB.Where("id = ?", result.ID).First(&inv).Error; err != nil {
+		t.Fatalf("invitation not found in DB: %v", err)
+	}
+	if inv.InviteeID != seed.MemberID {
+		t.Errorf("inv.InviteeID = %q, want %q", inv.InviteeID, seed.MemberID)
+	}
+	if inv.InviterID != seed.CreatorID {
+		t.Errorf("inv.InviterID = %q, want %q", inv.InviterID, seed.CreatorID)
+	}
+}
+
+func TestSendInvitation_NotAdmin(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.SendInvitation(ctx, seed.MemberID, seed.CommunityID, seed.CreatorID)
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+func TestSendInvitation_Self(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.CreatorID)
+	if err == nil {
+		t.Fatal("expected error for self-invite, got nil")
+	}
+	if !errors.Is(err, validations.ErrCannotInviteSelf) {
+		t.Errorf("error = %v, want ErrCannotInviteSelf", err)
+	}
+}
+
+func TestSendInvitation_AlreadyMember(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	// Creator is already a member — try inviting them
+	_, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.CreatorID)
+	if err == nil {
+		t.Fatal("expected error for already member (self-invite), got nil")
+	}
+}
+
+func TestSendInvitation_DuplicatePending(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("first SendInvitation: %v", err)
+	}
+
+	_, err = seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err == nil {
+		t.Fatal("expected error for duplicate pending invitation, got nil")
+	}
+	if !errors.Is(err, validations.ErrJoinRequestPending) {
+		t.Errorf("error = %v, want ErrJoinRequestPending", err)
+	}
+}
+
+// ─── ListMyInvitations integration tests ─────────────────────────────
+
+func TestListMyInvitations_HasInvites(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+
+	items, err := seed.Service.ListMyInvitations(ctx, seed.MemberID)
+	if err != nil {
+		t.Fatalf("ListMyInvitations: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1", len(items))
+	}
+	if items[0].CommunityID != seed.CommunityID {
+		t.Errorf("items[0].CommunityID = %q, want %q", items[0].CommunityID, seed.CommunityID)
+	}
+}
+
+func TestListMyInvitations_Empty(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	items, err := seed.Service.ListMyInvitations(ctx, seed.MemberID)
+	if err != nil {
+		t.Fatalf("ListMyInvitations: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("got %d items, want 0", len(items))
+	}
+}
+
+// ─── RespondInvitation integration tests ─────────────────────────────
+
+func TestRespondInvitation_Accept(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+
+	if err := seed.Service.RespondInvitation(ctx, seed.MemberID, result.ID, true); err != nil {
+		t.Fatalf("RespondInvitation(accept): %v", err)
+	}
+
+	// DB: status = accepted
+	var inv models.CommunityInvitation
+	if err := seed.DB.Where("id = ?", result.ID).First(&inv).Error; err != nil {
+		t.Fatalf("invitation not found: %v", err)
+	}
+	if inv.Status != models.InvitationStatusAccepted {
+		t.Errorf("inv.Status = %q, want %q", inv.Status, models.InvitationStatusAccepted)
+	}
+	if inv.RespondedAt == nil {
+		t.Fatal("RespondedAt is nil, want non-nil")
+	}
+
+	// group_members: 2 rows (creator + member)
+	var gmCount int64
+	seed.DB.Model(&models.GroupMember{}).Where("community_id = ?", seed.CommunityID).Count(&gmCount)
+	if gmCount != 2 {
+		t.Errorf("group_members count = %d, want 2", gmCount)
+	}
+
+	// user_roles: member has GROUP_MEMBER role
+	var urCount int64
+	seed.DB.Model(&models.UserRole{}).Where("user_id = ? AND scope_id = ?", seed.MemberID, seed.CommunityID).Count(&urCount)
+	if urCount != 1 {
+		t.Errorf("user_roles for member count = %d, want 1", urCount)
+	}
+}
+
+func TestRespondInvitation_Decline(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+
+	if err := seed.Service.RespondInvitation(ctx, seed.MemberID, result.ID, false); err != nil {
+		t.Fatalf("RespondInvitation(decline): %v", err)
+	}
+
+	var inv models.CommunityInvitation
+	if err := seed.DB.Where("id = ?", result.ID).First(&inv).Error; err != nil {
+		t.Fatalf("invitation not found: %v", err)
+	}
+	if inv.Status != models.InvitationStatusDeclined {
+		t.Errorf("inv.Status = %q, want %q", inv.Status, models.InvitationStatusDeclined)
+	}
+	if inv.RespondedAt == nil {
+		t.Fatal("RespondedAt is nil, want non-nil")
+	}
+
+	// member should NOT have been added
+	var gmCount int64
+	seed.DB.Model(&models.GroupMember{}).Where("community_id = ? AND user_id = ?", seed.CommunityID, seed.MemberID).Count(&gmCount)
+	if gmCount != 0 {
+		t.Errorf("group_members count for member = %d, want 0", gmCount)
+	}
+}
+
+func TestRespondInvitation_NotInvitee(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+
+	// Creator tries to respond to an invitation addressed to Member
+	err = seed.Service.RespondInvitation(ctx, seed.CreatorID, result.ID, true)
+	if err == nil {
+		t.Fatal("expected error when wrong user responds, got nil")
+	}
+	if !errors.Is(err, validations.ErrInvitationNotFound) {
+		t.Errorf("error = %v, want ErrInvitationNotFound", err)
+	}
+}
+
+func TestRespondInvitation_AlreadyHandled(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	result, err := seed.Service.SendInvitation(ctx, seed.CreatorID, seed.CommunityID, seed.MemberID)
+	if err != nil {
+		t.Fatalf("SendInvitation: %v", err)
+	}
+
+	if err := seed.Service.RespondInvitation(ctx, seed.MemberID, result.ID, true); err != nil {
+		t.Fatalf("first RespondInvitation: %v", err)
+	}
+
+	err = seed.Service.RespondInvitation(ctx, seed.MemberID, result.ID, false)
+	if err == nil {
+		t.Fatal("expected error for already handled invitation, got nil")
+	}
+	if !errors.Is(err, validations.ErrInvitationAlreadyHandled) {
+		t.Errorf("error = %v, want ErrInvitationAlreadyHandled", err)
+	}
+}
+
+func TestRespondInvitation_NotFound(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	err := seed.Service.RespondInvitation(ctx, seed.MemberID, "non-existent-invitation-id", true)
+	if err == nil {
+		t.Fatal("expected error for non-existent invitation, got nil")
+	}
+	if !errors.Is(err, validations.ErrInvitationNotFound) {
+		t.Errorf("error = %v, want ErrInvitationNotFound", err)
 	}
 }

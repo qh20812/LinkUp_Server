@@ -17,7 +17,7 @@ func Run(env config.Env) error {
 	tables := []string{
 		"ad_analytics", "moderation_logs", "bans", "reports",
 		"notifications", "notification_preferences", "calls", "messages", "chat_participants", "chat_invitations",
-		"chats", "community_join_requests", "group_members", "community_rules", "communities", "tags",
+		"chats", "community_join_requests", "community_invitations", "community_invite_codes", "group_members", "community_rules", "communities", "tags",
 		"community_policies", "member_contributions", "community_challenges", "challenge_participants",
 		"post_reactions", "bookmarks", "blocks", "friends",
 		"follows", "comments", "posts", "media", "stories",

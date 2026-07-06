@@ -127,3 +127,210 @@ func TestApproveJoinRequest_AuthGuard(t *testing.T) {
 		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
 	}
 }
+
+// ── CreateInviteCode controller tests ────────────────────────────────
+
+func TestCreateInviteCode_AuthGuard(t *testing.T) {
+	ctrl := newCommunityController()
+	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
+	unauthRouter.POST("/api/communities/:communityID/invite-codes", ctrl.CreateInviteCode)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/communities/community-1/invite-codes", nil)
+	w := httptest.NewRecorder()
+	unauthRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("Không tìm thấy thông tin chứng thực người dùng")) {
+		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
+	}
+}
+
+func TestCreateInviteCode_MissingCommunityID(t *testing.T) {
+	ctrl := newCommunityController()
+	authRouter := gin.New()
+	authRouter.Use(func(c *gin.Context) {
+		c.Set("userID", "user-1")
+		c.Next()
+	})
+	authRouter.POST("/api/communities/:communityID/invite-codes", ctrl.CreateInviteCode)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/communities//invite-codes",
+		bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	authRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
+	}
+}
+
+// ── ListInviteCodes controller tests ─────────────────────────────────
+
+func TestListInviteCodes_AuthGuard(t *testing.T) {
+	ctrl := newCommunityController()
+	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
+	unauthRouter.GET("/api/communities/:communityID/invite-codes", ctrl.ListInviteCodes)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/communities/community-1/invite-codes", nil)
+	w := httptest.NewRecorder()
+	unauthRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("Không tìm thấy thông tin chứng thực người dùng")) {
+		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
+	}
+}
+
+func TestListInviteCodes_MissingCommunityID(t *testing.T) {
+	ctrl := newCommunityController()
+	authRouter := gin.New()
+	authRouter.Use(func(c *gin.Context) {
+		c.Set("userID", "user-1")
+		c.Next()
+	})
+	authRouter.GET("/api/communities/:communityID/invite-codes", ctrl.ListInviteCodes)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/communities//invite-codes", nil)
+	w := httptest.NewRecorder()
+	authRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
+	}
+}
+
+// ── DeactivateInviteCode controller tests ────────────────────────────
+
+func TestDeactivateInviteCode_AuthGuard(t *testing.T) {
+	ctrl := newCommunityController()
+	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
+	unauthRouter.DELETE("/api/communities/:communityID/invite-codes/:codeID", ctrl.DeactivateInviteCode)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/communities/community-1/invite-codes/code-1", nil)
+	w := httptest.NewRecorder()
+	unauthRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("Không tìm thấy thông tin chứng thực người dùng")) {
+		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
+	}
+}
+
+// ── SendInvitation controller tests ──────────────────────────────────
+
+func TestSendInvitation_AuthGuard(t *testing.T) {
+	ctrl := newCommunityController()
+	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
+	unauthRouter.POST("/api/communities/:communityID/invitations", ctrl.SendInvitation)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/communities/community-1/invitations", nil)
+	w := httptest.NewRecorder()
+	unauthRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("Không tìm thấy thông tin chứng thực người dùng")) {
+		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
+	}
+}
+
+func TestSendInvitation_MissingCommunityID(t *testing.T) {
+	ctrl := newCommunityController()
+	authRouter := gin.New()
+	authRouter.Use(func(c *gin.Context) {
+		c.Set("userID", "user-1")
+		c.Next()
+	})
+	authRouter.POST("/api/communities/:communityID/invitations", ctrl.SendInvitation)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/communities//invitations",
+		bytes.NewReader([]byte(`{"invitee_id": "user-2"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	authRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
+	}
+}
+
+// ── ListMyInvitations controller tests ───────────────────────────────
+
+func TestListMyInvitations_AuthGuard(t *testing.T) {
+	ctrl := newCommunityController()
+	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
+	unauthRouter.GET("/api/communities/invitations", ctrl.ListMyInvitations)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/communities/invitations", nil)
+	w := httptest.NewRecorder()
+	unauthRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("Không tìm thấy thông tin chứng thực người dùng")) {
+		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
+	}
+}
+
+// ── RespondInvitation controller tests ───────────────────────────────
+
+func TestRespondInvitation_AuthGuard(t *testing.T) {
+	ctrl := newCommunityController()
+	unauthRouter := gin.New()
+	unauthRouter.Use(func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized,
+			gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+	})
+	unauthRouter.PUT("/api/communities/invitations/:invitationID/respond", ctrl.RespondInvitation)
+
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/communities/invitations/invitation-1/respond", nil)
+	w := httptest.NewRecorder()
+	unauthRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte("Không tìm thấy thông tin chứng thực người dùng")) {
+		t.Fatalf("body = %q, want to contain auth error", w.Body.String())
+	}
+}

@@ -489,6 +489,115 @@ func (r *CommunityRepository) FindCommunityMemberIDs(ctx context.Context, commun
 	return userIDs, nil
 }
 
+// ── Invite code ─────────────────────────────────────────────────────────────
+
+func (r *CommunityRepository) CreateInviteCode(ctx context.Context, code *models.CommunityInviteCode) error {
+	return r.db.WithContext(ctx).Create(code).Error
+}
+
+func (r *CommunityRepository) FindInviteCodeByCode(ctx context.Context, code string) (*models.CommunityInviteCode, error) {
+	var inviteCode models.CommunityInviteCode
+	err := r.db.WithContext(ctx).Where("code = ?", code).First(&inviteCode).Error
+	if err != nil {
+		return nil, err
+	}
+	return &inviteCode, nil
+}
+
+func (r *CommunityRepository) FindInviteCodeByID(ctx context.Context, id string) (*models.CommunityInviteCode, error) {
+	var inviteCode models.CommunityInviteCode
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&inviteCode).Error
+	if err != nil {
+		return nil, err
+	}
+	return &inviteCode, nil
+}
+
+func (r *CommunityRepository) ListInviteCodesByCommunity(ctx context.Context, communityID string) ([]models.CommunityInviteCode, error) {
+	var codes []models.CommunityInviteCode
+	err := r.db.WithContext(ctx).
+		Where("community_id = ?", communityID).
+		Order("created_at DESC").
+		Find(&codes).Error
+	return codes, err
+}
+
+func (r *CommunityRepository) DeactivateInviteCode(ctx context.Context, codeID string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.CommunityInviteCode{}).
+		Where("id = ?", codeID).
+		Update("is_active", false).Error
+}
+
+func (r *CommunityRepository) IncrementInviteCodeUsedCount(ctx context.Context, tx *gorm.DB, codeID string) error {
+	db := r.db.WithContext(ctx)
+	if tx != nil {
+		db = tx
+	}
+	return db.
+		Model(&models.CommunityInviteCode{}).
+		Where("id = ?", codeID).
+		UpdateColumn("used_count", gorm.Expr("used_count + 1")).Error
+}
+
+// ── Direct invitation ───────────────────────────────────────────────────────
+
+func (r *CommunityRepository) CreateInvitation(ctx context.Context, inv *models.CommunityInvitation) error {
+	return r.db.WithContext(ctx).Create(inv).Error
+}
+
+func (r *CommunityRepository) FindInvitationByID(ctx context.Context, id string) (*models.CommunityInvitation, error) {
+	var inv models.CommunityInvitation
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&inv).Error
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+func (r *CommunityRepository) FindPendingInvitation(ctx context.Context, communityID, inviteeID string) (*models.CommunityInvitation, error) {
+	var inv models.CommunityInvitation
+	err := r.db.WithContext(ctx).
+		Where("community_id = ? AND invitee_id = ? AND status = ?", communityID, inviteeID, models.InvitationStatusPending).
+		First(&inv).Error
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+func (r *CommunityRepository) UpdateInvitationStatus(ctx context.Context, tx *gorm.DB, id string, status models.InvitationStatus) error {
+	now := time.Now().UTC()
+	db := r.db.WithContext(ctx)
+	if tx != nil {
+		db = tx
+	}
+	return db.
+		Model(&models.CommunityInvitation{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":       status,
+			"responded_at": now,
+		}).Error
+}
+
+type invitationWithCommunity struct {
+	models.CommunityInvitation
+	CommunityName string `gorm:"column:name"`
+}
+
+func (r *CommunityRepository) ListPendingInvitationsByInvitee(ctx context.Context, inviteeID string) ([]invitationWithCommunity, error) {
+	var invites []invitationWithCommunity
+	err := r.db.WithContext(ctx).
+		Table("community_invitations").
+		Select("community_invitations.*, communities.name").
+		Joins("JOIN communities ON communities.id = community_invitations.community_id").
+		Where("community_invitations.invitee_id = ? AND community_invitations.status = ?", inviteeID, models.InvitationStatusPending).
+		Order("community_invitations.created_at DESC").
+		Find(&invites).Error
+	return invites, err
+}
+
 // mapRoleNameToGroupRole ánh xạ role name từ roles table sang GroupRole enum.
 func mapRoleNameToGroupRole(name models.RoleName) models.GroupRole {
 	switch name {

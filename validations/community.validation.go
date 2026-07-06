@@ -2,8 +2,10 @@ package validations
 
 import (
 	"errors"
+	"linkup/models"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -32,6 +34,13 @@ var (
 	ErrKickReasonRequired        = errors.New("lý do là bắt buộc")
 	ErrKickReasonTooShort        = errors.New("lý do phải có ít nhất 3 ký tự")
 	ErrKickReasonTooLong         = errors.New("lý do không được vượt quá 500 ký tự")
+	ErrInviteCodeNotFound        = errors.New("mã mời không tồn tại")
+	ErrInviteCodeExpired         = errors.New("mã mời đã hết hạn")
+	ErrInviteCodeInactive        = errors.New("mã mời đã bị vô hiệu hóa")
+	ErrInviteCodeMaxUses         = errors.New("mã mời đã đạt số lần sử dụng tối đa")
+	ErrInvitationNotFound        = errors.New("lời mời không tồn tại")
+	ErrInvitationAlreadyHandled  = errors.New("lời mời đã được xử lý")
+	ErrCannotInviteSelf          = errors.New("không thể mời chính mình")
 )
 
 type CommunityValidation struct{}
@@ -111,4 +120,20 @@ func (v *CommunityValidation) ValidateUpdateRole(role string) error {
 	default:
 		return ErrInvalidRole
 	}
+}
+
+func (v *CommunityValidation) ValidateInviteCode(code *models.CommunityInviteCode) error {
+	if code == nil {
+		return ErrInviteCodeNotFound
+	}
+	if !code.IsActive {
+		return ErrInviteCodeInactive
+	}
+	if code.ExpiresAt != nil && time.Now().UTC().After(*code.ExpiresAt) {
+		return ErrInviteCodeExpired
+	}
+	if code.MaxUses > 0 && code.UsedCount >= code.MaxUses {
+		return ErrInviteCodeMaxUses
+	}
+	return nil
 }

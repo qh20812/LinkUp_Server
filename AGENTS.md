@@ -1,6 +1,6 @@
 # LinkUp Server — AGENTS.md
 
-> This file is `.gitignore`d (line 61). Local-only, won't be committed.
+> `.gitignore`d (line 61). Local-only.
 
 ## Build & run
 
@@ -11,15 +11,17 @@ go build ./cmd/seed && ./seed.exe          # full seed (drops & recreates all ta
 go build ./... && go vet ./...              # verify & vet all packages
 ```
 
-**Tests** (validation-only, no DB in `auth`, `community`, `contribution`):
+**Tests** (no CI — `go build && go vet` is the gate):
 ```bash
-go test ./tests/auth/... -v -run TestValidate
+# Validation-only (no DB needed)
 go test ./tests/community/... -v
 go test ./tests/contribution/... -v
-go test ./tests/... -run TestRegisterHandler_Success  # needs TEST_DSN
-go test ./services/...                                # contribution internal tests (some need TEST_DSN)
+
+# Internal service tests (some need TEST_DSN, see source for guard)
+go test ./services/...
 ```
-`tests/chat/`, `tests/friend/`, `tests/post/` are empty dirs. No linter — `go build && go vet` is the gate. No CI (no `.github/`).
+
+`tests/chat/`, `tests/friend/`, `tests/post/` are empty. No linter configured.
 
 ## Architecture
 
@@ -30,8 +32,7 @@ cmd/seed/     → raw database/sql (10 ordered steps)
 ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 ```
 
-- **Module `linkup`** (Go 1.26.3). Run from repo root.
-- **Gin** with `gin.New()` + `gin.Logger(), gin.Recovery()`.
+- **Module `linkup`** (Go 1.26.3, Gin). Run from repo root.
 - **DB**: `db/mysql.go` returns `*sql.DB`; `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`.
 - **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
 - **Validation split**: DTOs use `binding` tags (community, group_chat, post:`ReactPostInput`, chat). Others use `validations` package (13 validators, sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
@@ -45,7 +46,7 @@ ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 
 - `.env` loaded by **custom line parser** (not godotenv). Singleton guard prevents reloads.
 - Required: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CLOUDINARY_URL`.
-- **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing (line 172: `if !e.DBSSL`). Always set `DB_SSL=true`. Also not wired into the actual DSN (`db/mysql.go` ignores it).
+- **`DB_SSL` bug**: `validateRequired` treats `"false"` as missing (`env.go:172`: `if !e.DBSSL`). Always set `DB_SSL=true`. Also not wired into the actual DSN (`db/mysql.go` ignores it).
 - `PORT` defaults to `"8080"`. Optional: `GMAIL_USER`, `GMAIL_PASSWORD`, `FRONTEND_RESET_URL` (default `http://localhost:3000`).
 - `config.GetEnv()` returns a **value copy** — mutations don't affect the singleton.
 - `utils/email.go` reads `GMAIL_USER`/`GMAIL_PASSWORD` via `os.Getenv` directly (not from `config.Env`). New email features should follow the same pattern.
@@ -104,6 +105,10 @@ Two endpoints, two Hub instances, one unified `ws.Hub` type:
 ## JWT
 
 `utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). Separate `utils.GenerateToken` for single tokens (reset). Auth has `/api/auth/refresh` endpoint.
+
+## Skills
+
+`.claude/skills/golang-patterns` and `golang-testing` are installed and available as code-generation and testing references.
 
 ## Stubs / not wired
 
