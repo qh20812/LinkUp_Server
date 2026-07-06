@@ -18,6 +18,7 @@ type Chat struct {
 	Name          string    `json:"name"`
 	AvatarURI     string    `json:"avatar_uri"`
 	EncryptionKey string    `json:"-" gorm:"column:encryption_key"`
+	CommunityID   *string   `json:"community_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 

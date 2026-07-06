@@ -81,3 +81,15 @@ func (r *NotificationRepository) GetUnreadCount(ctx context.Context, receiverID 
 	}
 	return count, nil
 }
+
+// CreateBulk tạo nhiều notifications trong 1 lần insert.
+func (r *NotificationRepository) CreateBulk(ctx context.Context, notifications []models.Notification) error {
+	if len(notifications) == 0 {
+		return nil
+	}
+	tx := r.db.WithContext(ctx).CreateInBatches(&notifications, 100)
+	if tx.Error != nil {
+		return fmt.Errorf("create notifications bulk: %w", tx.Error)
+	}
+	return nil
+}

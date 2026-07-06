@@ -65,9 +65,38 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		state.CommunityIDs = append(state.CommunityIDs, c.id)
 
+		if err := internal.Exec(database,
+			`INSERT INTO community_policies (
+				id, community_id, post_weight, comment_weight, reaction_weight, event_weight,
+				top_contributor_threshold, moderator_promotion_threshold, auto_promote_enabled, badge_enabled,
+				created_at, updated_at
+			) VALUES (?, ?, 10, 5, 2, 20, 2500, 5000, 1, 1, ?, NULL)`,
+			internal.UUID(), c.id, now,
+		); err != nil {
+			return fmt.Errorf("relationships: insert community policy for %s: %w", c.name, err)
+		}
+
 		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID, c.id); err != nil {
 			return fmt.Errorf("relationships: community_admin user_role for %s: %w", state.UserIDs[c.creatorIdx], err)
 		}
+
+		chatID := internal.UUID()
+		if err := internal.Exec(database,
+			`INSERT INTO chats (id, type, name, avatar_uri, encryption_key, community_id, created_at) VALUES (?, 'group', ?, ?, 'seed-enc-key', ?, ?)`,
+			chatID, c.name, fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
+			c.id, now,
+		); err != nil {
+			return fmt.Errorf("relationships: insert default chat for community %s: %w", c.name, err)
+		}
+
+		if err := internal.Exec(database,
+			`INSERT INTO chat_participants (id, chat_id, user_id, role, joined_at) VALUES (?, ?, ?, 'CHAT_ADMIN', ?)`,
+			internal.UUID(), chatID, state.UserIDs[c.creatorIdx], now,
+		); err != nil {
+			return fmt.Errorf("relationships: insert admin participant for community %s: %w", c.name, err)
+		}
+
+		state.CommunityChatIDs = append(state.CommunityChatIDs, chatID)
 
 		rules := []struct {
 			category string
@@ -105,7 +134,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		members = append(members, memberData{communityIdx: ci, userIdx: adminIdx, role: "GROUP_ADMIN"})
 		members = append(members, memberData{communityIdx: ci, userIdx: modIdx, role: "GROUP_MOD"})
 		for m := 0; m < 3; m++ {
-			idx := (ci*5 + m + 4) % 19 + 1
+			idx := (ci*5+m+4)%19 + 1
 			members = append(members, memberData{communityIdx: ci, userIdx: idx, role: "GROUP_MEMBER"})
 		}
 	}
@@ -149,6 +178,21 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 		if err := addUserRole(userID, communityMemberRoleID, communityID); err != nil {
 			return fmt.Errorf("relationships: community_member user_role for %s: %w", userID, err)
+		}
+
+		// Skip chat_participant cho creator — đã được thêm khi tạo community
+		if m.userIdx != communities[m.communityIdx].creatorIdx {
+			partnerRole := "CHAT_MEMBER"
+			if m.role == "GROUP_ADMIN" {
+				partnerRole = "CHAT_ADMIN"
+			}
+
+			if err := internal.Exec(database,
+				`INSERT INTO chat_participants (id, chat_id, user_id, role, joined_at) VALUES (?, ?, ?, ?, ?)`,
+				internal.UUID(), state.CommunityChatIDs[m.communityIdx], userID, partnerRole, now,
+			); err != nil {
+				return fmt.Errorf("relationships: insert chat participant for community %d user %d: %w", m.communityIdx, m.userIdx, err)
+			}
 		}
 	}
 

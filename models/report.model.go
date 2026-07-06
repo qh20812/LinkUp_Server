@@ -11,16 +11,17 @@ const (
 	ReportStatusPending  ReportStatus = "pending"
 	ReportStatusReviewed ReportStatus = "reviewed"
 	ReportStatusResolved ReportStatus = "resolved"
+	ReportStatusRejected ReportStatus = "rejected"
 )
 
 type Report struct {
-	ID              string        `json:"id"`
-	ReporterID      string `json:"reporter_id"`
+	ID              string       `json:"id"`
+	ReporterID      string       `json:"reporter_id"`
 	ReportType      string       `json:"report_type"`
-	TargetUserID    *string `json:"target_user_id,omitempty"`
-	TargetPostID    *string `json:"target_post_id,omitempty"`
-	TargetCommentID *string `json:"target_comment_id,omitempty"`
-	ViolationRuleID *string `json:"violation_rule_id,omitempty"`
+	TargetUserID    *string      `json:"target_user_id,omitempty"`
+	TargetPostID    *string      `json:"target_post_id,omitempty"`
+	TargetCommentID *string      `json:"target_comment_id,omitempty"`
+	ViolationRuleID *string      `json:"violation_rule_id,omitempty"`
 	ReasonDetail    string       `json:"reason_detail"`
 	Status          ReportStatus `json:"status"`
 	CreatedAt       time.Time    `json:"created_at"`
@@ -48,6 +49,8 @@ func ParseReportStatus(value string) ReportStatus {
 		return ReportStatusReviewed
 	case string(ReportStatusResolved):
 		return ReportStatusResolved
+	case string(ReportStatusRejected):
+		return ReportStatusRejected
 	default:
 		return ReportStatusPending
 	}

@@ -13,6 +13,7 @@ const (
 	ModerationActionMute    ModerationAction = "mute"
 	ModerationActionSuspend ModerationAction = "suspend"
 	ModerationActionDelete  ModerationAction = "delete"
+	ModerationActionUpdate  ModerationAction = "update"
 )
 
 type ModerationTargetType string
@@ -26,13 +27,13 @@ const (
 )
 
 type ModerationLog struct {
-	ID          string              `json:"id"`
-	ModeratorID string              `json:"moderator_id"`
-	Action      ModerationAction    `json:"action"`
+	ID          string               `json:"id"`
+	ModeratorID string               `json:"moderator_id"`
+	Action      ModerationAction     `json:"action"`
 	TargetType  ModerationTargetType `json:"target_type"`
-	TargetID    string              `json:"target_id"`
-	Reason      string              `json:"reason"`
-	CreatedAt   time.Time           `json:"created_at"`
+	TargetID    string               `json:"target_id"`
+	Reason      string               `json:"reason"`
+	CreatedAt   time.Time            `json:"created_at"`
 }
 
 func NewModerationLog(moderatorID string, action ModerationAction, targetType ModerationTargetType, targetID string, reason string) ModerationLog {
@@ -55,6 +56,8 @@ func ParseModerationAction(value string) ModerationAction {
 		return ModerationActionSuspend
 	case string(ModerationActionDelete):
 		return ModerationActionDelete
+	case string(ModerationActionUpdate):
+		return ModerationActionUpdate
 	default:
 		return ModerationActionWarn
 	}

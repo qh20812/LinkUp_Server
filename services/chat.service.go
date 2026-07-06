@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -18,15 +20,17 @@ type ChatService struct {
 	chatRepo     *repository.ChatRepository
 	friendRepo   *repository.FriendRepository
 	inviteRepo   *repository.ChatInvitationRepository
+	mediaRepo    *repository.MediaRepository
 	notifService *NotificationService
 	validation   *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
 		chatRepo:     chatRepo,
 		friendRepo:   friendRepo,
 		inviteRepo:   inviteRepo,
+		mediaRepo:    mediaRepo,
 		notifService: notifService,
 		validation:   validation,
 	}
@@ -44,11 +48,25 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 }
 
 func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID *string) (*models.Message, error) {
+	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if mute != nil {
+		var expiresStr string
+		if mute.ExpiresAt != nil {
+			expiresStr = mute.ExpiresAt.UTC().Format(time.RFC3339)
+		} else {
+			expiresStr = "vĩnh viễn"
+		}
+		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
+	}
+
 	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
 		return nil, err
 	}
 
-	_, err := s.chatRepo.FindChatByID(ctx, chatID)
+	_, err = s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -61,12 +79,22 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, errors.New("bạn không phải thành viên của chat này")
 	}
 
-	if mediaID != nil {
-		isOwned, err := s.chatRepo.IsMediaOwnedByUser(ctx, *mediaID, userID)
+	if emojiID != nil && *emojiID != "" {
+		ok, err := s.chatRepo.IsEmojiExists(ctx, *emojiID)
 		if err != nil {
-			return nil, fmt.Errorf("check media ownership: %w", err)
+			return nil, fmt.Errorf("check emoji: %w", err)
 		}
-		if !isOwned {
+		if !ok {
+			return nil, errors.New("emoji không tồn tại")
+		}
+	}
+
+	if mediaID != nil && *mediaID != "" {
+		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
+		if err != nil {
+			return nil, errors.New("media không tồn tại")
+		}
+		if media.UserID != userID {
 			return nil, errors.New("media không thuộc về bạn")
 		}
 	}
@@ -277,8 +305,21 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 	deleteForAll := strings.EqualFold(mode, "all")
 
 	if deleteForAll {
+		if msg.DeletedForSender || msg.DeletedForReceiver || msg.DeletedAt != nil {
+			return nil, errors.New("tin nhắn đã bị thu hồi")
+		}
 		deletedAt := time.Now().UTC()
 		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	if msg.SenderID == userID {
+		if msg.DeletedForSender {
+			return nil, errors.New("tin nhắn đã bị xóa")
+		}
+	} else {
+		if msg.DeletedForReceiver {
+			return nil, errors.New("tin nhắn đã bị xóa")
+		}
 	}
 
 	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
@@ -299,4 +340,93 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 		return nil, err
 	}
 	return s.chatRepo.SearchMessages(ctx, chatID, userID, keyword)
+}
+
+func (s *ChatService) DownloadMessageMedia(ctx context.Context, userID, messageID string) (*models.Media, string, string, []byte, error) {
+	message, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, "", "", nil, validations.ErrMessageNotFound
+	}
+
+	isParticipant, err := s.chatRepo.IsUserParticipant(ctx, message.ChatID, userID)
+	if err != nil {
+		return nil, "", "", nil, err
+	}
+	if !isParticipant {
+		return nil, "", "", nil, validations.ErrMessageAccessDenied
+	}
+
+	if message.MediaID == nil || *message.MediaID == "" {
+		return nil, "", "", nil, validations.ErrMediaNotFound
+	}
+
+	media, err := s.mediaRepo.GetByID(ctx, *message.MediaID)
+	if err != nil {
+		return nil, "", "", nil, validations.ErrMediaNotFound
+	}
+
+	resp, err := http.Get(media.FileURI)
+	if err != nil {
+		return nil, "", "", nil, fmt.Errorf("download file from storage: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", "", nil, fmt.Errorf("download file failed: %s", resp.Status)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", "", nil, fmt.Errorf("read file content: %w", err)
+	}
+
+	contentType := media.FileType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	filename := fmt.Sprintf("%s%s", media.ID, extensionFromContentType(contentType))
+
+	return media, contentType, filename, data, nil
+}
+
+func extensionFromContentType(contentType string) string {
+	switch strings.ToLower(contentType) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "iamge/webp":
+		return ".webp"
+	case "video/mp4":
+		return ".mp4"
+	case "video/quicktime":
+		return ".mov"
+	case "video/x-msvideo":
+		return ".avi"
+	case "video/x-matroska":
+		return ".mkv"
+	case "video/webm":
+		return ".webm"
+	default:
+		return ".bin"
+	}
+}
+
+func (s *ChatService) DeleteChat(ctx context.Context, userID, chatID string) error {
+	if _, err := s.chatRepo.FindChatByID(ctx, chatID); err != nil {
+		return err
+	}
+
+	participant, err := s.chatRepo.IsUserParticipant(ctx, chatID, userID)
+	if err != nil {
+		return err
+	}
+	if !participant {
+		return errors.New("bạn không phải là thành viên của chat này")
+	}
+
+	return s.chatRepo.DeleteChat(ctx, chatID)
 }

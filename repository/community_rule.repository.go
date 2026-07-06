@@ -56,3 +56,12 @@ func (r *CommunityRuleRepository) GetMaxPosition(ctx context.Context, communityI
 		Scan(&maxPos).Error
 	return maxPos.Max, err
 }
+
+func (r *CommunityRuleRepository) ExistsByCommunityCategoryTitle(ctx context.Context, communityID string, category models.RuleCategory, title string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&models.CommunityRule{}).
+		Where("community_id = ? AND category = ? AND LOWER(title) = LOWER(?)", communityID, category, title).
+		Count(&count).Error
+	return count > 0, err
+}

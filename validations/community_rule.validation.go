@@ -14,6 +14,7 @@ var (
 	ErrRuleTitleMaxLength   = errors.New("tiêu đề nội quy không được vượt quá 255 ký tự")
 	ErrRuleContentMaxLength = errors.New("nội dung nội quy không được vượt quá 2000 ký tự")
 	ErrRulePositionNegative = errors.New("vị trí không được âm")
+	ErrRuleTitleDuplicate   = errors.New("tiêu đề nội quy đã tồn tại trong danh mục này")
 )
 
 type CommunityRuleValidation struct{}

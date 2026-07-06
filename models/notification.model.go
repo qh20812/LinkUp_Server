@@ -8,12 +8,22 @@ import (
 type NotificationType string
 
 const (
-	NotificationTypeLike          NotificationType = "like"
-	NotificationTypeComment       NotificationType = "comment"
-	NotificationTypeFollow        NotificationType = "follow"
-	NotificationTypeMessage       NotificationType = "message"
-	NotificationTypeFriendRequest  NotificationType = "friend_request"
-	NotificationTypeFriendAccepted NotificationType = "friend_accepted"
+	NotificationTypeLike                  NotificationType = "like"
+	NotificationTypeComment               NotificationType = "comment"
+	NotificationTypeFollow                NotificationType = "follow"
+	NotificationTypeMessage               NotificationType = "message"
+	NotificationTypeFriendRequest         NotificationType = "friend_request"
+	NotificationTypeFriendAccepted            NotificationType = "friend_accepted"
+	NotificationTypeCommunityJoinRequest      NotificationType = "community_join_request"
+	NotificationTypeCommunityJoinApproved     NotificationType = "community_join_approved"
+	NotificationTypeCommunityJoinRejected     NotificationType = "community_join_rejected"
+	NotificationTypeCommunityRoleChanged      NotificationType = "community_role_changed"
+	NotificationTypeCommunityMemberLeft      NotificationType = "community_member_left"
+	NotificationTypeCommunityMemberKicked    NotificationType = "community_member_kicked"
+	NotificationTypeCommunityGroupChatAdded     NotificationType = "community_group_chat_added"
+	NotificationTypeCommunityInviteCodeUsed     NotificationType = "community_invite_code_used"
+	NotificationTypeCommunityInvitationReceived NotificationType = "community_invitation_received"
+	NotificationTypeCommunityInvitationAccepted NotificationType = "community_invitation_accepted"
 )
 
 type Notification struct {
@@ -56,6 +66,26 @@ func ParseNotificationType(value string) NotificationType {
 		return NotificationTypeFriendRequest
 	case string(NotificationTypeFriendAccepted):
 		return NotificationTypeFriendAccepted
+	case string(NotificationTypeCommunityJoinRequest):
+		return NotificationTypeCommunityJoinRequest
+	case string(NotificationTypeCommunityJoinApproved):
+		return NotificationTypeCommunityJoinApproved
+	case string(NotificationTypeCommunityJoinRejected):
+		return NotificationTypeCommunityJoinRejected
+	case string(NotificationTypeCommunityRoleChanged):
+		return NotificationTypeCommunityRoleChanged
+	case string(NotificationTypeCommunityMemberLeft):
+		return NotificationTypeCommunityMemberLeft
+	case string(NotificationTypeCommunityMemberKicked):
+		return NotificationTypeCommunityMemberKicked
+	case string(NotificationTypeCommunityGroupChatAdded):
+		return NotificationTypeCommunityGroupChatAdded
+	case string(NotificationTypeCommunityInviteCodeUsed):
+		return NotificationTypeCommunityInviteCodeUsed
+	case string(NotificationTypeCommunityInvitationReceived):
+		return NotificationTypeCommunityInvitationReceived
+	case string(NotificationTypeCommunityInvitationAccepted):
+		return NotificationTypeCommunityInvitationAccepted
 	default:
 		return NotificationTypeLike
 	}

@@ -39,8 +39,7 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	// Truyền thêm cả input.Status vào service xử lý
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status)
+	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
