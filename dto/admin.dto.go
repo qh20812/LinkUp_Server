@@ -125,6 +125,7 @@ type AdminReportDetailResponse struct {
 }
 
 type AdminReportReviewInput struct {
-	Action string `json:"action" binding:"required"`
-	Reason string `json:"reason,omitempty"`
+	Action   string `json:"action" binding:"required"`
+	Reason   string `json:"reason,omitempty"`
+	Duration string `json:"duration,omitempty"`
 }

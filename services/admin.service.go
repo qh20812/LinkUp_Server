@@ -470,7 +470,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		return err
 	}
 
-	if report.Status != models.ReportStatusPending {
+	if isReportFinalStatus(report.Status) {
 		return errors.New("báo cáo đã được xử lý")
 	}
 
@@ -505,11 +505,16 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 			return errors.New("ban chỉ hỗ trợ cho báo cáo người dùng")
 		}
 
+		expiresAt, err := s.resolveBanExpiresAt(input.Duration)
+		if err != nil {
+			return err
+		}
+
 		if err := s.authRepo.UpdateUserStatus(ctx, *report.TargetUserID, models.UserStatusBanned); err != nil {
 			return fmt.Errorf("ban user: %w", err)
 		}
 
-		ban := models.NewBan(*report.TargetUserID, superAdminID, input.Reason, nil)
+		ban := models.NewBan(*report.TargetUserID, superAdminID, input.Reason, expiresAt)
 		ban.ID = utils.GenerateUUID()
 		ban.CreatedAt = time.Now().UTC()
 
@@ -587,4 +592,28 @@ func reportTargetType(report *models.Report) string {
 		return "comment"
 	}
 	return "unknown"
+}
+
+func isReportFinalStatus(status models.ReportStatus) bool {
+	switch status {
+	case models.ReportStatusRejected, models.ReportStatusResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *AdminService) resolveBanExpiresAt(durationKey string) (*time.Time, error) {
+	durationKey = strings.TrimSpace(durationKey)
+	if durationKey == "" || strings.EqualFold(durationKey, "permanent") {
+		return nil, nil
+	}
+
+	duration, ok := banDurationMap[durationKey]
+	if !ok {
+		return nil, fmt.Errorf("thời hạn ban không hợp lệ")
+	}
+
+	t := time.Now().UTC().Add(duration)
+	return &t, nil
 }
