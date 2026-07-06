@@ -89,6 +89,8 @@ func Run(env config.Env) error {
 			description TEXT,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
 			background_uri VARCHAR(512) NOT NULL DEFAULT '',
+			auto_approve TINYINT(1) NOT NULL DEFAULT 0,
+			privacy VARCHAR(20) NOT NULL DEFAULT 'public',
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -121,7 +123,10 @@ func Run(env config.Env) error {
 			name VARCHAR(255) NOT NULL DEFAULT '',
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
 			encryption_key VARCHAR(255) NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL
+			community_id VARCHAR(36) NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_chats_community (community_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 6. Depends on users, posts
@@ -552,6 +557,40 @@ func Run(env config.Env) error {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 37. Depends on communities, users - Community challenges
+		// 36b. Depends on communities, users — Invite codes
+		`CREATE TABLE IF NOT EXISTS community_invite_codes (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			code VARCHAR(6) NOT NULL,
+			created_by VARCHAR(36) NOT NULL,
+			max_uses INT NOT NULL DEFAULT 0,
+			used_count INT NOT NULL DEFAULT 0,
+			expires_at DATETIME NULL,
+			is_active TINYINT(1) NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_invite_codes_code (code),
+			INDEX idx_invite_codes_community (community_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 36c. Depends on communities, users — Direct invitations
+		`CREATE TABLE IF NOT EXISTS community_invitations (
+			id VARCHAR(36) PRIMARY KEY,
+			community_id VARCHAR(36) NOT NULL,
+			inviter_id VARCHAR(36) NOT NULL,
+			invitee_id VARCHAR(36) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL,
+			responded_at DATETIME NULL,
+			FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE CASCADE,
+			FOREIGN KEY (inviter_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (invitee_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_invitations_community (community_id),
+			INDEX idx_invitations_invitee (invitee_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 37. Depends on community_policies, users — Community challenges
 		`CREATE TABLE IF NOT EXISTS community_challenges (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,

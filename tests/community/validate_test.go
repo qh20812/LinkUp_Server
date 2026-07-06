@@ -2,7 +2,9 @@ package community_test
 
 import (
 	"testing"
+	"time"
 
+	"linkup/models"
 	"linkup/validations"
 )
 
@@ -105,6 +107,47 @@ func TestValidateDescription_Boundaries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateInviteCode(t *testing.T) {
+	v := validations.NewCommunityValidation()
+	now := time.Now().UTC()
+
+	tests := []struct {
+		name    string
+		code    *models.CommunityInviteCode
+		wantErr string
+	}{
+		{"nil code", nil, "mã mời không tồn tại"},
+		{"inactive", &models.CommunityInviteCode{IsActive: false}, "mã mời đã bị vô hiệu hóa"},
+		{"expired", &models.CommunityInviteCode{IsActive: true, ExpiresAt: ptrTime(now.Add(-1 * time.Hour))}, "mã mời đã hết hạn"},
+		{"max uses reached", &models.CommunityInviteCode{IsActive: true, MaxUses: 5, UsedCount: 5}, "mã mời đã đạt số lần sử dụng tối đa"},
+		{"under max uses", &models.CommunityInviteCode{IsActive: true, MaxUses: 5, UsedCount: 3}, ""},
+		{"unlimited uses", &models.CommunityInviteCode{IsActive: true, MaxUses: 0, UsedCount: 100}, ""},
+		{"not expired yet", &models.CommunityInviteCode{IsActive: true, ExpiresAt: ptrTime(now.Add(1 * time.Hour))}, ""},
+		{"no expiry", &models.CommunityInviteCode{IsActive: true}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.ValidateInviteCode(tt.code)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Errorf("expected error %q, got nil", tt.wantErr)
+				} else if err.Error() != tt.wantErr {
+					t.Errorf("error = %q, want %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }
 
 func TestValidateAvatarURI_ValidURLs(t *testing.T) {

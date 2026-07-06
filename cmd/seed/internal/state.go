@@ -8,6 +8,7 @@ type SeedState struct {
 	PostIDs         []string
 	CommentIDs      []string
 	CommunityIDs    []string
-	ChatIDs         []string
-	MediaIDs        []string
+	ChatIDs          []string
+	CommunityChatIDs []string
+	MediaIDs         []string
 }

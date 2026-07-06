@@ -177,7 +177,7 @@ func main() {
 		// ===== KHỞI TẠO CONTRIBUTION POLICY (ĐIỂM ĐÓNG GÓP & CHALLENGE) =====
 		contributionRepository := repository.NewContributionRepository(gormDB)
 		contributionValidation := validations.NewContributionValidation()
-		contributionService := services.NewContributionService(contributionRepository, communityRepository, profileRepository, postRepository, notificationService, contributionValidation)
+		contributionService := services.NewContributionService(contributionRepository, communityRepository, profileRepository, notificationService, contributionValidation)
 		postService.SetContributionService(contributionService)
 		contributionController := controllers.NewContributionController(contributionService)
 		routes.RegisterContributionRoutes(router, contributionController, env)

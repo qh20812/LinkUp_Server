@@ -2,14 +2,20 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"linkup/dto"
 	"linkup/models"
 	"linkup/utils"
-	"sort"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+var (
+	ErrRepoChallengeAlreadyJoined       = errors.New("bạn đã tham gia challenge này")
+	ErrRepoChallengeParticipantLimitHit = errors.New("challenge đã đủ số lượng người tham gia")
 )
 
 type ContributionRepository struct {
@@ -102,49 +108,120 @@ func (r *ContributionRepository) UpsertContribution(ctx context.Context, contrib
 	})
 }
 
-func (r *ContributionRepository) GetLeaderboard(ctx context.Context, communityID string, limit int) ([]dto.LeaderboardItem, error) {
-	type leaderboardRow struct {
-		UserID            string  `gorm:"column:user_id"`
-		DisplayName       string  `gorm:"column:display_name"`
-		AvatarURI         string  `gorm:"column:avatar_uri"`
-		ContributionScore int     `gorm:"column:contribution_score"`
-		BadgeType         *string `gorm:"column:badge_type"`
+func (r *ContributionRepository) GetLeaderboard(ctx context.Context, communityID string, offset, limit int) ([]dto.LeaderboardItem, error) {
+		type leaderboardRow struct {
+			UserID            string  `gorm:"column:user_id"`
+			DisplayName       string  `gorm:"column:display_name"`
+			AvatarURI         string  `gorm:"column:avatar_uri"`
+			ContributionScore int     `gorm:"column:contribution_score"`
+			BadgeType         *string `gorm:"column:badge_type"`
+		}
+
+		if limit <= 0 {
+			limit = 10
+		}
+		if offset < 0 {
+			offset = 0
+		}
+
+		var rows []leaderboardRow
+		err := r.db.WithContext(ctx).
+			Table("member_contributions AS mc").
+			Select(`mc.user_id,
+				COALESCE(p.display_name, '') AS display_name,
+				COALESCE(p.avatar_uri, '') AS avatar_uri,
+				mc.contribution_score,
+				mc.badge_type`).
+			Joins("LEFT JOIN profiles p ON p.user_id = mc.user_id").
+			Where("mc.community_id = ?", communityID).
+			Order("mc.contribution_score DESC, mc.created_at ASC").
+			Offset(offset).
+			Limit(limit).
+			Find(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+
+		items := make([]dto.LeaderboardItem, 0, len(rows))
+		for i, row := range rows {
+			items = append(items, dto.LeaderboardItem{
+				Rank:              offset + i + 1,
+				UserID:            row.UserID,
+				DisplayName:       row.DisplayName,
+				AvatarURI:         row.AvatarURI,
+				ContributionScore: row.ContributionScore,
+				BadgeType:         row.BadgeType,
+			})
+		}
+		return items, nil
 	}
 
-	if limit <= 0 {
-		limit = 10
-	}
+func (r *ContributionRepository) GetCommunityMembers(ctx context.Context, communityID string, offset, limit int) ([]dto.CommunityMemberItem, error) {
+		type memberRow struct {
+			UserID            string    `gorm:"column:user_id"`
+			DisplayName       string    `gorm:"column:display_name"`
+			AvatarURI         string    `gorm:"column:avatar_uri"`
+			Role              string    `gorm:"column:role"`
+			JoinedAt          time.Time `gorm:"column:joined_at"`
+			ContributionScore int       `gorm:"column:contribution_score"`
+			BadgeType         *string   `gorm:"column:badge_type"`
+		}
 
-	var rows []leaderboardRow
-	err := r.db.WithContext(ctx).
-		Table("member_contributions AS mc").
-		Select(`mc.user_id,
-			COALESCE(p.display_name, '') AS display_name,
-			COALESCE(p.avatar_uri, '') AS avatar_uri,
-			mc.contribution_score,
-			mc.badge_type`).
-		Joins("LEFT JOIN profiles p ON p.user_id = mc.user_id").
-		Where("mc.community_id = ?", communityID).
-		Order("mc.contribution_score DESC, mc.created_at ASC").
-		Limit(limit).
-		Find(&rows).Error
-	if err != nil {
-		return nil, err
-	}
+		if limit <= 0 {
+			limit = 10
+		}
+		if offset < 0 {
+			offset = 0
+		}
 
-	items := make([]dto.LeaderboardItem, 0, len(rows))
-	for i, row := range rows {
-		items = append(items, dto.LeaderboardItem{
-			Rank:              i + 1,
-			UserID:            row.UserID,
-			DisplayName:       row.DisplayName,
-			AvatarURI:         row.AvatarURI,
-			ContributionScore: row.ContributionScore,
-			BadgeType:         row.BadgeType,
-		})
+		var rows []memberRow
+		err := r.db.WithContext(ctx).
+			Table("group_members AS gm").
+			Select(`gm.user_id,
+				COALESCE(p.display_name, '') AS display_name,
+				COALESCE(p.avatar_uri, '') AS avatar_uri,
+				COALESCE((
+					SELECT r2.name FROM user_roles ur2
+					JOIN roles r2 ON r2.id = ur2.role_id
+					WHERE ur2.user_id = gm.user_id
+					  AND ur2.scope_id = gm.community_id
+					  AND ur2.scope_type = 'community'
+					  AND r2.name IN ('GROUP_ADMIN', 'GROUP_MOD', 'GROUP_MEMBER')
+					ORDER BY CASE r2.name
+						WHEN 'GROUP_ADMIN' THEN 1
+						WHEN 'GROUP_MOD' THEN 2
+						WHEN 'GROUP_MEMBER' THEN 3
+						ELSE 4 END
+					LIMIT 1
+				), '') AS role,
+				gm.joined_at,
+				COALESCE(mc.contribution_score, 0) AS contribution_score,
+				mc.badge_type`).
+			Joins("LEFT JOIN profiles p ON p.user_id = gm.user_id").
+			Joins("LEFT JOIN member_contributions mc ON mc.community_id = gm.community_id AND mc.user_id = gm.user_id").
+			Where("gm.community_id = ?", communityID).
+			Order("mc.contribution_score DESC, gm.joined_at ASC").
+			Offset(offset).
+			Limit(limit).
+			Find(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+
+		items := make([]dto.CommunityMemberItem, 0, len(rows))
+		for _, row := range rows {
+			items = append(items, dto.CommunityMemberItem{
+				UserID:            row.UserID,
+				DisplayName:       row.DisplayName,
+				AvatarURI:         row.AvatarURI,
+				Role:              row.Role,
+				JoinedAt:          row.JoinedAt,
+				ContributionScore: row.ContributionScore,
+				BadgeType:         row.BadgeType,
+			})
+		}
+		return items, nil
 	}
-	return items, nil
-}
 
 // === Challenge ===
 func (r *ContributionRepository) CreateChallenge(ctx context.Context, challenge *models.CommunityChallenge) error {
@@ -180,10 +257,10 @@ func (r *ContributionRepository) GetActiveChallenges(ctx context.Context, commun
 	return challenges, err
 }
 
-func (r *ContributionRepository) FindActiveChallengesByHashtag(ctx context.Context, hashtag string) ([]models.CommunityChallenge, error) {
+func (r *ContributionRepository) FindActiveChallengesByHashtag(ctx context.Context, communityID, hashtag string) ([]models.CommunityChallenge, error) {
 	var challenges []models.CommunityChallenge
 	err := r.db.WithContext(ctx).
-		Where("LOWER(hashtag) = LOWER(?) AND status = ?", hashtag, models.ChallengeStatusActive).
+		Where("community_id = ? AND LOWER(hashtag) = LOWER(?) AND status = ?", communityID, hashtag, models.ChallengeStatusActive).
 		Order("end_date ASC, created_at DESC").
 		Find(&challenges).Error
 	return challenges, err
@@ -230,6 +307,51 @@ func (r *ContributionRepository) JoinChallenge(ctx context.Context, participant 
 		participant.ID = existing.ID
 		participant.JoinedAt = existing.JoinedAt
 		return tx.Save(participant).Error
+	})
+}
+
+// JoinChallengeAtomic atomically checks limit + duplicate before inserting.
+// Uses FOR UPDATE on the challenge row to serialize concurrent join attempts.
+func (r *ContributionRepository) JoinChallengeAtomic(ctx context.Context, participant *models.ChallengeParticipant, maxParticipants *int) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize: lock the challenge row so only one goroutine can proceed.
+		var challenge models.CommunityChallenge
+		if err := tx.Where("id = ?", participant.ChallengeID).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&challenge).Error; err != nil {
+			return err
+		}
+
+		// Check if already joined (race-safe: inside locked transaction).
+		var existing int64
+		if err := tx.Model(&models.ChallengeParticipant{}).
+			Where("challenge_id = ? AND user_id = ?", participant.ChallengeID, participant.UserID).
+			Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return ErrRepoChallengeAlreadyJoined
+		}
+
+		// Check participant limit (race-safe: count is accurate under lock).
+		var count int64
+		if err := tx.Model(&models.ChallengeParticipant{}).
+			Where("challenge_id = ?", participant.ChallengeID).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if maxParticipants != nil && count >= int64(*maxParticipants) {
+			return ErrRepoChallengeParticipantLimitHit
+		}
+
+		// Insert
+		if participant.ID == "" {
+			participant.ID = utils.GenerateUUID()
+		}
+		if participant.JoinedAt.IsZero() {
+			participant.JoinedAt = time.Now().UTC()
+		}
+		return tx.Create(participant).Error
 	})
 }
 
@@ -338,19 +460,68 @@ func (r *ContributionRepository) GetRankedContributions(ctx context.Context, com
 	return contributions, err
 }
 
-func (r *ContributionRepository) BuildLeaderboardFromContributions(ctx context.Context, communityID string, limit int) ([]dto.LeaderboardItem, error) {
-	items, err := r.GetLeaderboard(ctx, communityID, limit)
-	if err != nil {
-		return nil, err
+
+
+// AtomicIncrement atomically increments a counter column to prevent race conditions.
+// Only allows safe column names to prevent SQL injection.
+func (r *ContributionRepository) AtomicIncrement(ctx context.Context, communityID, userID, column string) error {
+	allowed := map[string]bool{
+		"valid_posts":          true,
+		"quality_comments":     true,
+		"positive_reactions":   true,
+		"event_participations": true,
 	}
-	return items, nil
+	if !allowed[column] {
+		return fmt.Errorf("invalid increment field: %s", column)
+	}
+	return r.db.WithContext(ctx).
+		Model(&models.MemberContribution{}).
+		Where("community_id = ? AND user_id = ?", communityID, userID).
+		Update(column, gorm.Expr(column+" + ?", 1)).Error
 }
 
-func (r *ContributionRepository) SortLeaderboard(items []dto.LeaderboardItem) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].ContributionScore == items[j].ContributionScore {
-			return items[i].UserID < items[j].UserID
-		}
-		return items[i].ContributionScore > items[j].ContributionScore
-	})
+// AtomicDecrement atomically decrements a counter column.
+// Only allows safe column names to prevent SQL injection.
+func (r *ContributionRepository) AtomicDecrement(ctx context.Context, communityID, userID, column string) error {
+	allowed := map[string]bool{
+		"valid_posts":          true,
+		"quality_comments":     true,
+		"positive_reactions":   true,
+		"event_participations": true,
+	}
+	if !allowed[column] {
+		return fmt.Errorf("invalid decrement field: %s", column)
+	}
+	return r.db.WithContext(ctx).
+		Model(&models.MemberContribution{}).
+		Where("community_id = ? AND user_id = ?", communityID, userID).
+		Update(column, gorm.Expr(column+" - ?", 1)).Error
+}
+
+// UpdateContributionCalculatedFields updates only the calculated fields
+// (score, badge, promotion, timestamps) — not the raw counters.
+func (r *ContributionRepository) UpdateContributionCalculatedFields(ctx context.Context, contribution *models.MemberContribution) error {
+	return r.db.WithContext(ctx).
+		Model(&models.MemberContribution{}).
+		Where("community_id = ? AND user_id = ?", contribution.CommunityID, contribution.UserID).
+		Updates(map[string]interface{}{
+			"contribution_score": contribution.ContributionScore,
+			"badge_type":         contribution.BadgeType,
+			"promoted_to_mod":    contribution.PromotedToMod,
+			"last_calculated_at": contribution.LastCalculatedAt,
+			"updated_at":         contribution.UpdatedAt,
+		}).Error
+}
+
+// TryClaimPromotion atomically sets promoted_to_mod = true.
+// Returns true if the claim succeeded (was the first caller), false if already claimed.
+func (r *ContributionRepository) TryClaimPromotion(ctx context.Context, communityID, userID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&models.MemberContribution{}).
+		Where("community_id = ? AND user_id = ? AND promoted_to_mod = ?", communityID, userID, false).
+		Update("promoted_to_mod", true)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }

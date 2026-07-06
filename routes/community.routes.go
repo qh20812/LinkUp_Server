@@ -22,5 +22,15 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 		communityGroup.PUT("/:communityID/members/:memberID/role", ctrl.UpdateMemberRole)
 		communityGroup.DELETE("/:communityID/members/:memberID", ctrl.KickMember)
 		communityGroup.DELETE("/:communityID/leave", ctrl.LeaveCommunity)
+
+		// Invite codes management
+		communityGroup.POST("/:communityID/invite-codes", ctrl.CreateInviteCode)
+		communityGroup.GET("/:communityID/invite-codes", ctrl.ListInviteCodes)
+		communityGroup.DELETE("/:communityID/invite-codes/:codeID", ctrl.DeactivateInviteCode)
+
+		// Direct invitations
+		communityGroup.POST("/:communityID/invitations", ctrl.SendInvitation)
+		communityGroup.GET("/invitations", ctrl.ListMyInvitations)
+		communityGroup.PUT("/invitations/:invitationID/respond", ctrl.RespondInvitation)
 	}
 }

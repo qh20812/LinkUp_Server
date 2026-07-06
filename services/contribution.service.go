@@ -8,7 +8,6 @@ import (
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
-	"sort"
 	"strings"
 	"time"
 
@@ -28,27 +27,29 @@ type ContributionService struct {
 	contributionRepo   *repository.ContributionRepository
 	communityRepo      *repository.CommunityRepository
 	profileRepo        *repository.ProfileRepository
-	postRepo           *repository.PostRepository
 	notificationService *NotificationService
 	validation         *validations.ContributionValidation
 	groupRole          *utils.GroupRoleChecker
 }
 
-func NewContributionService(contributionRepo *repository.ContributionRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, postRepo *repository.PostRepository, notificationService *NotificationService, validation *validations.ContributionValidation) *ContributionService {
+func NewContributionService(contributionRepo *repository.ContributionRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, notificationService *NotificationService, validation *validations.ContributionValidation) *ContributionService {
 	return &ContributionService{
 		contributionRepo:   contributionRepo,
 		communityRepo:      communityRepo,
 		profileRepo:        profileRepo,
-		postRepo:           postRepo,
 		notificationService: notificationService,
 		validation:         validation,
 		groupRole:          utils.NewGroupRoleChecker(communityRepo.GetUserRole),
 	}
 }
 
-func (s *ContributionService) GetPolicy(ctx context.Context, communityID string) (*models.CommunityPolicy, error) {
+func (s *ContributionService) GetPolicy(ctx context.Context, communityID, userID string) (*models.CommunityPolicy, error) {
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
 		return nil, validations.ErrCommunityNotFound
+	}
+
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleMember); err != nil {
+		return nil, validations.ErrNotCommunityMember
 	}
 
 	policy, err := s.contributionRepo.GetPolicy(ctx, communityID)
@@ -66,52 +67,50 @@ func (s *ContributionService) GetPolicy(ctx context.Context, communityID string)
 	return policy, nil
 }
 
-func (s *ContributionService) UpdatePolicy(ctx context.Context, adminID, communityID string, input dto.UpdatePolicyInput) error {
+func (s *ContributionService) RequireMember(ctx context.Context, communityID, userID string) error {
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
 		return validations.ErrCommunityNotFound
 	}
-	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
-		return validations.ErrNotCommunityAdmin
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleMember); err != nil {
+		return validations.ErrNotCommunityMember
 	}
-	if err := s.validation.ValidateUpdatePolicyInput(input); err != nil {
-		return err
-	}
-
-	now := time.Now().UTC()
-	policy := &models.CommunityPolicy{
-		CommunityID:                 communityID,
-		PostWeight:                  input.PostWeight,
-		CommentWeight:               input.CommentWeight,
-		ReactionWeight:              input.ReactionWeight,
-		EventWeight:                 input.EventWeight,
-		TopContributorThreshold:     input.TopContributorThreshold,
-		ModeratorPromotionThreshold: input.ModeratorPromotionThreshold,
-		AutoPromoteEnabled:          input.AutoPromoteEnabled,
-		BadgeEnabled:                input.BadgeEnabled,
-		UpdatedAt:                   &now,
-	}
-
-	existing, err := s.contributionRepo.GetPolicy(ctx, communityID)
-	if err == nil {
-		policy.ID = existing.ID
-		policy.CreatedAt = existing.CreatedAt
-	}
-	if policy.ID == "" {
-		policy.ID = utils.GenerateUUID()
-	}
-	if policy.CreatedAt.IsZero() {
-		policy.CreatedAt = now
-	}
-
-	return s.contributionRepo.UpsertPolicy(ctx, policy)
+	return nil
 }
+
+func (s *ContributionService) UpdatePolicy(ctx context.Context, adminID, communityID string, input dto.UpdatePolicyInput) error {
+		if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+			return validations.ErrCommunityNotFound
+		}
+		if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+			return validations.ErrNotCommunityAdmin
+		}
+		if err := s.validation.ValidateUpdatePolicyInput(input); err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		policy := &models.CommunityPolicy{
+			CommunityID:                 communityID,
+			PostWeight:                  input.PostWeight,
+			CommentWeight:               input.CommentWeight,
+			ReactionWeight:              input.ReactionWeight,
+			EventWeight:                 input.EventWeight,
+			TopContributorThreshold:     input.TopContributorThreshold,
+			ModeratorPromotionThreshold: input.ModeratorPromotionThreshold,
+			AutoPromoteEnabled:          input.AutoPromoteEnabled,
+			BadgeEnabled:                input.BadgeEnabled,
+			UpdatedAt:                   &now,
+		}
+
+		return s.contributionRepo.UpsertPolicy(ctx, policy)
+	}
 
 func (s *ContributionService) RecalculateScore(ctx context.Context, communityID, userID string) (*models.MemberContribution, error) {
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
 		return nil, validations.ErrCommunityNotFound
 	}
 
-	policy, err := s.GetPolicy(ctx, communityID)
+	policy, err := s.ensurePolicy(ctx, communityID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,38 +124,28 @@ func (s *ContributionService) RecalculateScore(ctx context.Context, communityID,
 }
 
 func (s *ContributionService) GetLeaderboard(ctx context.Context, communityID string, page, pageSize int) ([]dto.LeaderboardItem, error) {
-	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
-		return nil, validations.ErrCommunityNotFound
+		if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+			return nil, validations.ErrCommunityNotFound
+		}
+
+		page, pageSize = s.validation.NormalizePagination(page, pageSize)
+		offset := (page - 1) * pageSize
+		items, err := s.contributionRepo.GetLeaderboard(ctx, communityID, offset, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		return items, nil
 	}
 
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
+func (s *ContributionService) GetCommunityMembers(ctx context.Context, communityID string, page, pageSize int) ([]dto.CommunityMemberItem, error) {
+		if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+			return nil, validations.ErrCommunityNotFound
+		}
 
-	limit := page * pageSize
-	items, err := s.contributionRepo.GetLeaderboard(ctx, communityID, limit)
-	if err != nil {
-		return nil, err
+		page, pageSize = s.validation.NormalizePagination(page, pageSize)
+		offset := (page - 1) * pageSize
+		return s.contributionRepo.GetCommunityMembers(ctx, communityID, offset, pageSize)
 	}
-
-	start := (page - 1) * pageSize
-	if start >= len(items) {
-		return []dto.LeaderboardItem{}, nil
-	}
-	end := start + pageSize
-	if end > len(items) {
-		end = len(items)
-	}
-	result := append([]dto.LeaderboardItem(nil), items[start:end]...)
-	s.sortLeaderboard(result)
-	return result, nil
-}
 
 func (s *ContributionService) GetContribution(ctx context.Context, communityID, userID string) (*models.MemberContribution, error) {
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
@@ -191,11 +180,6 @@ func (s *ContributionService) GetContributionResponse(ctx context.Context, commu
 		}
 	}
 
-	isModerator, err := s.groupRole.IsModOrAbove(ctx, communityID, userID)
-	if err != nil {
-		isModerator = false
-	}
-
 	return &dto.ContributionResponse{
 		UserID:              userID,
 		DisplayName:         displayName,
@@ -206,7 +190,6 @@ func (s *ContributionService) GetContributionResponse(ctx context.Context, commu
 		EventParticipations: updated.EventParticipations,
 		ContributionScore:   updated.ContributionScore,
 		BadgeType:           updated.BadgeType,
-		IsModerator:         isModerator,
 		PromotedToMod:       updated.PromotedToMod,
 	}, nil
 }
@@ -231,6 +214,7 @@ func (s *ContributionService) GetActiveChallengeResponses(ctx context.Context, c
 			PointsPerPost:     challenge.PointsPerPost,
 			StartDate:         challenge.StartDate,
 			EndDate:           challenge.EndDate,
+			MaxParticipants:   challenge.MaxParticipants,
 			Status:            string(challenge.Status),
 			ParticipantsCount: participantsCount,
 		})
@@ -240,6 +224,10 @@ func (s *ContributionService) GetActiveChallengeResponses(ctx context.Context, c
 }
 
 func (s *ContributionService) GetChallengeParticipants(ctx context.Context, challengeID string) ([]dto.ChallengeParticipantItem, error) {
+	// Verify challenge exists so missing challenges return 404, not empty list.
+	if _, err := s.contributionRepo.GetChallengeByID(ctx, challengeID); err != nil {
+		return nil, ErrChallengeNotFound
+	}
 	return s.contributionRepo.GetChallengeParticipants(ctx, challengeID)
 }
 
@@ -250,17 +238,10 @@ func (s *ContributionService) CreateChallenge(ctx context.Context, adminID, comm
 	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
 		return validations.ErrNotCommunityAdmin
 	}
-	if err := s.validation.ValidateCreateChallenge(input); err != nil {
-		return err
-	}
 
-	startDate, err := time.Parse(time.RFC3339, strings.TrimSpace(input.StartDate))
+	startDate, endDate, err := s.validation.ValidateCreateChallenge(input)
 	if err != nil {
-		return validations.ErrDateFormatInvalid
-	}
-	endDate, err := time.Parse(time.RFC3339, strings.TrimSpace(input.EndDate))
-	if err != nil {
-		return validations.ErrDateFormatInvalid
+		return err
 	}
 
 	challenge := &models.CommunityChallenge{
@@ -289,6 +270,10 @@ func (s *ContributionService) JoinChallenge(ctx context.Context, userID, challen
 		return ErrChallengeInactive
 	}
 
+	if err := s.groupRole.RequireRole(ctx, challenge.CommunityID, userID, models.GroupRoleMember); err != nil {
+		return validations.ErrNotCommunityMember
+	}
+
 	now := time.Now().UTC()
 	if now.Before(challenge.StartDate) {
 		return ErrChallengeNotStarted
@@ -297,24 +282,21 @@ func (s *ContributionService) JoinChallenge(ctx context.Context, userID, challen
 		return ErrChallengeEnded
 	}
 
-	participants, err := s.contributionRepo.GetChallengeParticipants(ctx, challengeID)
-	if err != nil {
-		return err
-	}
-	for _, participant := range participants {
-		if participant.UserID == userID {
-			return ErrChallengeAlreadyJoined
-		}
-	}
-	if challenge.MaxParticipants != nil && len(participants) >= *challenge.MaxParticipants {
-		return ErrChallengeParticipantLimitHit
-	}
-
-	return s.contributionRepo.JoinChallenge(ctx, &models.ChallengeParticipant{
+	err = s.contributionRepo.JoinChallengeAtomic(ctx, &models.ChallengeParticipant{
 		ChallengeID: challengeID,
 		UserID:      userID,
 		JoinedAt:    now,
-	})
+	}, challenge.MaxParticipants)
+	if err != nil {
+		if errors.Is(err, repository.ErrRepoChallengeAlreadyJoined) {
+			return ErrChallengeAlreadyJoined
+		}
+		if errors.Is(err, repository.ErrRepoChallengeParticipantLimitHit) {
+			return ErrChallengeParticipantLimitHit
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *ContributionService) GetActiveChallenges(ctx context.Context, communityID string) ([]models.CommunityChallenge, error) {
@@ -324,13 +306,9 @@ func (s *ContributionService) GetActiveChallenges(ctx context.Context, community
 	return s.contributionRepo.GetActiveChallenges(ctx, communityID)
 }
 
-func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, userID, content string) error {
+func (s *ContributionService) ProcessChallengePost(ctx context.Context, communityID, userID, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return nil
-	}
-
-	if _, err := s.postRepo.FindByID(ctx, postID); err != nil {
-		return errors.New("bài viết không tồn tại")
 	}
 
 	hashtags := extractHashtags(content)
@@ -338,9 +316,10 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 		return nil
 	}
 
+	// Only find challenges in this community (prevents cross-community leak).
 	matchedChallenges := make(map[string]models.CommunityChallenge)
 	for _, hashtag := range hashtags {
-		challenges, err := s.contributionRepo.FindActiveChallengesByHashtag(ctx, hashtag)
+		challenges, err := s.contributionRepo.FindActiveChallengesByHashtag(ctx, communityID, hashtag)
 		if err != nil {
 			return err
 		}
@@ -350,6 +329,11 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 	}
 
 	if len(matchedChallenges) == 0 {
+		return nil
+	}
+
+	// Silently skip non-members (safety guard — upstream already enforces this).
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleMember); err != nil {
 		return nil
 	}
 
@@ -369,14 +353,25 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 			participant = nil
 		}
 		if participant == nil {
-			if err := s.contributionRepo.JoinChallenge(ctx, &models.ChallengeParticipant{
+			if err := s.contributionRepo.JoinChallengeAtomic(ctx, &models.ChallengeParticipant{
 				ChallengeID: challenge.ID,
 				UserID:      userID,
 				JoinedAt:    now,
-			}); err != nil {
-				return err
+			}, challenge.MaxParticipants); err != nil {
+				if errors.Is(err, repository.ErrRepoChallengeAlreadyJoined) {
+					participant, err = s.contributionRepo.FindChallengeParticipant(ctx, challenge.ID, userID)
+					if err != nil {
+						return err
+					}
+				} else if errors.Is(err, repository.ErrRepoChallengeParticipantLimitHit) {
+					continue
+				} else {
+					return err
+				}
 			}
-			participant = &models.ChallengeParticipant{ChallengeID: challenge.ID, UserID: userID, JoinedAt: now}
+			if participant == nil {
+				participant = &models.ChallengeParticipant{ChallengeID: challenge.ID, UserID: userID, JoinedAt: now}
+			}
 		}
 
 		participant.PostsCount++
@@ -392,16 +387,24 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 	}
 
 	for communityID, delta := range communityDeltas {
-		contribution, err := s.ensureContribution(ctx, communityID, userID)
+		for i := 0; i < delta.EventParticipations; i++ {
+			if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+				return err
+			}
+			if err := s.contributionRepo.AtomicIncrement(ctx, communityID, userID, "event_participations"); err != nil {
+				return err
+			}
+		}
+
+		contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
 		if err != nil {
 			return err
 		}
-		contribution.EventParticipations += delta.EventParticipations
-		policy, err := s.GetPolicy(ctx, communityID)
+		policy, err := s.ensurePolicy(ctx, communityID)
 		if err != nil {
 			return err
 		}
-		if _, err := s.recalculateAndPersistContribution(ctx, contribution, policy); err != nil {
+		if err := s.recalculateAndPersistScoreOnly(ctx, contribution, policy); err != nil {
 			return err
 		}
 	}
@@ -410,45 +413,111 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, postID, 
 }
 
 func (s *ContributionService) IncrementValidPosts(ctx context.Context, communityID, userID string) error {
-	contribution, err := s.ensureContribution(ctx, communityID, userID)
+	if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+		return err
+	}
+	if err := s.contributionRepo.AtomicIncrement(ctx, communityID, userID, "valid_posts"); err != nil {
+		return err
+	}
+	contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
 	if err != nil {
 		return err
 	}
-	contribution.ValidPosts++
-	policy, err := s.GetPolicy(ctx, communityID)
+	policy, err := s.ensurePolicy(ctx, communityID)
 	if err != nil {
 		return err
 	}
-	_, err = s.recalculateAndPersistContribution(ctx, contribution, policy)
-	return err
+	return s.recalculateAndPersistScoreOnly(ctx, contribution, policy)
 }
 
 func (s *ContributionService) IncrementQualityComments(ctx context.Context, communityID, userID string) error {
-	contribution, err := s.ensureContribution(ctx, communityID, userID)
+	if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+		return err
+	}
+	if err := s.contributionRepo.AtomicIncrement(ctx, communityID, userID, "quality_comments"); err != nil {
+		return err
+	}
+	contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
 	if err != nil {
 		return err
 	}
-	contribution.QualityComments++
-	policy, err := s.GetPolicy(ctx, communityID)
+	policy, err := s.ensurePolicy(ctx, communityID)
 	if err != nil {
 		return err
 	}
-	_, err = s.recalculateAndPersistContribution(ctx, contribution, policy)
-	return err
+	return s.recalculateAndPersistScoreOnly(ctx, contribution, policy)
 }
 
 func (s *ContributionService) IncrementPositiveReactions(ctx context.Context, communityID, userID string) error {
-	contribution, err := s.ensureContribution(ctx, communityID, userID)
+	if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+		return err
+	}
+	if err := s.contributionRepo.AtomicIncrement(ctx, communityID, userID, "positive_reactions"); err != nil {
+		return err
+	}
+	contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
 	if err != nil {
 		return err
 	}
-	contribution.PositiveReactions++
-	policy, err := s.GetPolicy(ctx, communityID)
+	policy, err := s.ensurePolicy(ctx, communityID)
 	if err != nil {
 		return err
 	}
-	_, err = s.recalculateAndPersistContribution(ctx, contribution, policy)
-	return err
+	return s.recalculateAndPersistScoreOnly(ctx, contribution, policy)
+}
+
+func (s *ContributionService) IncrementEventParticipations(ctx context.Context, communityID, userID string) error {
+	if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+		return err
+	}
+	if err := s.contributionRepo.AtomicIncrement(ctx, communityID, userID, "event_participations"); err != nil {
+		return err
+	}
+	contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
+	if err != nil {
+		return err
+	}
+	policy, err := s.ensurePolicy(ctx, communityID)
+	if err != nil {
+		return err
+	}
+	return s.recalculateAndPersistScoreOnly(ctx, contribution, policy)
+}
+
+func (s *ContributionService) DecrementQualityComments(ctx context.Context, communityID, userID string) error {
+	if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+		return err
+	}
+	if err := s.contributionRepo.AtomicDecrement(ctx, communityID, userID, "quality_comments"); err != nil {
+		return err
+	}
+	contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
+	if err != nil {
+		return err
+	}
+	policy, err := s.ensurePolicy(ctx, communityID)
+	if err != nil {
+		return err
+	}
+	return s.recalculateAndPersistScoreOnly(ctx, contribution, policy)
+}
+
+func (s *ContributionService) DecrementPositiveReactions(ctx context.Context, communityID, userID string) error {
+	if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+		return err
+	}
+	if err := s.contributionRepo.AtomicDecrement(ctx, communityID, userID, "positive_reactions"); err != nil {
+		return err
+	}
+	contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
+	if err != nil {
+		return err
+	}
+	policy, err := s.ensurePolicy(ctx, communityID)
+	if err != nil {
+		return err
+	}
+	return s.recalculateAndPersistScoreOnly(ctx, contribution, policy)
 }
 
 func (s *ContributionService) checkAndAssignBadge(contribution *models.MemberContribution, policy *models.CommunityPolicy) {
@@ -483,9 +552,21 @@ func (s *ContributionService) checkAndPromoteToMod(ctx context.Context, contribu
 		if isMod {
 			return nil
 		}
+
+		// Update role first (idempotent — harmless if another goroutine already did it).
 		if err := s.communityRepo.UpdateUserRole(ctx, contribution.CommunityID, contribution.UserID, models.RoleGroupMod); err != nil {
 			return err
 		}
+
+		// Atomically claim the promotion flag — only one goroutine wins.
+		claimed, err := s.contributionRepo.TryClaimPromotion(ctx, contribution.CommunityID, contribution.UserID)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			return nil
+		}
+
 		s.notificationService.Create(ctx, contribution.UserID, nil, models.NotificationTypeCommunityRoleChanged, "bạn đã được thăng chức lên Moderator nhờ điểm đóng góp", nil, nil, nil)
 		contribution.PromotedToMod = true
 	}
@@ -506,6 +587,18 @@ func (s *ContributionService) recalculateAndPersistContribution(ctx context.Cont
 		return nil, err
 	}
 	return contribution, nil
+}
+
+func (s *ContributionService) recalculateAndPersistScoreOnly(ctx context.Context, contribution *models.MemberContribution, policy *models.CommunityPolicy) error {
+	contribution.ContributionScore = s.calculateContributionScore(contribution, policy)
+	s.checkAndAssignBadge(contribution, policy)
+	if err := s.checkAndPromoteToMod(ctx, contribution, policy); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	contribution.LastCalculatedAt = now
+	contribution.UpdatedAt = &now
+	return s.contributionRepo.UpdateContributionCalculatedFields(ctx, contribution)
 }
 
 func (s *ContributionService) calculateContributionScore(contribution *models.MemberContribution, policy *models.CommunityPolicy) int {
@@ -594,13 +687,4 @@ func extractHashtags(content string) []string {
 	}
 
 	return result
-}
-
-func (s *ContributionService) sortLeaderboard(items []dto.LeaderboardItem) {
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].ContributionScore == items[j].ContributionScore {
-			return items[i].UserID < items[j].UserID
-		}
-		return items[i].ContributionScore > items[j].ContributionScore
-	})
 }

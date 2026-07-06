@@ -2,17 +2,27 @@ package models
 
 import "time"
 
+type CommunityPrivacy string
+
+const (
+	PrivacyPublic        CommunityPrivacy = "public"
+	PrivacyCode          CommunityPrivacy = "code"
+	PrivacyInvitationOnly CommunityPrivacy = "invitation_only"
+)
+
 type Community struct {
-	ID            string     `json:"id"`
-	CreatorID     string     `json:"creator_id"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	AvatarURI     string     `json:"avatar_uri"`
-	BackgroundURI string     `json:"background_uri"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+	ID            string           `json:"id"`
+	CreatorID     string           `json:"creator_id"`
+	Name          string           `json:"name"`
+	Description   string           `json:"description"`
+	AvatarURI     string           `json:"avatar_uri"`
+	BackgroundURI string           `json:"background_uri"`
+	AutoApprove   bool             `json:"auto_approve"`
+	Privacy       CommunityPrivacy `json:"privacy" gorm:"type:varchar(20);default:public"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     *time.Time       `json:"updated_at,omitempty"`
 }
 
 func NewCommunity(creatorID, name, description, avatarURI string) Community {
-	return Community{CreatorID: creatorID, Name: name, Description: description, AvatarURI: avatarURI, BackgroundURI: ""}
+	return Community{CreatorID: creatorID, Name: name, Description: description, AvatarURI: avatarURI, BackgroundURI: "", Privacy: PrivacyPublic}
 }

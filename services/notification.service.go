@@ -165,7 +165,8 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted,
 		models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved,
 		models.NotificationTypeCommunityJoinRejected, models.NotificationTypeCommunityRoleChanged,
-		models.NotificationTypeCommunityMemberLeft, models.NotificationTypeCommunityMemberKicked:
+		models.NotificationTypeCommunityMemberLeft, models.NotificationTypeCommunityMemberKicked,
+		models.NotificationTypeCommunityGroupChatAdded:
 		return pref.FriendRequestEnabled
 	default:
 		return true

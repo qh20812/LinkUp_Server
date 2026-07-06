@@ -56,6 +56,47 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 	}
 }
 
+// RequireContributionLevel checks that the authenticated user's contribution
+// score in the community (identified by :communityID URL param) meets or
+// exceeds the given threshold. Requires AuthMiddleware to run first.
+func RequireContributionLevel(db *gorm.DB, threshold int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, exists := c.Get("userID")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			c.Abort()
+			return
+		}
+		userID := userIDVal.(string)
+
+		communityID := c.Param("communityID")
+		if communityID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing community ID"})
+			c.Abort()
+			return
+		}
+
+		var score int
+		err := db.Table("member_contributions").
+			Select("COALESCE(contribution_score, 0)").
+			Where("community_id = ? AND user_id = ?", communityID, userID).
+			Scan(&score).Error
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check contribution level"})
+			c.Abort()
+			return
+		}
+
+		if score < threshold {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Điểm đóng góp chưa đủ để thực hiện hành động này"})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // CheckAdOwnership kiểm tra tính chính chủ đối với vai trò PARTNER
 func CheckAdOwnership(db *gorm.DB, adService services.AdService) gin.HandlerFunc {
 	return func(c *gin.Context) {
