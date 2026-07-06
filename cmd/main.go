@@ -11,6 +11,7 @@ import (
 	"linkup/config"
 	"linkup/controllers"
 	"linkup/db"
+	"linkup/models" // <-- Tích hợp thêm package models để sử dụng AutoMigrate
 	"linkup/repository"
 	"linkup/routes"
 	"linkup/services"
@@ -60,6 +61,16 @@ func main() {
 			log.Fatalf("failed to init gorm: %v", err)
 		}
 
+		// ====================================================================
+		// TỰ ĐỘNG TẠO BẢNG STORY VIEWS & CẬP NHẬT LẠI CẤU TRÚC BẢNG INTERACT
+		// ====================================================================
+		log.Println("Running database auto-migration for Stories...")
+		err = gormDB.AutoMigrate(&models.StoryView{}, &models.StoryInteract{})
+		if err != nil {
+			log.Printf("Warning: Migration failed: %v", err)
+		}
+		// ====================================================================
+
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
@@ -83,7 +94,6 @@ func main() {
 		routes.RegisterNotificationRoutes(router, notificationController, env)
 
 		// ===== KHỞI TẠO TẦNG TAG (HASHTAG & MENTION) =====
-		// Lưu ý: Đặt trước cụm Post để Tiêm (Inject) TagService vào trong PostService tự động bóc tách
 		tagRepository := repository.NewTagRepository(gormDB)
 		tagService := services.NewTagService(tagRepository)
 		tagController := controllers.NewTagController(tagService)
@@ -112,6 +122,12 @@ func main() {
 		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
+
+		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
+		storyRepository := repository.NewStoryRepository(gormDB)
+		storyService := services.NewStoryService(storyRepository)
+		storyController := controllers.NewStoryController(storyService)
+		routes.RegisterStoryRoutes(router, storyController, env)
 
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
 		reportRepository := repository.NewReportRepository(gormDB)
@@ -154,9 +170,7 @@ func main() {
 
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
-		// Tiêm thêm chatRepository để xử lý dữ liệu bảng chats chung
 		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, notificationService, validations.NewGroupChatValidation())
-		// Tiêm thêm chatService phục vụ tính năng gửi tin nhắn nhóm mã hóa bảo mật
 		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env)
 
