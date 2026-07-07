@@ -16,6 +16,30 @@ func NewAdminController(adminService *services.AdminService) *AdminController {
 	return &AdminController{adminService: adminService}
 }
 
+func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
+	// Lấy ID Admin từ Middleware Auth
+	superAdminID := c.GetString("userID")
+	if superAdminID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	var input dto.AdminAnalyticsFilterInput
+	// Bind query params
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn bộ lọc không hợp lệ"})
+		return
+	}
+
+	result, err := ctrl.adminService.GetDashboardAnalytics(c.Request.Context(), superAdminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 func (ctrl *AdminController) ListUsers(c *gin.Context) {
 	var input dto.AdminUserFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {

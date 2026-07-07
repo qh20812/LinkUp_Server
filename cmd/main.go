@@ -117,7 +117,7 @@ func main() {
 		followController := controllers.NewFollowController(followService)
 		routes.RegisterFollowRoutes(router, followController, env)
 
-		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ẢNH/FILE TRÊN CLOUDINARY) =====
+		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ÁNH/FILE TRÊN CLOUDINARY) =====
 		mediaRepository := repository.NewMediaRepository(gormDB)
 		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
 		mediaController := controllers.NewMediaController(mediaService)
@@ -204,7 +204,16 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, notificationService)
+		adminRepository := repository.NewAdminRepository(gormDB)
+		adminService := services.NewAdminService(
+			authRepository,
+			banRepository,
+			postRepository,
+			reportRepository,
+			moderationRepository,
+			adminRepository,
+			notificationService,
+		)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
 
