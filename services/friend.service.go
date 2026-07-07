@@ -108,7 +108,7 @@ func (s *FriendService) GetFriendRequests(ctx context.Context, userID string) (d
 	sentItems := make([]dto.FriendRequestItem, 0, len(sent))
 	for _, f := range sent {
 		profile, err := s.profileRepo.FindByUserID(ctx, f.ReceiverID)
-		if err != nil {
+		if err != nil || profile == nil {
 			continue
 		}
 		sentItems = append(sentItems, dto.FriendRequestItem{
@@ -125,7 +125,7 @@ func (s *FriendService) GetFriendRequests(ctx context.Context, userID string) (d
 	receivedItems := make([]dto.FriendRequestItem, 0, len(received))
 	for _, f := range received {
 		profile, err := s.profileRepo.FindByUserID(ctx, f.SenderID)
-		if err != nil {
+		if err != nil || profile == nil {
 			continue
 		}
 		receivedItems = append(receivedItems, dto.FriendRequestItem{

@@ -24,13 +24,19 @@ func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*model
     if err != nil {
         return nil, fmt.Errorf("view profile: %w", err)
     }
+    if profile == nil {
+        return nil, fmt.Errorf("profile not found")
+    }
     return profile, nil
 }
 
 func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, targetUserID string) (*models.Profile, error) {
     profile, err := s.profileRepository.FindByUserID(ctx, targetUserID)
     if err != nil {
-		return nil, fmt.Errorf("không tìm thấy hồ sơ")
+		return nil, fmt.Errorf("view profile: %w", err)
+    }
+    if profile == nil {
+        return nil, fmt.Errorf("không tìm thấy hồ sơ")
     }
 
     if viewerID == targetUserID {
@@ -48,6 +54,9 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
     existingProfile, err := s.profileRepository.FindByUserID(ctx, userID)
     if err != nil {
         return nil, fmt.Errorf("edit profile: %w", err)
+    }
+    if existingProfile == nil {
+        return nil, fmt.Errorf("profile not found")
     }
 
     if input.PhoneNumber != nil && *input.PhoneNumber != "" {

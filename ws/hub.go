@@ -51,39 +51,50 @@ func (h *Hub) Run() {
 
 		case client := <-h.unregister:
 			h.mu.Lock()
-			for chatID, clients := range h.rooms {
-				delete(clients, client)
-				if len(clients) == 0 {
-					delete(h.rooms, chatID)
-				}
-			}
-			if clients, ok := h.clients[client.userID]; ok {
-				if _, exists := clients[client]; exists {
-					delete(clients, client)
-					if len(clients) == 0 {
-						delete(h.clients, client.userID)
-					}
-				}
-			}
+			h.removeFromClientsMap(client)
 			h.mu.Unlock()
 			close(client.send)
 
 		case message := <-h.broadcast:
+			// Phase 1 fix: Acquire RLock, snapshot the client set into a
+			// slice, then release RLock before doing any I/O or mutation.
+			// This avoids the RLock→Lock downgrade that caused concurrent
+			// map panics when another goroutine mutated the map between
+			// RUnlock and Lock.
 			h.mu.RLock()
-			clients := h.rooms[message.ChatID]
-			for client := range clients {
-				select {
-				case client.send <- message.Data:
-				default:
-					h.mu.RUnlock()
-					h.mu.Lock()
-					delete(clients, client)
-					close(client.send)
-					h.mu.Unlock()
-					h.mu.RLock()
-				}
+			roomClients := h.rooms[message.ChatID]
+			snapshot := make([]*Client, 0, len(roomClients))
+			for c := range roomClients {
+				snapshot = append(snapshot, c)
 			}
 			h.mu.RUnlock()
+
+			// Iterate the snapshot (owned by this goroutine, safe without lock).
+			// Collect clients whose send channel is full — they are stuck
+			// and must be removed to prevent goroutine leaks.
+			var toRemove []*Client
+			for _, c := range snapshot {
+				select {
+				case c.send <- message.Data:
+				default:
+					toRemove = append(toRemove, c)
+				}
+			}
+
+			// Batch-remove stuck clients under a single write lock.
+			if len(toRemove) > 0 {
+				h.mu.Lock()
+				for _, c := range toRemove {
+					// Double-check the client is still in the room map
+					// (it may have been removed by unregister already).
+					if roomClients[c] {
+						delete(roomClients, c)
+					}
+					h.removeFromClientsMap(c)
+					close(c.send)
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }
@@ -101,32 +112,56 @@ func (h *Hub) RegisterClient(client *Client) {
 	h.register <- client
 }
 
+// SendToUser sends a message to all WebSocket connections of the given user.
+// Thread-safe: copies the client set under RLock, then mutates under Lock.
 func (h *Hub) SendToUser(userID string, msg OutgoingMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
 
+	// Phase 1 fix: Copy the client set under RLock so we can release the
+	// lock before doing I/O (channel send). This prevents holding RLock
+	// while iterating a map that may be mutated by unregister/broadcast.
 	h.mu.RLock()
 	clients, ok := h.clients[userID]
-	h.mu.RUnlock()
-
 	if !ok {
+		h.mu.RUnlock()
 		return
 	}
+	snapshot := make([]*Client, 0, len(clients))
+	for c := range clients {
+		snapshot = append(snapshot, c)
+	}
+	h.mu.RUnlock()
 
-	for client := range clients {
+	// Iterate the snapshot (safe without lock — owned by this goroutine).
+	// Collect clients whose send channel is full (stuck/disconnected).
+	var toRemove []*Client
+	for _, c := range snapshot {
 		select {
-		case client.send <- data:
+		case c.send <- data:
 		default:
-			h.mu.Lock()
-			delete(clients, client)
-			close(client.send)
-			if len(clients) == 0 {
-				delete(h.clients, client.userID)
-			}
-			h.mu.Unlock()
+			toRemove = append(toRemove, c)
 		}
+	}
+
+	// Batch-remove stuck clients under a single write lock.
+	if len(toRemove) > 0 {
+		h.mu.Lock()
+		for _, c := range toRemove {
+			// Re-check: client may have already been removed by unregister.
+			if clients[c] {
+				delete(clients, c)
+			}
+			h.removeFromClientsMap(c)
+			close(c.send)
+		}
+		// Clean up empty user entry.
+		if len(clients) == 0 {
+			delete(h.clients, userID)
+		}
+		h.mu.Unlock()
 	}
 }
 
@@ -134,6 +169,23 @@ func (h *Hub) IsUserOnline(userID string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients[userID]) > 0
+}
+
+// removeFromClientsMap removes a client from all rooms and the per-userID
+// clients map. Caller MUST hold h.mu (write lock).
+func (h *Hub) removeFromClientsMap(c *Client) {
+	for roomID, clients := range h.rooms {
+		delete(clients, c)
+		if len(clients) == 0 {
+			delete(h.rooms, roomID)
+		}
+	}
+	if clients, ok := h.clients[c.userID]; ok {
+		delete(clients, c)
+		if len(clients) == 0 {
+			delete(h.clients, c.userID)
+		}
+	}
 }
 
 func (h *Hub) SendToUsers(userIDs []string, msg OutgoingMessage) {

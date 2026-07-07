@@ -196,7 +196,7 @@ func main() {
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)
-		callService := services.NewVoiceCallService(callRepository, friendRepository, hub)
+		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, hub)
 		callController := controllers.NewVoiceCallController(hub, callService, env)
 		routes.RegisterCallRoutes(router, callController, env)
 	}

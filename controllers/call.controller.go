@@ -3,21 +3,28 @@ package controllers
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"linkup/config"
 	"linkup/dto"
+	"linkup/repository"
 	"linkup/services"
 	"linkup/ws"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 type VoiceCallController struct {
 	hub         *ws.Hub
 	callService *services.VoiceCallService
 	env         config.Env
+}
+
+var callUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
 }
 
 func NewVoiceCallController(hub *ws.Hub, callService *services.VoiceCallService, env config.Env) *VoiceCallController {
@@ -62,7 +69,7 @@ func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := callUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "không thể nâng cấp kết nối websocket"})
 		return
@@ -75,32 +82,78 @@ func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
 	client.ReadPump()
 }
 
+// queryToFilter converts the Gin-bound query DTO into a repository filter.
+// Whitelists and validates values here so the service/repo never see raw user input.
+func queryToFilter(q dto.CallHistoryQuery) repository.CallHistoryFilter {
+	f := repository.CallHistoryFilter{
+		Limit:  q.Limit,
+		Offset: q.Offset,
+	}
+	// Whitelist call type.
+	if q.Type != nil {
+		t := strings.ToLower(strings.TrimSpace(*q.Type))
+		if t == "voice" || t == "video" {
+			f.CallType = &t
+		}
+	}
+	// Whitelist call status.
+	if q.Status != nil {
+		s := strings.ToLower(strings.TrimSpace(*q.Status))
+		switch s {
+		case "missed", "ended", "rejected", "connected", "calling", "ringing":
+			f.Status = &s
+		}
+	}
+	// Whitelist sort column (repository also validates, defense-in-depth).
+	sort := strings.ToLower(strings.TrimSpace(q.Sort))
+	switch sort {
+	case "created_at", "duration", "call_type", "status":
+		f.Sort = sort
+	default:
+		f.Sort = "created_at"
+	}
+	// Whitelist order direction.
+	order := strings.ToLower(strings.TrimSpace(q.Order))
+	if order == "asc" || order == "desc" {
+		f.Order = order
+	} else {
+		f.Order = "desc"
+	}
+	return f
+}
+
 func (ctrl *VoiceCallController) GetCallHistory(c *gin.Context) {
 	userID := fmt.Sprintf("%v", c.GetString("userID"))
 
-	limitStr := c.DefaultQuery("limit", "20")
-	offsetStr := c.DefaultQuery("offset", "0")
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > 100 {
-		limit = 20
+	var query dto.CallHistoryQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		return
 	}
-	offset, err := strconv.Atoi(offsetStr)
-	if err != nil || offset < 0 {
-		offset = 0
+	// Enforce safe defaults after binding.
+	if query.Limit < 1 {
+		query.Limit = 20
+	}
+	if query.Limit > 100 {
+		query.Limit = 100
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
 	}
 
-	calls, total, err := ctrl.callService.GetCallHistory(c.Request.Context(), userID, limit, offset)
+	f := queryToFilter(query)
+
+	items, total, err := ctrl.callService.GetCallHistoryFiltered(c.Request.Context(), userID, f)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":  calls,
-		"total": total,
-		"limit": limit,
-		"offset": offset,
+		"data":   items,
+		"total":  total,
+		"limit":  f.Limit,
+		"offset": f.Offset,
 	})
 }
 
@@ -222,4 +275,47 @@ func (ctrl *VoiceCallController) ToggleMute(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "đã cập nhật trạng thái tắt tiếng"})
+}
+
+// HideCall removes a call from the user's history view (soft-delete per user).
+func (ctrl *VoiceCallController) HideCall(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+	callID := c.Param("callID")
+
+	if callID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		return
+	}
+
+	if err := ctrl.callService.HideCallFromHistory(c.Request.Context(), userID, callID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "cuộc gọi đã được ẩn khỏi lịch sử"})
+}
+
+// GetMissedCallCount returns the number of unread missed calls.
+func (ctrl *VoiceCallController) GetMissedCallCount(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	count, err := ctrl.callService.GetMissedCallCount(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"count": count})
+}
+
+// MarkMissedRead marks all current missed calls as read for the user.
+func (ctrl *VoiceCallController) MarkMissedRead(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	if err := ctrl.callService.MarkMissedAsRead(c.Request.Context(), userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "đã đánh dấu đã đọc"})
 }

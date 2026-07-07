@@ -322,7 +322,7 @@ func (s *CommunityService) ListPendingRequests(ctx context.Context, adminID, com
 		profile, err := s.profileRepo.FindByUserID(ctx, req.UserID)
 		displayName := ""
 		avatarURI := ""
-		if err == nil {
+		if err == nil && profile != nil {
 			displayName = profile.DisplayName
 			avatarURI = profile.AvatarURI
 		}
@@ -630,7 +630,7 @@ func (s *CommunityService) DeactivateInviteCode(ctx context.Context, adminID, co
 	return nil
 }
 
-// ── Direct invitation ───────────────────────────────────────────────────────
+// ── Direct invitation ──────────────────────────
 
 func (s *CommunityService) SendInvitation(ctx context.Context, inviterID, communityID, inviteeID string) (*dto.InvitationItem, error) {
 	if err := s.groupRole.RequireRole(ctx, communityID, inviterID, models.GroupRoleAdmin); err != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -12,9 +14,44 @@ import (
 	"linkup/utils"
 )
 
+// Phase 4 fix: Configurable CheckOrigin via WS_ALLOWED_ORIGINS env var.
+// - Empty or "*": allows all origins (default, suitable for dev)
+// - Comma-separated list: only allows origins matching the list
+// This mitigates Cross-Site WebSocket Hijacking (CSWSH) in production.
+var allowedOrigins = parseAllowedOrigins(os.Getenv("WS_ALLOWED_ORIGINS"))
+
+func parseAllowedOrigins(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "*" {
+		return nil // nil means "allow all"
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			origins = append(origins, strings.ToLower(p))
+		}
+	}
+	return origins
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		if allowedOrigins == nil {
+			return true // wildcard: allow all
+		}
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return false
+		}
+		originLower := strings.ToLower(origin)
+		for _, o := range allowedOrigins {
+			if originLower == o {
+				return true
+			}
+		}
+		return false
 	},
 }
 
