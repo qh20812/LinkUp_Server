@@ -11,7 +11,8 @@ import (
 	"linkup/config"
 	"linkup/controllers"
 	"linkup/db"
-	"linkup/models" // <-- Tích hợp thêm package models để sử dụng AutoMigrate
+	"linkup/groupws"
+	"linkup/models"
 	"linkup/repository"
 	"linkup/routes"
 	"linkup/services"
@@ -169,10 +170,14 @@ func main() {
 		routes.RegisterChatRoutes(router, chatController, env)
 
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
+		groupHub := groupws.NewHub()
+		go groupHub.Run()
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
 		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, notificationService, validations.NewGroupChatValidation())
 		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env)
+		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, notificationService, chatValidation)
+		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env)
 
 		// ===== KHỞI TẠO COMMUNITY (NHÓM CỘNG ĐỒNG BÀI VIẾT) =====
 		communityRepository := repository.NewCommunityRepository(gormDB)
