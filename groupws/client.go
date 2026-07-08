@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -98,7 +99,7 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
-			history, err := c.messageService.GetAllMessagesDecrypted(c.ctx, c.userID, payload.ChatID)
+			history, err := c.messageService.GetAllMessagesRaw(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
 				c.sendError(fmt.Sprintf("lấy lịch sử thất bại: %v", err))
 				continue
@@ -107,13 +108,15 @@ func (c *Client) ReadPump() {
 			msgs := make([]dto.MessagePayload, 0, len(history))
 			for _, m := range history {
 				msgs = append(msgs, dto.MessagePayload{
-					ID:        m.ID,
-					ChatID:    m.ChatID,
-					SenderID:  m.SenderID,
-					Content:   m.Content,
-					EmojiID:   m.EmojiID,
-					MediaID:   m.MediaID,
-					CreatedAt: m.CreatedAt,
+					ID:            m.ID,
+					ChatID:        m.ChatID,
+					SenderID:      m.SenderID,
+					Content:       m.Content,
+					EmojiID:       m.EmojiID,
+					MediaID:       m.MediaID,
+					IsAnonymized:  m.IsAnonymized,
+					AnonymousName: m.AnonymousName,
+					CreatedAt:     m.CreatedAt,
 				})
 			}
 
@@ -216,7 +219,7 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			if err := c.groupService.LeaveGroup(c.ctx, payload.ChatID, c.userID); err != nil {
+			if err := c.groupService.LeaveGroup(c.ctx, payload.ChatID, c.userID, payload.LeaveMode, payload.HistoryMode); err != nil {
 				c.sendError(err.Error())
 				continue
 			}
@@ -224,13 +227,18 @@ func (c *Client) ReadPump() {
 			c.hub.LeaveChat(payload.ChatID, c)
 			delete(c.joinedChats, payload.ChatID)
 
-			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type: "group:member:left",
-				Payload: mustMarshal(map[string]any{
-					"chat_id": payload.ChatID,
-					"user_id": c.userID,
-				}),
-			})
+			// Chỉ public leave mới broadcast toàn nhóm
+			if strings.EqualFold(strings.TrimSpace(payload.LeaveMode), "public") {
+				c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+					Type: "group:member:left",
+					Payload: mustMarshal(map[string]any{
+						"chat_id":      payload.ChatID,
+						"user_id":      c.userID,
+						"leave_mode":   payload.LeaveMode,
+						"history_mode": payload.HistoryMode,
+					}),
+				})
+			}
 
 		case "group:member:add":
 			var payload dto.GroupMemberActionPayload

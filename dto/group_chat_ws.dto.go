@@ -5,7 +5,9 @@ type GroupJoinPayload struct {
 }
 
 type GroupLeavePayload struct {
-	ChatID string `json:"chat_id"`
+	ChatID      string `json:"chat_id"`
+	LeaveMode   string `json:"leave_mode"`
+	HistoryMode string `json:"history_mode"`
 }
 
 type GroupSendMessagePayload struct {
@@ -52,14 +54,14 @@ type GroupTransferAdminPayload struct {
 }
 
 type GroupSettingsUpdatePayload struct {
-    ChatID               string  `json:"chat_id"`
-    NotificationsEnabled *bool   `json:"notifications_enabled,omitempty"`
-    AllowMemberAdd       *bool   `json:"allow_member_add,omitempty"`
-    Name                 *string `json:"name,omitempty"`
-    AvatarURI            *string `json:"avatar_uri,omitempty"`
+	ChatID               string  `json:"chat_id"`
+	NotificationsEnabled *bool   `json:"notifications_enabled,omitempty"`
+	AllowMemberAdd       *bool   `json:"allow_member_add,omitempty"`
+	Name                 *string `json:"name,omitempty"`
+	AvatarURI            *string `json:"avatar_uri,omitempty"`
 }
 
 type GroupHistoryPayload struct {
-    ChatID   string         `json:"chat_id"`
-    Messages []MessagePayload `json:"messages"`
+	ChatID   string           `json:"chat_id"`
+	Messages []MessagePayload `json:"messages"`
 }
