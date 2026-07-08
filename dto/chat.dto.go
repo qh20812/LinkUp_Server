@@ -22,13 +22,15 @@ type SendMessagePayload struct {
 }
 
 type MessagePayload struct {
-	ID        string    `json:"id"`
-	ChatID    string    `json:"chat_id"`
-	SenderID  string    `json:"sender_id"`
-	Content   string    `json:"content"`
-	EmojiID   *string   `json:"emoji_id,omitempty"`
-	MediaID   *string   `json:"media_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	ChatID        string    `json:"chat_id"`
+	SenderID      string    `json:"sender_id"`
+	Content       string    `json:"content"`
+	EmojiID       *string   `json:"emoji_id,omitempty"`
+	MediaID       *string   `json:"media_id,omitempty"`
+	IsAnonymized  bool      `json:"is_anonymized"`
+	AnonymousName *string   `json:"anonymous_name,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type TypingPayload struct {
@@ -42,7 +44,7 @@ type DirectChatRequest struct {
 }
 
 type DirectChatResponse struct {
-	ChatID string `json:"chat_id"`
+	ChatID  string `json:"chat_id"`
 	Message string `json:"message,omitempty"`
 }
 

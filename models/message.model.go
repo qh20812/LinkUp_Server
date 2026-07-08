@@ -9,6 +9,8 @@ type Message struct {
 	Content            string     `json:"content" db:"content"`
 	MediaID            *string    `json:"media_id,omitempty" db:"media_id"`
 	EmojiID            *string    `json:"emoji_id,omitempty" db:"emoji_id"`
+	IsAnonymized       bool       `json:"is_anonymized" db:"is_anonymized"`
+	AnonymousName      *string    `json:"anonymous_name,omitempty" db:"anonymous_name"`
 	DeletedForSender   bool       `json:"deleted_for_sender" db:"deleted_for_sender"`
 	DeletedForReceiver bool       `json:"deleted_for_receiver" db:"deleted_for_receiver"`
 	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
