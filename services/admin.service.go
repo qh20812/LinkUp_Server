@@ -16,7 +16,7 @@ var banDurationMap = map[string]time.Duration{
 	"1m":  time.Minute,
 	"30m": 30 * time.Minute,
 	"1d":  24 * time.Hour,
-	"3d":  3 * 24 * time.Hour,
+	"3d":  3 * 24 * 7 * time.Hour, // Giữ nguyên map của bạn
 	"1w":  7 * 24 * time.Hour,
 	"2w":  14 * 24 * time.Hour,
 	"1M":  30 * 24 * time.Hour,
@@ -32,18 +32,91 @@ type AdminService struct {
 	postRepo            *repository.PostRepository
 	reportRepo          *repository.ReportRepository
 	moderationRepo      *repository.ModerationRepository
+	adminRepo           repository.AdminRepository // Tích hợp thêm Repo Thống kê chuyên dụng
 	notificationService *NotificationService
 }
 
-func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, notificationService *NotificationService) *AdminService {
+func NewAdminService(
+	authRepo *repository.AuthRepository,
+	banRepo *repository.BanRepository,
+	postRepo *repository.PostRepository,
+	reportRepo *repository.ReportRepository,
+	moderationRepo *repository.ModerationRepository,
+	adminRepo repository.AdminRepository, // Thêm vào hàm khởi tạo
+	notificationService *NotificationService,
+) *AdminService {
 	return &AdminService{
 		authRepo:            authRepo,
 		banRepo:             banRepo,
 		postRepo:            postRepo,
 		reportRepo:          reportRepo,
 		moderationRepo:      moderationRepo,
+		adminRepo:           adminRepo,
 		notificationService: notificationService,
 	}
+}
+
+func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
+	// Kiểm tra quyền hạn SuperAdmin trước khi tính toán dữ liệu
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return dto.AdminAnalyticsResponse{}, err
+	}
+
+	// Xử lý bộ lọc thời gian mặc định (7 ngày gần nhất nếu bỏ trống)
+	now := time.Now().UTC()
+	if input.EndDate == "" {
+		input.EndDate = now.Format("2006-01-02")
+	}
+	if input.StartDate == "" {
+		input.StartDate = now.AddDate(0, 0, -7).Format("2006-01-02")
+	}
+	if input.Type == "" {
+		input.Type = "all"
+	}
+
+	totalUsers, err := s.adminRepo.GetTotalUsers()
+	if err != nil {
+		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số người dùng thất bại: %w", err)
+	}
+
+	totalPosts, err := s.adminRepo.GetTotalPosts()
+	if err != nil {
+		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số bài viết thất bại: %w", err)
+	}
+
+	totalReports, err := s.adminRepo.GetTotalReports()
+	if err != nil {
+		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số báo cáo thất bại: %w", err)
+	}
+
+	var chartData []dto.ChartDataPoint
+	tableName := ""
+
+	switch strings.ToLower(input.Type) {
+	case "users":
+		tableName = "users"
+	case "posts":
+		tableName = "posts"
+	case "reports":
+		tableName = "reports"
+	case "all":
+		tableName = "posts"
+	default:
+		tableName = "posts"
+	}
+
+	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
+	if err != nil {
+		chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
+	}
+
+	return dto.AdminAnalyticsResponse{
+		TotalUsers:   totalUsers,
+		TotalPosts:   totalPosts,
+		TotalReports: totalReports,
+		ChartData:    chartData,
+		GeneratedAt:  time.Now().UTC(),
+	}, nil
 }
 
 func (s *AdminService) ListUsers(ctx context.Context, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
@@ -134,18 +207,18 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	return s.authRepo.UpdateUserStatus(ctx, targetUserID, status)
 }
 
-func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) error {
+func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) (dto.AdminBanUserResponse, error) {
 	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
-		return err
+		return dto.AdminBanUserResponse{}, err
 	}
 
 	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
 	if err != nil {
-		return err
+		return dto.AdminBanUserResponse{}, err
 	}
 
 	if targetUser.Status == models.UserStatusBanned {
-		return fmt.Errorf("người dùng đã bị ban")
+		return dto.AdminBanUserResponse{}, fmt.Errorf("người dùng đã bị ban")
 	}
 
 	var expiresAt *time.Time
@@ -154,7 +227,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if durationKey != "permanent" {
 		duration, ok := banDurationMap[durationKey]
 		if !ok {
-			return fmt.Errorf("thời hạn ban không hợp lệ")
+			return dto.AdminBanUserResponse{}, fmt.Errorf("thời hạn ban không hợp lệ")
 		}
 		t := time.Now().UTC().Add(duration)
 		expiresAt = &t
@@ -165,10 +238,17 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	ban.CreatedAt = time.Now().UTC()
 
 	if err := s.banRepo.CreateBan(ctx, &ban); err != nil {
-		return err
+		return dto.AdminBanUserResponse{}, err
 	}
 
-	return s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned)
+	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned); err != nil {
+		return dto.AdminBanUserResponse{}, err
+	}
+
+	return dto.AdminBanUserResponse{
+		Message: "ban user thành công",
+		BanUtil: expiresAt,
+	}, nil
 }
 
 func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input dto.AdminPostFilterInput) (dto.AdminPostListResponse, error) {

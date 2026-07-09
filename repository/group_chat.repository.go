@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"linkup/models"
+	"linkup/utils"
 	"time"
 
 	"gorm.io/gorm"
@@ -223,4 +224,82 @@ func (r *GroupChatRepository) GetMutesForChat(ctx context.Context, chatID string
 	var mutes []models.GroupChatMute
 	err := r.db.WithContext(ctx).Where("chat_id = ?", chatID).Find(&mutes).Error
 	return mutes, err
+}
+
+func (r *GroupChatRepository) GetAdminIDs(ctx context.Context, chatID string) ([]string, error) {
+	var ids []string
+	err := r.db.WithContext(ctx).
+		Table("chat_participants").
+		Where("chat_id = ? AND role = ?", chatID, models.ChatRoleAdmin).
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
+func (r *GroupChatRepository) AnonymizeMessagesBySender(ctx context.Context, chatID, senderID string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Message{}).
+		Where("chat_id = ? AND sender_id = ?", chatID, senderID).
+		Updates(map[string]any{
+			"is_anonymized":  true,
+			"anonymous_name": "Thành viên ẩn danh",
+		}).Error
+}
+
+func (r *GroupChatRepository) CreateMemberRequest(ctx context.Context, req *models.GroupChatMemberRequest) error {
+	return r.db.WithContext(ctx).Create(req).Error
+}
+
+func (r *GroupChatRepository) FindPendingMemberRequest(ctx context.Context, chatID, targetUserID string) (*models.GroupChatMemberRequest, error) {
+	var req models.GroupChatMemberRequest
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ? AND target_user_id = ? AND status = ?", chatID, targetUserID, models.GroupChatMemberRequestPending).
+		First(&req).Error
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (r *GroupChatRepository) FindMemberRequestByID(ctx context.Context, requestID string) (*models.GroupChatMemberRequest, error) {
+	var req models.GroupChatMemberRequest
+	err := r.db.WithContext(ctx).Where("id = ?", requestID).First(&req).Error
+	if err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+func (r *GroupChatRepository) ApproveMemberRequest(ctx context.Context, requestID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var req models.GroupChatMemberRequest
+		if err := tx.Where("id = ? AND status = ?", requestID, models.GroupChatMemberRequestPending).
+			First(&req).Error; err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+
+		req.Status = models.GroupChatMemberRequestApproved
+		req.RespondedAt = &now
+		if err := tx.Save(&req).Error; err != nil {
+			return err
+		}
+
+		participant := models.NewChatParticipant(req.ChatID, req.TargetUserID, models.ChatRoleMember)
+		participant.ID = utils.GenerateUUID()
+		participant.JoinedAt = now
+
+		return tx.Create(&participant).Error
+	})
+}
+
+func (r *GroupChatRepository) RejectMemberRequest(ctx context.Context, requestID string) error {
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).
+		Model(&models.GroupChatMemberRequest{}).
+		Where("id = ? AND status = ?", requestID, models.GroupChatMemberRequestPending).
+		Updates(map[string]any{
+			"status":       models.GroupChatMemberRequestRejected,
+			"responded_at": now,
+		}).Error
 }

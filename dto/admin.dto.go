@@ -37,6 +37,11 @@ type AdminUserBanInput struct {
 	Duration string `json:"duration" binding:"required"`
 }
 
+type AdminBanUserResponse struct {
+	Message string     `json:"message"`
+	BanUtil *time.Time `json:"ban_util,omitempty"`
+}
+
 type AdminPostFilterInput struct {
 	Keyword  string `json:"keyword" form:"keyword"`
 	Status   string `json:"status" form:"status"`
@@ -128,4 +133,23 @@ type AdminReportReviewInput struct {
 	Action   string `json:"action" binding:"required"`
 	Reason   string `json:"reason,omitempty"`
 	Duration string `json:"duration,omitempty"`
+}
+
+type AdminAnalyticsFilterInput struct {
+	StartDate string `form:"start_date"` // Định dạng: YYYY-MM-DD
+	EndDate   string `form:"end_date"`   // Định dạng: YYYY-MM-DD
+	Type      string `form:"type"`       // Lọc biểu đồ theo: "users", "posts", "reports", "all"
+}
+
+type ChartDataPoint struct {
+	Date  string `json:"date"`  // Trục X: Ngày dạng chuỗi "YYYY-MM-DD"
+	Count int64  `json:"count"` // Trục Y: Lượng tạo mới trong ngày
+}
+
+type AdminAnalyticsResponse struct {
+	TotalUsers   int64            `json:"total_users"`
+	TotalPosts   int64            `json:"total_posts"`
+	TotalReports int64            `json:"total_reports"`
+	ChartData    []ChartDataPoint `json:"chart_data,omitempty"`
+	GeneratedAt  time.Time        `json:"generated_at"`
 }
