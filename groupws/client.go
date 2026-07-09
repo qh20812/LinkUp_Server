@@ -108,15 +108,16 @@ func (c *Client) ReadPump() {
 			msgs := make([]dto.MessagePayload, 0, len(history))
 			for _, m := range history {
 				msgs = append(msgs, dto.MessagePayload{
-					ID:            m.ID,
-					ChatID:        m.ChatID,
-					SenderID:      m.SenderID,
-					Content:       m.Content,
-					EmojiID:       m.EmojiID,
-					MediaID:       m.MediaID,
-					IsAnonymized:  m.IsAnonymized,
-					AnonymousName: m.AnonymousName,
-					CreatedAt:     m.CreatedAt,
+					ID:               m.ID,
+					ChatID:           m.ChatID,
+					SenderID:         m.SenderID,
+					Content:          m.Content,
+					EmojiID:          m.EmojiID,
+					MediaID:          m.MediaID,
+					ReplyToMessageID: m.ReplyToMessageID,
+					IsAnonymized:     m.IsAnonymized,
+					AnonymousName:    m.AnonymousName,
+					CreatedAt:        m.CreatedAt,
 				})
 			}
 
@@ -139,6 +140,7 @@ func (c *Client) ReadPump() {
 				payload.Content,
 				payload.EmojiID,
 				payload.MediaID,
+				payload.ReplyToMessageID,
 			)
 			if err != nil {
 				c.sendError(err.Error())
@@ -148,13 +150,14 @@ func (c *Client) ReadPump() {
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
 				Type: "group:message:new",
 				Payload: mustMarshal(dto.MessagePayload{
-					ID:        msg.ID,
-					ChatID:    msg.ChatID,
-					SenderID:  msg.SenderID,
-					Content:   msg.Content,
-					EmojiID:   msg.EmojiID,
-					MediaID:   msg.MediaID,
-					CreatedAt: msg.CreatedAt,
+					ID:               msg.ID,
+					ChatID:           msg.ChatID,
+					SenderID:         msg.SenderID,
+					Content:          msg.Content,
+					EmojiID:          msg.EmojiID,
+					MediaID:          msg.MediaID,
+					ReplyToMessageID: msg.ReplyToMessageID,
+					CreatedAt:        msg.CreatedAt,
 				}),
 			})
 

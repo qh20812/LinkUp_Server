@@ -15,22 +15,24 @@ type ChatJoinPayload struct {
 }
 
 type SendMessagePayload struct {
-	ChatID  string  `json:"chat_id,omitempty"`
-	Content string  `json:"content"`
-	EmojiID *string `json:"emoji_id,omitempty"`
-	MediaID *string `json:"media_id,omitempty"`
+	ChatID           string  `json:"chat_id,omitempty"`
+	Content          string  `json:"content"`
+	EmojiID          *string `json:"emoji_id,omitempty"`
+	MediaID          *string `json:"media_id,omitempty"`
+	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
 }
 
 type MessagePayload struct {
-	ID            string    `json:"id"`
-	ChatID        string    `json:"chat_id"`
-	SenderID      string    `json:"sender_id"`
-	Content       string    `json:"content"`
-	EmojiID       *string   `json:"emoji_id,omitempty"`
-	MediaID       *string   `json:"media_id,omitempty"`
-	IsAnonymized  bool      `json:"is_anonymized"`
-	AnonymousName *string   `json:"anonymous_name,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	ChatID           string    `json:"chat_id"`
+	SenderID         string    `json:"sender_id"`
+	Content          string    `json:"content"`
+	EmojiID          *string   `json:"emoji_id,omitempty"`
+	MediaID          *string   `json:"media_id,omitempty"`
+	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
+	IsAnonymized     bool      `json:"is_anonymized"`
+	AnonymousName    *string   `json:"anonymous_name,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type TypingPayload struct {

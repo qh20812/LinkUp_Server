@@ -74,7 +74,7 @@ func (s *GroupMessageService) JoinRoom(ctx context.Context, userID, chatID strin
 func (s *GroupMessageService) SendMessage(
 	ctx context.Context,
 	userID, chatID, content string,
-	emojiID, mediaID *string,
+	emojiID, mediaID, replyToMessageID *string,
 ) (*models.Message, error) {
 	chat, err := s.ensureGroupMember(ctx, userID, chatID)
 	if err != nil {
@@ -119,6 +119,16 @@ func (s *GroupMessageService) SendMessage(
 		}
 	}
 
+	if replyToMessageID != nil && *replyToMessageID != "" {
+		parentMsg, err := s.chatRepo.FindMessageByID(ctx, *replyToMessageID)
+		if err != nil {
+			return nil, errors.New("tin nhắn gốc không tồn tại")
+		}
+		if parentMsg.ChatID != chatID {
+			return nil, errors.New("tin nhắn gốc không thuộc phòng chat này")
+		}
+	}
+
 	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	if err != nil {
 		return nil, fmt.Errorf("lấy khóa mã hóa thất bại: %w", err)
@@ -132,6 +142,7 @@ func (s *GroupMessageService) SendMessage(
 	msg := models.NewMessage(chatID, userID, encryptedContent, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
+	msg.ReplyToMessageID = replyToMessageID
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
 	if err != nil {

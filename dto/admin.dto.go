@@ -37,6 +37,11 @@ type AdminUserBanInput struct {
 	Duration string `json:"duration" binding:"required"`
 }
 
+type AdminBanUserResponse struct {
+	Message string     `json:"message"`
+	BanUtil *time.Time `json:"ban_util,omitempty"`
+}
+
 type AdminPostFilterInput struct {
 	Keyword  string `json:"keyword" form:"keyword"`
 	Status   string `json:"status" form:"status"`
