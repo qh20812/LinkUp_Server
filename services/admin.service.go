@@ -134,18 +134,18 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	return s.authRepo.UpdateUserStatus(ctx, targetUserID, status)
 }
 
-func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) error {
+func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) (dto.AdminBanUserResponse, error) {
 	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
-		return err
+		return dto.AdminBanUserResponse{}, err
 	}
 
 	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
 	if err != nil {
-		return err
+		return dto.AdminBanUserResponse{}, err
 	}
 
 	if targetUser.Status == models.UserStatusBanned {
-		return fmt.Errorf("người dùng đã bị ban")
+		return dto.AdminBanUserResponse{}, fmt.Errorf("người dùng đã bị ban")
 	}
 
 	var expiresAt *time.Time
@@ -154,7 +154,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if durationKey != "permanent" {
 		duration, ok := banDurationMap[durationKey]
 		if !ok {
-			return fmt.Errorf("thời hạn ban không hợp lệ")
+			return dto.AdminBanUserResponse{}, fmt.Errorf("thời hạn ban không hợp lệ")
 		}
 		t := time.Now().UTC().Add(duration)
 		expiresAt = &t
@@ -165,10 +165,17 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	ban.CreatedAt = time.Now().UTC()
 
 	if err := s.banRepo.CreateBan(ctx, &ban); err != nil {
-		return err
+		return dto.AdminBanUserResponse{}, err
 	}
 
-	return s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned)
+	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned); err != nil {
+		return dto.AdminBanUserResponse{}, err
+	}
+
+	return dto.AdminBanUserResponse{
+		Message: "ban user thành công",
+		BanUtil: expiresAt,
+	}, nil
 }
 
 func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input dto.AdminPostFilterInput) (dto.AdminPostListResponse, error) {

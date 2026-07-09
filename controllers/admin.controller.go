@@ -78,12 +78,13 @@ func (ctrl *AdminController) BanUser(c *gin.Context) {
 		return
 	}
 
-	if err := ctrl.adminService.BanUser(c.Request.Context(), superAdminID, targetUserID, input); err != nil {
+	result, err := ctrl.adminService.BanUser(c.Request.Context(), superAdminID, targetUserID, input)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "ban user thành công"})
+	c.JSON(http.StatusOK, result)
 }
 
 func (ctrl *AdminController) ListPosts(c *gin.Context) {
