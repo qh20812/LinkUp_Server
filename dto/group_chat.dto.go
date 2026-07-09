@@ -17,9 +17,10 @@ type BanMemberInput struct {
 
 // Input cho tính năng gửi tin nhắn nhóm qua HTTP (nếu không dùng qua trực tiếp WS)
 type SendGroupMessageInput struct {
-	Content string  `json:"content" binding:"required"`
-	EmojiID *string `json:"emoji_id"`
-	MediaID *string `json:"media_id"`
+	Content          string  `json:"content" binding:"required"`
+	EmojiID          *string `json:"emoji_id"`
+	MediaID          *string `json:"media_id"`
+	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
 }
 
 type GroupChatSettingsDTO struct {
@@ -46,13 +47,13 @@ type GroupChatSettingsResponse struct {
 }
 
 type MuteMemberInput struct {
-    UserID       string `json:"user_id" binding:"required"`
-    Reason       string `json:"reason" binding:"required,oneof=spam abuse harassment violation other"`
-    DurationMins int    `json:"duration_minutes" binding:"required,oneof=1 30 60 1440 0"` // 0 = permanent
+	UserID       string `json:"user_id" binding:"required"`
+	Reason       string `json:"reason" binding:"required,oneof=spam abuse harassment violation other"`
+	DurationMins int    `json:"duration_minutes" binding:"required,oneof=1 30 60 1440 0"` // 0 = permanent
 }
 
 type UnmuteMemberInput struct {
-    UserID string `json:"user_id" binding:"required"`
+	UserID string `json:"user_id" binding:"required"`
 }
 
 // GroupChatTransferOwnershipInput là input cho tính năng chuyển quyền sở hữu nhóm chat.

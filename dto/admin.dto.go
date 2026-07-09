@@ -37,6 +37,11 @@ type AdminUserBanInput struct {
 	Duration string `json:"duration" binding:"required"`
 }
 
+type AdminBanUserResponse struct {
+	Message string     `json:"message"`
+	BanUtil *time.Time `json:"ban_util,omitempty"`
+}
+
 type AdminPostFilterInput struct {
 	Keyword  string `json:"keyword" form:"keyword"`
 	Status   string `json:"status" form:"status"`
@@ -157,17 +162,17 @@ type AdminGroupListResponse struct {
 }
 
 type AdminGroupDetailResponse struct {
-	ID          string                `json:"id"`
-	Name        string                `json:"name"`
-	AvatarURI   string                `json:"avatar_uri"`
-	CreatorID   *string               `json:"creator_id,omitempty"`
-	CreatorName string                `json:"creator_name"`
-	Type        string                `json:"type"`
-	Status      string                `json:"status"`
-	MemberCount int                   `json:"member_count"`
-	Members     []AdminGroupMember    `json:"members"`
-	CreatedAt   time.Time             `json:"created_at"`
-	UpdatedAt   *time.Time            `json:"updated_at,omitempty"`
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	AvatarURI   string             `json:"avatar_uri"`
+	CreatorID   *string            `json:"creator_id,omitempty"`
+	CreatorName string             `json:"creator_name"`
+	Type        string             `json:"type"`
+	Status      string             `json:"status"`
+	MemberCount int                `json:"member_count"`
+	Members     []AdminGroupMember `json:"members"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   *time.Time         `json:"updated_at,omitempty"`
 }
 
 type AdminGroupMember struct {
@@ -206,19 +211,19 @@ type AdminCommunityListResponse struct {
 }
 
 type AdminCommunityDetailResponse struct {
-	ID          string                `json:"id"`
-	Name        string                `json:"name"`
-	Description string                `json:"description"`
-	AvatarURI   string                `json:"avatar_uri"`
-	CreatorID   string                `json:"creator_id"`
-	CreatorName string                `json:"creator_name"`
-	Privacy     string                `json:"privacy"`
-	Status      string                `json:"status"`
-	AutoApprove bool                  `json:"auto_approve"`
-	MemberCount int                   `json:"member_count"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	AvatarURI   string                 `json:"avatar_uri"`
+	CreatorID   string                 `json:"creator_id"`
+	CreatorName string                 `json:"creator_name"`
+	Privacy     string                 `json:"privacy"`
+	Status      string                 `json:"status"`
+	AutoApprove bool                   `json:"auto_approve"`
+	MemberCount int                    `json:"member_count"`
 	Members     []AdminCommunityMember `json:"members"`
-	CreatedAt   time.Time             `json:"created_at"`
-	UpdatedAt   *time.Time            `json:"updated_at,omitempty"`
+	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   *time.Time             `json:"updated_at,omitempty"`
 }
 
 type AdminCommunityMember struct {
@@ -253,8 +258,26 @@ type AdminModerationLogItem struct {
 }
 
 type AdminModerationLogListResponse struct {
-	Logs  []AdminModerationLogItem `json:"logs"`
-	Total int64                    `json:"total"`
-	Page  int                      `json:"page"`
-	PageSize int                   `json:"page_size"`
+	Logs     []AdminModerationLogItem `json:"logs"`
+	Total    int64                    `json:"total"`
+	Page     int                      `json:"page"`
+	PageSize int                      `json:"page_size"`
+}
+type AdminAnalyticsFilterInput struct {
+	StartDate string `form:"start_date"` // Định dạng: YYYY-MM-DD
+	EndDate   string `form:"end_date"`   // Định dạng: YYYY-MM-DD
+	Type      string `form:"type"`       // Lọc biểu đồ theo: "users", "posts", "reports", "all"
+}
+
+type ChartDataPoint struct {
+	Date  string `json:"date"`  // Trục X: Ngày dạng chuỗi "YYYY-MM-DD"
+	Count int64  `json:"count"` // Trục Y: Lượng tạo mới trong ngày
+}
+
+type AdminAnalyticsResponse struct {
+	TotalUsers   int64            `json:"total_users"`
+	TotalPosts   int64            `json:"total_posts"`
+	TotalReports int64            `json:"total_reports"`
+	ChartData    []ChartDataPoint `json:"chart_data,omitempty"`
+	GeneratedAt  time.Time        `json:"generated_at"`
 }

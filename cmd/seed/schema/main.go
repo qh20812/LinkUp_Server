@@ -720,6 +720,31 @@ func Run(env config.Env) error {
 			FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		// 39. group_chat_member_request:
+		`CREATE TABLE IF NOT EXISTS group_chat_member_requests (
+			id VARCHAR(36) PRIMARY KEY,
+			chat_id VARCHAR(36) NOT NULL,
+			requester_id VARCHAR(36) NOT NULL,
+			target_user_id VARCHAR(36) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL,
+			responded_at DATETIME NULL,
+			INDEX idx_group_chat_member_requests_chat_id (chat_id),
+			INDEX idx_group_chat_member_requests_requester_id (requester_id),
+			INDEX idx_group_chat_member_requests_target_user_id (target_user_id),
+			INDEX idx_group_chat_member_requests_status (status),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 40. Add 2 columns to messages
+		`ALTER TABLE messages
+		ADD COLUMN is_anonymized TINYINT(1) NOT NULL DEFAULT 0,
+		ADD COLUMN anonymous_name VARCHAR(255) NULL`,
+
+		// 41. Reply Messges
+		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
 	}
 
 	for _, stmt := range statements {
