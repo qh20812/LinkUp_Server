@@ -213,6 +213,28 @@ func (ctrl *GroupChatController) TransferAdmin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền admin thành công"})
 }
 
+func (ctrl *GroupChatController) TransferOwnership(c *gin.Context) {
+	userIDVal, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.GroupChatTransferOwnershipInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp target_user_id"})
+		return
+	}
+
+	if err := ctrl.groupService.TransferOwnership(c.Request.Context(), chatID, userID, input.TargetUserID, input.KeepAdmin); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền sở hữu nhóm thành công"})
+}
+
 func (ctrl *GroupChatController) MuteMember(c *gin.Context) {
 	adminIDVal, exists := c.Get("userID")
 	if !exists {

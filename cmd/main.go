@@ -190,7 +190,7 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, notificationService)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, notificationService)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
 

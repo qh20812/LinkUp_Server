@@ -549,6 +549,40 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 	return nil
 }
 
+func (s *CommunityService) TransferOwnership(ctx context.Context, requesterID, communityID, targetUserID string, keepAdmin bool) error {
+	if requesterID == targetUserID {
+		return errors.New("không thể chuyển quyền sở hữu cho chính mình")
+	}
+
+	community, err := s.repo.FindByID(ctx, communityID)
+	if err != nil {
+		return validations.ErrCommunityNotFound
+	}
+
+	if community.CreatorID != requesterID {
+		return errors.New("chỉ người tạo cộng đồng mới có thể chuyển quyền sở hữu")
+	}
+
+	isMember, err := s.repo.IsUserMember(ctx, communityID, targetUserID)
+	if err != nil {
+		return errors.New("lỗi khi kiểm tra thành viên")
+	}
+	if !isMember {
+		return validations.ErrMemberNotFound
+	}
+
+	if err := s.repo.TransferCommunityOwnership(ctx, communityID, requesterID, targetUserID, keepAdmin); err != nil {
+		return errors.New("chuyển quyền sở hữu thất bại")
+	}
+
+	s.notifService.Create(ctx, targetUserID, &requesterID,
+		models.NotificationTypeCommunityRoleChanged,
+		"Bạn đã được chuyển quyền sở hữu cộng đồng",
+		nil, &communityID, nil)
+
+	return nil
+}
+
 // ── Invite code management ──────────────────────────────────────────────────
 
 func (s *CommunityService) CreateInviteCode(ctx context.Context, adminID, communityID string, maxUses int, expiresAt *time.Time) (*dto.InviteCodeResponse, error) {

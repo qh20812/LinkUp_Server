@@ -71,6 +71,15 @@ func (s *GroupChatService) CreateGroup(ctx context.Context, userID string, name,
 
 // 1. CHỨC NĂNG: RỜI KHỎI NHÓM CHAT
 func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID string) error {
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+
+	if chat.CreatorID != nil && *chat.CreatorID == userID {
+		return validations.ErrCreatorCannotLeaveGroup
+	}
+
 	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, userID)
 	if err != nil {
 		return err
@@ -314,6 +323,35 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 	}
 
 	return s.groupRepo.TransferAdmin(ctx, chatID, requestID, targetUserID, time.Now().UTC())
+}
+
+func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, requesterID, targetUserID string, keepAdmin bool) error {
+	if requesterID == targetUserID {
+		return errors.New("không thể chuyển quyền sở hữu cho chính mình")
+	}
+
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+
+	if chat.CreatorID == nil || *chat.CreatorID != requesterID {
+		return errors.New("chỉ người tạo nhóm mới có thể chuyển quyền sở hữu")
+	}
+
+	if chat.Type != models.ChatTypeGroup {
+		return errors.New("chỉ hỗ trợ chuyển quyền sở hữu cho nhóm chat")
+	}
+
+	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
+	if err != nil {
+		return err
+	}
+	if !isMember {
+		return errors.New("người nhận phải là thành viên của nhóm")
+	}
+
+	return s.groupRepo.TransferOwnership(ctx, chatID, requesterID, targetUserID, keepAdmin, time.Now().UTC())
 }
 
 func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targetUserID, reason string, durationMinutes int) (*models.GroupChatMute, error) {

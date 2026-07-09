@@ -8,22 +8,26 @@ import (
 type ModerationAction string
 
 const (
-	ModerationActionWarn    ModerationAction = "warn"
-	ModerationActionBan     ModerationAction = "ban"
-	ModerationActionMute    ModerationAction = "mute"
-	ModerationActionSuspend ModerationAction = "suspend"
-	ModerationActionDelete  ModerationAction = "delete"
-	ModerationActionUpdate  ModerationAction = "update"
+	ModerationActionWarn          ModerationAction = "warn"
+	ModerationActionBan           ModerationAction = "ban"
+	ModerationActionMute          ModerationAction = "mute"
+	ModerationActionSuspend       ModerationAction = "suspend"
+	ModerationActionDelete        ModerationAction = "delete"
+	ModerationActionUpdate        ModerationAction = "update"
+	ModerationActionHide          ModerationAction = "hide"
+	ModerationActionTransferOwner ModerationAction = "transfer_owner"
 )
 
 type ModerationTargetType string
 
 const (
-	ModerationTargetUser    ModerationTargetType = "user"
-	ModerationTargetPost    ModerationTargetType = "post"
-	ModerationTargetComment ModerationTargetType = "comment"
-	ModerationTargetAd      ModerationTargetType = "ad"
-	ModerationTargetReport  ModerationTargetType = "report"
+	ModerationTargetUser      ModerationTargetType = "user"
+	ModerationTargetPost      ModerationTargetType = "post"
+	ModerationTargetComment   ModerationTargetType = "comment"
+	ModerationTargetAd        ModerationTargetType = "ad"
+	ModerationTargetReport    ModerationTargetType = "report"
+	ModerationTargetCommunity ModerationTargetType = "community"
+	ModerationTargetGroupChat ModerationTargetType = "group_chat"
 )
 
 type ModerationLog struct {
@@ -58,6 +62,10 @@ func ParseModerationAction(value string) ModerationAction {
 		return ModerationActionDelete
 	case string(ModerationActionUpdate):
 		return ModerationActionUpdate
+	case string(ModerationActionHide):
+		return ModerationActionHide
+	case string(ModerationActionTransferOwner):
+		return ModerationActionTransferOwner
 	default:
 		return ModerationActionWarn
 	}
@@ -79,6 +87,10 @@ func ParseModerationTargetType(value string) ModerationTargetType {
 		return ModerationTargetAd
 	case string(ModerationTargetReport):
 		return ModerationTargetReport
+	case string(ModerationTargetCommunity):
+		return ModerationTargetCommunity
+	case string(ModerationTargetGroupChat):
+		return ModerationTargetGroupChat
 	default:
 		return ModerationTargetUser
 	}

@@ -32,16 +32,24 @@ type AdminService struct {
 	postRepo            *repository.PostRepository
 	reportRepo          *repository.ReportRepository
 	moderationRepo      *repository.ModerationRepository
+	chatRepo            *repository.ChatRepository
+	communityRepo       *repository.CommunityRepository
+	profileRepo         *repository.ProfileRepository
+	groupChatRepo       *repository.GroupChatRepository
 	notificationService *NotificationService
 }
 
-func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, notificationService *NotificationService) *AdminService {
+func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, chatRepo *repository.ChatRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, groupChatRepo *repository.GroupChatRepository, notificationService *NotificationService) *AdminService {
 	return &AdminService{
 		authRepo:            authRepo,
 		banRepo:             banRepo,
 		postRepo:            postRepo,
 		reportRepo:          reportRepo,
 		moderationRepo:      moderationRepo,
+		chatRepo:            chatRepo,
+		communityRepo:       communityRepo,
+		profileRepo:         profileRepo,
+		groupChatRepo:       groupChatRepo,
 		notificationService: notificationService,
 	}
 }
@@ -167,6 +175,8 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if err := s.banRepo.CreateBan(ctx, &ban); err != nil {
 		return err
 	}
+
+	s.transferOwnershipOnBan(ctx, targetUserID)
 
 	return s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned)
 }
@@ -567,6 +577,435 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	return nil
 }
 
+// ── Shared helpers ─────────────────────────────────────────────────────────
+
+func (s *AdminService) ensureAdmin(ctx context.Context, userID string) error {
+	if userID == "" {
+		return errors.New("không có quyền truy cập")
+	}
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, userID, models.RoleSuperAdmin)
+	if err != nil {
+		return fmt.Errorf("check role: %w", err)
+	}
+	if isSuperAdmin {
+		return nil
+	}
+	isAdmin, err := s.authRepo.HasRole(ctx, userID, models.RoleAdmin)
+	if err != nil {
+		return fmt.Errorf("check role: %w", err)
+	}
+	if isAdmin {
+		return nil
+	}
+	return errors.New("chỉ có admin/superadmin mới được phép")
+}
+
+func (s *AdminService) resolvePageSize(page, pageSize int) (int, int) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+// ── Group Chat: Admin endpoints ─────────────────────────────────────────────
+
+func (s *AdminService) ListGroups(ctx context.Context, userID string, input dto.AdminGroupFilterInput) (dto.AdminGroupListResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminGroupListResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	keyword := strings.TrimSpace(input.Keyword)
+	status := strings.TrimSpace(strings.ToLower(input.Status))
+	if status != "" {
+		switch status {
+		case string(models.ChatStatusActive), string(models.ChatStatusHidden), string(models.ChatStatusArchived):
+		default:
+			return dto.AdminGroupListResponse{}, fmt.Errorf("trạng thái group không hợp lệ")
+		}
+	}
+
+	items, err := s.chatRepo.ListGroups(ctx, keyword, status, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminGroupListResponse{}, err
+	}
+
+	total, err := s.chatRepo.CountGroups(ctx, keyword, status)
+	if err != nil {
+		return dto.AdminGroupListResponse{}, err
+	}
+
+	return dto.AdminGroupListResponse{
+		Groups:   items,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+func (s *AdminService) GetGroupDetail(ctx context.Context, userID, chatID string) (dto.AdminGroupDetailResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminGroupDetailResponse{}, err
+	}
+
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return dto.AdminGroupDetailResponse{}, fmt.Errorf("group không tồn tại")
+	}
+	if chat.Type != models.ChatTypeGroup {
+		return dto.AdminGroupDetailResponse{}, fmt.Errorf("ID không phải là group chat")
+	}
+
+	members, err := s.chatRepo.GetGroupMembers(ctx, chatID)
+	if err != nil {
+		return dto.AdminGroupDetailResponse{}, err
+	}
+
+	creatorName := ""
+	if chat.CreatorID != nil {
+		creator, err := s.profileRepo.FindByUserID(ctx, *chat.CreatorID)
+		if err == nil && creator != nil {
+			creatorName = creator.DisplayName
+		}
+	}
+
+	return dto.AdminGroupDetailResponse{
+		ID:          chat.ID,
+		Name:        chat.Name,
+		AvatarURI:   chat.AvatarURI,
+		CreatorID:   chat.CreatorID,
+		CreatorName: creatorName,
+		Type:        string(chat.Type),
+		Status:      string(chat.Status),
+		MemberCount: len(members),
+		Members:     members,
+		CreatedAt:   chat.CreatedAt,
+	}, nil
+}
+
+func (s *AdminService) ListGroupMembers(ctx context.Context, userID, chatID string) ([]dto.AdminGroupMember, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("group không tồn tại")
+	}
+	if chat.Type != models.ChatTypeGroup {
+		return nil, fmt.Errorf("ID không phải là group chat")
+	}
+
+	return s.chatRepo.GetGroupMembers(ctx, chatID)
+}
+
+func (s *AdminService) GetGroupModerationLogs(ctx context.Context, userID, chatID string, input dto.AdminGroupFilterInput) (dto.AdminModerationLogListResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminModerationLogListResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	logs, err := s.moderationRepo.ListLogsByTarget(ctx, models.ModerationTargetGroupChat, chatID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminModerationLogListResponse{}, err
+	}
+
+	total, err := s.moderationRepo.CountLogsByTarget(ctx, models.ModerationTargetGroupChat, chatID)
+	if err != nil {
+		return dto.AdminModerationLogListResponse{}, err
+	}
+
+	return dto.AdminModerationLogListResponse{
+		Logs:     logs,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+func (s *AdminService) moderateGroup(ctx context.Context, superAdminID, chatID string, action models.ModerationAction, logAction models.ModerationAction, newStatus models.ChatStatus, actionLabel string, reason string) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return fmt.Errorf("group không tồn tại")
+	}
+	if chat.Type != models.ChatTypeGroup {
+		return fmt.Errorf("ID không phải là group chat")
+	}
+
+	if chat.Status == models.ChatStatusArchived && newStatus != models.ChatStatusArchived {
+		return fmt.Errorf("không thể thao tác trên group đã bị đình chỉ")
+	}
+
+	if chat.Status == newStatus {
+		return fmt.Errorf("group đã ở trạng thái %s", actionLabel)
+	}
+
+	moderation := models.NewModerationLog(superAdminID, logAction, models.ModerationTargetGroupChat, chatID, reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if err := s.chatRepo.UpdateChatStatus(ctx, chatID, newStatus); err != nil {
+		return err
+	}
+
+	if chat.CreatorID != nil {
+		content := fmt.Sprintf("Nhóm chat '%s' đã bị %s bởi quản trị viên. Lý do: %s", chat.Name, actionLabel, reason)
+		senderID := superAdminID
+		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+	}
+
+	return nil
+}
+
+func (s *AdminService) HideGroup(ctx context.Context, superAdminID, chatID string, input dto.AdminModerateInput) error {
+	return s.moderateGroup(ctx, superAdminID, chatID, models.ModerationActionHide, models.ModerationActionHide, models.ChatStatusHidden, "ẩn", input.Reason)
+}
+
+func (s *AdminService) UnhideGroup(ctx context.Context, superAdminID, chatID string) error {
+	return s.moderateGroup(ctx, superAdminID, chatID, models.ModerationActionUpdate, models.ModerationActionUpdate, models.ChatStatusActive, "bỏ ẩn", "Bỏ ẩn group")
+}
+
+func (s *AdminService) ArchiveGroup(ctx context.Context, superAdminID, chatID string, input dto.AdminModerateInput) error {
+	return s.moderateGroup(ctx, superAdminID, chatID, models.ModerationActionSuspend, models.ModerationActionSuspend, models.ChatStatusArchived, "đình chỉ", input.Reason)
+}
+
+func (s *AdminService) WarnGroup(ctx context.Context, superAdminID, chatID string, input dto.AdminWarnInput) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return fmt.Errorf("group không tồn tại")
+	}
+	if chat.Type != models.ChatTypeGroup {
+		return fmt.Errorf("ID không phải là group chat")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionWarn, models.ModerationTargetGroupChat, chatID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if chat.CreatorID != nil {
+		content := fmt.Sprintf("Cảnh báo nhóm chat '%s': %s", chat.Name, input.Message)
+		senderID := superAdminID
+		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+	}
+
+	return nil
+}
+
+// ── Community: Admin endpoints ──────────────────────────────────────────────
+
+func (s *AdminService) ListCommunities(ctx context.Context, userID string, input dto.AdminCommunityFilterInput) (dto.AdminCommunityListResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminCommunityListResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	keyword := strings.TrimSpace(input.Keyword)
+	status := strings.TrimSpace(strings.ToLower(input.Status))
+	if status != "" {
+		switch status {
+		case string(models.CommunityStatusActive), string(models.CommunityStatusHidden), string(models.CommunityStatusArchived):
+		default:
+			return dto.AdminCommunityListResponse{}, fmt.Errorf("trạng thái community không hợp lệ")
+		}
+	}
+
+	privacy := strings.TrimSpace(strings.ToLower(input.Privacy))
+	if privacy != "" {
+		switch privacy {
+		case string(models.PrivacyPublic), string(models.PrivacyCode), string(models.PrivacyInvitationOnly):
+		default:
+			return dto.AdminCommunityListResponse{}, fmt.Errorf("quyền riêng tư không hợp lệ")
+		}
+	}
+
+	items, err := s.communityRepo.ListCommunitiesAdmin(ctx, keyword, status, privacy, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminCommunityListResponse{}, err
+	}
+
+	total, err := s.communityRepo.CountCommunitiesAdmin(ctx, keyword, status, privacy)
+	if err != nil {
+		return dto.AdminCommunityListResponse{}, err
+	}
+
+	return dto.AdminCommunityListResponse{
+		Communities: items,
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
+	}, nil
+}
+
+func (s *AdminService) GetCommunityDetail(ctx context.Context, userID, communityID string) (dto.AdminCommunityDetailResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminCommunityDetailResponse{}, err
+	}
+
+	community, err := s.communityRepo.FindByID(ctx, communityID)
+	if err != nil {
+		return dto.AdminCommunityDetailResponse{}, fmt.Errorf("cộng đồng không tồn tại")
+	}
+
+	members, err := s.communityRepo.FindCommunityMembersWithProfiles(ctx, communityID)
+	if err != nil {
+		return dto.AdminCommunityDetailResponse{}, err
+	}
+
+	creatorName := ""
+	creator, err := s.profileRepo.FindByUserID(ctx, community.CreatorID)
+	if err == nil && creator != nil {
+		creatorName = creator.DisplayName
+	}
+
+	return dto.AdminCommunityDetailResponse{
+		ID:          community.ID,
+		Name:        community.Name,
+		Description: community.Description,
+		AvatarURI:   community.AvatarURI,
+		CreatorID:   community.CreatorID,
+		CreatorName: creatorName,
+		Privacy:     string(community.Privacy),
+		Status:      string(community.Status),
+		AutoApprove: community.AutoApprove,
+		MemberCount: len(members),
+		Members:     members,
+		CreatedAt:   community.CreatedAt,
+		UpdatedAt:   community.UpdatedAt,
+	}, nil
+}
+
+func (s *AdminService) ListCommunityMembers(ctx context.Context, userID, communityID string) ([]dto.AdminCommunityMember, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return nil, fmt.Errorf("cộng đồng không tồn tại")
+	}
+
+	return s.communityRepo.FindCommunityMembersWithProfiles(ctx, communityID)
+}
+
+func (s *AdminService) GetCommunityModerationLogs(ctx context.Context, userID, communityID string, input dto.AdminGroupFilterInput) (dto.AdminModerationLogListResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminModerationLogListResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	logs, err := s.moderationRepo.ListLogsByTarget(ctx, models.ModerationTargetCommunity, communityID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminModerationLogListResponse{}, err
+	}
+
+	total, err := s.moderationRepo.CountLogsByTarget(ctx, models.ModerationTargetCommunity, communityID)
+	if err != nil {
+		return dto.AdminModerationLogListResponse{}, err
+	}
+
+	return dto.AdminModerationLogListResponse{
+		Logs:     logs,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
+}
+
+func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, communityID string, action models.ModerationAction, logAction models.ModerationAction, newStatus models.CommunityStatus, actionLabel string, reason string) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	community, err := s.communityRepo.FindByID(ctx, communityID)
+	if err != nil {
+		return fmt.Errorf("cộng đồng không tồn tại")
+	}
+
+	if community.Status == models.CommunityStatusArchived && newStatus != models.CommunityStatusArchived {
+		return fmt.Errorf("không thể thao tác trên cộng đồng đã bị đình chỉ")
+	}
+
+	if community.Status == newStatus {
+		return fmt.Errorf("cộng đồng đã ở trạng thái %s", actionLabel)
+	}
+
+	moderation := models.NewModerationLog(superAdminID, logAction, models.ModerationTargetCommunity, communityID, reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if err := s.communityRepo.UpdateStatus(ctx, communityID, newStatus); err != nil {
+		return err
+	}
+
+	content := fmt.Sprintf("Cộng đồng '%s' đã bị %s bởi quản trị viên. Lý do: %s", community.Name, actionLabel, reason)
+	senderID := superAdminID
+	_, _ = s.notificationService.Create(ctx, community.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+
+	return nil
+}
+
+func (s *AdminService) HideCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminModerateInput) error {
+	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionHide, models.ModerationActionHide, models.CommunityStatusHidden, "ẩn", input.Reason)
+}
+
+func (s *AdminService) UnhideCommunity(ctx context.Context, superAdminID, communityID string) error {
+	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionUpdate, models.ModerationActionUpdate, models.CommunityStatusActive, "bỏ ẩn", "Bỏ ẩn cộng đồng")
+}
+
+func (s *AdminService) ArchiveCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminModerateInput) error {
+	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionSuspend, models.ModerationActionSuspend, models.CommunityStatusArchived, "đình chỉ", input.Reason)
+}
+
+func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminWarnInput) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	community, err := s.communityRepo.FindByID(ctx, communityID)
+	if err != nil {
+		return fmt.Errorf("cộng đồng không tồn tại")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionWarn, models.ModerationTargetCommunity, communityID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	content := fmt.Sprintf("Cảnh báo cộng đồng '%s': %s", community.Name, input.Message)
+	senderID := superAdminID
+	_, _ = s.notificationService.Create(ctx, community.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+
+	return nil
+}
+
 func (s *AdminService) ensureSuperAdmin(ctx context.Context, userID string) error {
 	if userID == "" {
 		return errors.New("không có quyền truy cập")
@@ -616,4 +1055,146 @@ func (s *AdminService) resolveBanExpiresAt(durationKey string) (*time.Time, erro
 
 	t := time.Now().UTC().Add(duration)
 	return &t, nil
+}
+
+// ── Auto-transfer ownership on ban ──────────────────────────────────────────
+
+func (s *AdminService) transferOwnershipOnBan(ctx context.Context, targetUserID string) {
+	// Transfer community ownership
+	communities, err := s.communityRepo.FindByCreator(ctx, targetUserID)
+	if err != nil {
+		return
+	}
+	for _, c := range communities {
+		nextOwnerID := s.findNextOwnerForCommunity(ctx, c.ID, targetUserID)
+		if nextOwnerID == "" {
+			continue
+		}
+		_ = s.communityRepo.TransferCommunityOwnership(ctx, c.ID, targetUserID, nextOwnerID, false)
+	}
+
+	// Transfer group chat ownership
+	groupChats, err := s.chatRepo.FindGroupChatsByCreator(ctx, targetUserID)
+	if err != nil {
+		return
+	}
+	for _, g := range groupChats {
+		nextAdminID := s.findNextAdminForGroupChat(ctx, g.ID, targetUserID)
+		if nextAdminID == "" {
+			continue
+		}
+		_ = s.groupChatRepo.TransferOwnership(ctx, g.ID, targetUserID, nextAdminID, false, time.Now().UTC())
+	}
+}
+
+func (s *AdminService) findNextOwnerForCommunity(ctx context.Context, communityID, excludeUserID string) string {
+	admins, err := s.communityRepo.FindCommunityAdmins(ctx, communityID)
+	if err == nil {
+		for _, id := range admins {
+			if id != excludeUserID {
+				return id
+			}
+		}
+	}
+
+	member, err := s.communityRepo.FindOldestMember(ctx, communityID, excludeUserID)
+	if err == nil && member != nil {
+		return member.UserID
+	}
+
+	mc, err := s.communityRepo.FindHighestContributionMember(ctx, communityID, excludeUserID)
+	if err == nil && mc != nil {
+		return mc.UserID
+	}
+
+	return ""
+}
+
+func (s *AdminService) findNextAdminForGroupChat(ctx context.Context, chatID, excludeUserID string) string {
+	admins, err := s.groupChatRepo.FindAllAdmins(ctx, chatID, excludeUserID)
+	if err == nil && len(admins) > 0 {
+		return admins[0]
+	}
+
+	member, err := s.groupChatRepo.FindOldestMember(ctx, chatID, excludeUserID)
+	if err == nil && member != nil {
+		return member.UserID
+	}
+
+	allIDs, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
+	if err == nil {
+		for _, id := range allIDs {
+			if id != excludeUserID {
+				return id
+			}
+		}
+	}
+
+	return ""
+}
+
+// ── Delete Group / Delete Community ─────────────────────────────────────────
+
+func (s *AdminService) DeleteGroup(ctx context.Context, superAdminID, chatID string, input dto.AdminModerateInput) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	if chat.Type != models.ChatTypeGroup {
+		return fmt.Errorf("chỉ có thể xóa group chat")
+	}
+
+	participantIDs, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
+	if err != nil {
+		return err
+	}
+
+	if len(participantIDs) > 1 {
+		return fmt.Errorf("không thể xóa group chat còn thành viên khác; hãy chuyển quyền sở hữu trước")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetGroupChat, chatID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	return s.chatRepo.DeleteChat(ctx, chatID)
+}
+
+func (s *AdminService) DeleteCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminModerateInput) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	community, err := s.communityRepo.FindByID(ctx, communityID)
+	if err != nil {
+		return fmt.Errorf("cộng đồng không tồn tại")
+	}
+	if community.CreatorID == "" {
+		return fmt.Errorf("cộng đồng không có người tạo")
+	}
+
+	memberIDs, err := s.communityRepo.FindCommunityMemberIDs(ctx, communityID)
+	if err != nil {
+		return err
+	}
+
+	if len(memberIDs) > 1 {
+		return fmt.Errorf("không thể xóa cộng đồng còn thành viên khác; hãy chuyển quyền sở hữu trước")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetCommunity, communityID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	return s.communityRepo.RemoveMember(ctx, communityID, community.CreatorID)
 }
