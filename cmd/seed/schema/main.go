@@ -652,6 +652,9 @@ func Run(env config.Env) error {
 		`ALTER TABLE messages
 		ADD COLUMN is_anonymized TINYINT(1) NOT NULL DEFAULT 0,
 		ADD COLUMN anonymous_name VARCHAR(255) NULL`,
+
+		// 41. Reply Messges
+		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
 	}
 
 	for _, stmt := range statements {

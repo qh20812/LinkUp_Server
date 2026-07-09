@@ -139,6 +139,7 @@ func (c *Client) ReadPump() {
 				payload.Content,
 				payload.EmojiID,
 				payload.MediaID,
+				payload.ReplyToMessageID,
 			)
 			if err != nil {
 				c.sendError(err.Error())
@@ -154,6 +155,7 @@ func (c *Client) ReadPump() {
 					Content:   msg.Content,
 					EmojiID:   msg.EmojiID,
 					MediaID:   msg.MediaID,
+					ReplyToMessageID: msg.ReplyToMessageID,
 					CreatedAt: msg.CreatedAt,
 				}),
 			})

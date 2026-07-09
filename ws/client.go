@@ -118,20 +118,21 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
 			messagePayload := dto.MessagePayload{
-				ID:        msg.ID,
-				ChatID:    msg.ChatID,
-				SenderID:  msg.SenderID,
-				Content:   msg.Content,
-				EmojiID:   msg.EmojiID,
-				MediaID:   msg.MediaID,
-				CreatedAt: msg.CreatedAt,
+				ID:               msg.ID,
+				ChatID:           msg.ChatID,
+				SenderID:         msg.SenderID,
+				Content:          msg.Content,
+				EmojiID:          msg.EmojiID,
+				MediaID:          msg.MediaID,
+				ReplyToMessageID: msg.ReplyToMessageID,
+				CreatedAt:        msg.CreatedAt,
 			}
 
 			resp, _ := json.Marshal(dto.WsEvent{

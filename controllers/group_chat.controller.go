@@ -122,6 +122,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		input.Content,
 		input.EmojiID,
 		input.MediaID,
+		input.ReplyToMessageID,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
