@@ -15,7 +15,7 @@ type GroupSendMessagePayload struct {
 	Content          string  `json:"content"`
 	EmojiID          *string `json:"emoji_id,omitempty"`
 	MediaID          *string `json:"media_id,omitempty"`
-	ReplyToMessageID *string `json:"reply_to_message,omitempty"`
+	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
 }
 
 type GroupTypingPayload struct {
