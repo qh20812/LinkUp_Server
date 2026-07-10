@@ -32,16 +32,16 @@ type CallIncomingPayload struct {
 }
 
 type CallStatusPayload struct {
-	CallID             string  `json:"call_id"`
-	Status             string  `json:"status"`
-	CallerID           string  `json:"caller_id"`
-	CalleeID           string  `json:"callee_id"`
-	CallType           string  `json:"call_type"`
-	VideoEnabledCaller bool    `json:"video_enabled_caller"`
-	VideoEnabledCallee bool    `json:"video_enabled_callee"`
-	StartedAt          *int64  `json:"started_at,omitempty"`
-	EndedAt            *int64  `json:"ended_at,omitempty"`
-	Duration           int     `json:"duration,omitempty"`
+	CallID             string `json:"call_id"`
+	Status             string `json:"status"`
+	CallerID           string `json:"caller_id"`
+	CalleeID           string `json:"callee_id"`
+	CallType           string `json:"call_type"`
+	VideoEnabledCaller bool   `json:"video_enabled_caller"`
+	VideoEnabledCallee bool   `json:"video_enabled_callee"`
+	StartedAt          *int64 `json:"started_at,omitempty"`
+	EndedAt            *int64 `json:"ended_at,omitempty"`
+	Duration           int    `json:"duration,omitempty"`
 }
 
 type CallBusyPayload struct {
@@ -60,4 +60,20 @@ type ToggleMuteRequest struct {
 
 type ToggleVideoRequest struct {
 	VideoEnabled bool `json:"video_enabled"`
+}
+
+type GroupCallInitiatePayload struct {
+	ChatID         string   `json:"chat_id"`
+	ParticipantIDs []string `json:"participant_ids,omitempty"`
+	CallType       string   `json:"call_type,omitempty"`
+}
+
+type GroupCallJoinPayload struct {
+	ChatID string `json:"chat_id"`
+	CallID string `json:"call_id"`
+}
+
+type GroupCallSignalPayload struct {
+	CallID string          `json:"call_id"`
+	Signal json.RawMessage `json:"signal"`
 }

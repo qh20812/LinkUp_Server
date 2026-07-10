@@ -235,3 +235,11 @@ func (s *GroupMessageService) SearchMessages(
 
 	return filtered, nil
 }
+
+func (s *GroupMessageService) ListGroupMemberIDs(ctx context.Context, userID, chatID string) ([]string, error) {
+	_, err := s.ensureGroupMember(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	return s.chatRepo.GetParticipantIDs(ctx, chatID)
+}

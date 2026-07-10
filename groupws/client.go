@@ -375,6 +375,103 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(settings),
 			})
 
+		case "group:call:initiate":
+			var payload dto.GroupCallInitiatePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu gọi nhóm không hợp lệ")
+				continue
+			}
+
+			memberIDs, err := c.messageService.ListGroupMemberIDs(c.ctx, c.userID, payload.ChatID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			session, err := c.hub.CreateGroupCall(payload.ChatID, c.userID, payload.CallType, payload.ParticipantIDs, memberIDs)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.sendEvent("group:call:created", map[string]any{
+				"call_id":      session.CallID,
+				"chat_id":      session.ChatID,
+				"caller_id":    session.CallerID,
+				"participants": session.ParticipantIDs(),
+				"call_type":    session.CallType,
+			})
+
+			for participantID := range session.Participants {
+				if participantID == c.userID {
+					continue
+				}
+				c.hub.SendToUser(participantID, dto.WsEvent{
+					Type: "group:call:incoming",
+					Payload: mustMarshal(map[string]any{
+						"call_id":      session.CallID,
+						"chat_id":      session.ChatID,
+						"caller_id":    session.CallerID,
+						"participants": session.ParticipantIDs(),
+						"call_type":    session.CallType,
+					}),
+				})
+			}
+
+		case "group:call:join":
+			var payload dto.GroupCallJoinPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tham gia cuộc gọi không hợp lệ")
+				continue
+			}
+
+			session, err := c.hub.JoinGroupCall(c.userID, payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(session.ChatID, dto.WsEvent{
+				Type: "group:call:joined",
+				Payload: mustMarshal(map[string]any{
+					"call_id": session.CallID,
+					"chat_id": session.ChatID,
+					"user_id": c.userID,
+				}),
+			})
+
+			c.sendEvent("group:call:joined_ack", map[string]any{
+				"call_id": session.CallID,
+				"chat_id": session.ChatID,
+			})
+
+		case "group:call:signal":
+			var payload dto.GroupCallSignalPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tín hiệu cuộc gọi không hợp lệ")
+				continue
+			}
+
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			for participantID := range session.Participants {
+				if participantID == c.userID {
+					continue
+				}
+				c.hub.SendToUser(participantID, dto.WsEvent{
+					Type: "group:call:signal",
+					Payload: mustMarshal(map[string]any{
+						"call_id":   payload.CallID,
+						"sender_id": c.userID,
+						"signal":    payload.Signal,
+					}),
+				})
+			}
+
 		default:
 			c.sendError("loại sự kiện không xác định")
 		}
