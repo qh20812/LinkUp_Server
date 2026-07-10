@@ -182,6 +182,35 @@ type AdminGroupMember struct {
 	Role        string `json:"role"`
 }
 
+// ── Admin Media Management ──
+
+type AdminMediaFilterInput struct {
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size" binding:"max=100"`
+	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected"`
+}
+
+type AdminMediaItem struct {
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	FileURI   string  `json:"file_uri"`
+	FileType  string  `json:"file_type"`
+	FileSize  float64 `json:"file_size"`
+	Status    string  `json:"status"`
+	CreatedAt string  `json:"created_at"`
+}
+
+type AdminMediaListResponse struct {
+	Items []AdminMediaItem `json:"items"`
+	Total int64            `json:"total"`
+	Page  int              `json:"page"`
+}
+
+type AdminReviewMediaInput struct {
+	Action string `json:"action" binding:"required,oneof=approve reject"`
+	Reason string `json:"reason" binding:"required"`
+}
+
 // ── Admin Community Management ──
 
 type AdminCommunityFilterInput struct {

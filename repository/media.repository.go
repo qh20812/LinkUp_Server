@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"linkup/models"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -54,6 +55,61 @@ func (r *MediaRepository) GetUserStorageInfo(ctx context.Context, userID string)
 		First(&user).
 		Error
 	return user.StorageQuotaBytes, user.StorageUsedBytes, err
+}
+
+func (r *MediaRepository) UpdateStatus(ctx context.Context, id string, status models.MediaStatus) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Where("id = ?", id).
+		Update("status", status).
+		Error
+}
+
+func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaStatus, page, pageSize int) ([]models.Media, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	var items []models.Media
+	var total int64
+
+	base := r.db.WithContext(ctx).Model(&models.Media{}).Where("status = ?", status)
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []models.Media{}, 0, nil
+	}
+
+	err := base.Session(&gorm.Session{}).
+		Order("created_at DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&items).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (r *MediaRepository) GetRejectedOlderThan(ctx context.Context, cutoff time.Time) ([]models.Media, error) {
+	var items []models.Media
+	err := r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Where("status = ? AND created_at < ?", models.MediaStatusRejected, cutoff).
+		Find(&items).Error
+	return items, err
+}
+
+func (r *MediaRepository) ClearFileURI(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Where("id = ?", id).
+		Update("file_uri", "").
+		Error
 }
 
 func (r *MediaRepository) DeleteWithStorageAdjustment(ctx context.Context, userID string, media *models.Media) error {

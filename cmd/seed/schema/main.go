@@ -219,7 +219,7 @@ func Run(env config.Env) error {
 			file_uri VARCHAR(512) NOT NULL,
 			file_type VARCHAR(50) NOT NULL DEFAULT '',
 			file_size DOUBLE NOT NULL DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'approved',
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,

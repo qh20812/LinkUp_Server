@@ -147,6 +147,10 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 		return errors.New("tải ảnh background thất bại")
 	}
 
+	if media.Status == models.MediaStatusRejected {
+		return errors.New("ảnh background vi phạm tiêu chuẩn cộng đồng")
+	}
+
 	if err := s.validation.ValidateBackgroundURI(media.FileURI); err != nil {
 		return err
 	}
