@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"linkup/dto"
 	"linkup/models"
@@ -489,6 +490,48 @@ func (r *CommunityRepository) FindCommunityMemberIDs(ctx context.Context, commun
 	return userIDs, nil
 }
 
+// FindByCreator lấy danh sách cộng đồng do một người dùng tạo.
+func (r *CommunityRepository) FindByCreator(ctx context.Context, creatorID string) ([]models.Community, error) {
+	var communities []models.Community
+	err := r.db.WithContext(ctx).Where("creator_id = ?", creatorID).Find(&communities).Error
+	if err != nil {
+		return nil, fmt.Errorf("tìm cộng đồng theo người tạo thất bại: %w", err)
+	}
+	return communities, nil
+}
+
+// FindOldestMember tìm thành viên tham gia sớm nhất (trừ userID chỉ định).
+func (r *CommunityRepository) FindOldestMember(ctx context.Context, communityID, excludeUserID string) (*models.GroupMember, error) {
+	var member models.GroupMember
+	err := r.db.WithContext(ctx).
+		Where("community_id = ? AND user_id <> ?", communityID, excludeUserID).
+		Order("joined_at ASC").
+		First(&member).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("tìm thành viên cũ nhất thất bại: %w", err)
+	}
+	return &member, nil
+}
+
+// FindHighestContributionMember tìm thành viên có điểm đóng góp cao nhất (trừ userID chỉ định).
+func (r *CommunityRepository) FindHighestContributionMember(ctx context.Context, communityID, excludeUserID string) (*models.MemberContribution, error) {
+	var mc models.MemberContribution
+	err := r.db.WithContext(ctx).
+		Where("community_id = ? AND user_id <> ?", communityID, excludeUserID).
+		Order("contribution_score DESC").
+		First(&mc).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("tìm thành viên có điểm đóng góp cao nhất thất bại: %w", err)
+	}
+	return &mc, nil
+}
+
 // ── Invite code ─────────────────────────────────────────────────────────────
 
 func (r *CommunityRepository) CreateInviteCode(ctx context.Context, code *models.CommunityInviteCode) error {
@@ -596,6 +639,200 @@ func (r *CommunityRepository) ListPendingInvitationsByInvitee(ctx context.Contex
 		Order("community_invitations.created_at DESC").
 		Find(&invites).Error
 	return invites, err
+}
+
+// TransferCommunityOwnership chuyển quyền sở hữu cộng đồng.
+// Cập nhật creator_id, gán/quản lý user_roles và cập nhật participant role trong group chat mặc định.
+func (r *CommunityRepository) TransferCommunityOwnership(ctx context.Context, communityID, oldCreatorID, newCreatorID string, keepAdmin bool) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+
+		if err := tx.Model(&models.Community{}).Where("id = ?", communityID).Update("creator_id", newCreatorID).Error; err != nil {
+			return fmt.Errorf("cập nhật creator_id thất bại: %w", err)
+		}
+
+		var communityAdminRole, groupAdminRole, groupMemberRole models.Role
+		if err := tx.Where("name = ?", models.RoleCommunityAdmin).First(&communityAdminRole).Error; err != nil {
+			return fmt.Errorf("không tìm thấy role COMMUNITY_ADMIN: %w", err)
+		}
+		if err := tx.Where("name = ?", models.RoleGroupAdmin).First(&groupAdminRole).Error; err != nil {
+			return fmt.Errorf("không tìm thấy role GROUP_ADMIN: %w", err)
+		}
+		if err := tx.Where("name = ?", models.RoleGroupMember).First(&groupMemberRole).Error; err != nil {
+			return fmt.Errorf("không tìm thấy role GROUP_MEMBER: %w", err)
+		}
+
+		scopeType := models.ScopeTypeCommunity
+		adminRoleIDs := []string{communityAdminRole.ID, groupAdminRole.ID}
+
+		if keepAdmin {
+			if err := tx.Where("user_id = ? AND scope_id = ? AND scope_type = ? AND role_id IN ?",
+				oldCreatorID, communityID, scopeType, adminRoleIDs).
+				Delete(&models.UserRole{}).Error; err != nil {
+				return fmt.Errorf("xóa admin roles cũ thất bại: %w", err)
+			}
+		} else {
+			if err := tx.Where("user_id = ? AND scope_id = ? AND scope_type = ? AND role_id IN ?",
+				oldCreatorID, communityID, scopeType, adminRoleIDs).
+				Delete(&models.UserRole{}).Error; err != nil {
+				return fmt.Errorf("xóa admin roles cũ thất bại: %w", err)
+			}
+			var count int64
+			tx.Model(&models.UserRole{}).Where("user_id = ? AND scope_id = ? AND scope_type = ? AND role_id = ?",
+				oldCreatorID, communityID, scopeType, groupMemberRole.ID).Count(&count)
+			if count == 0 {
+				memberRole := models.NewScopedUserRole(oldCreatorID, groupMemberRole.ID, communityID, scopeType)
+				memberRole.ID = utils.GenerateUUID()
+				memberRole.AssignedAt = now
+				if err := tx.Create(&memberRole).Error; err != nil {
+					return fmt.Errorf("gán member role cho chủ cũ thất bại: %w", err)
+				}
+			}
+		}
+
+		if err := tx.Where("user_id = ? AND scope_id = ? AND scope_type = ? AND role_id = ?",
+			newCreatorID, communityID, scopeType, groupMemberRole.ID).
+			Delete(&models.UserRole{}).Error; err != nil {
+			return fmt.Errorf("xóa member role của chủ mới thất bại: %w", err)
+		}
+
+		for _, roleID := range adminRoleIDs {
+			userRole := models.NewScopedUserRole(newCreatorID, roleID, communityID, scopeType)
+			userRole.ID = utils.GenerateUUID()
+			userRole.AssignedAt = now
+			if err := tx.Create(&userRole).Error; err != nil {
+				return fmt.Errorf("gán admin role cho chủ mới thất bại: %w", err)
+			}
+		}
+
+		var chat models.Chat
+		err := tx.Where("community_id = ? AND type = ?", communityID, models.ChatTypeGroup).First(&chat).Error
+		if err == nil {
+			if err := tx.Model(&models.ChatParticipant{}).
+				Where("chat_id = ? AND user_id = ?", chat.ID, newCreatorID).
+				Update("role", models.ChatRoleAdmin).Error; err != nil {
+				return fmt.Errorf("cập nhật participant role cho chủ mới thất bại: %w", err)
+			}
+		}
+
+		return nil
+	})
+}
+
+// ── Admin: Community management ─────────────────────────────────────────────
+
+func (r *CommunityRepository) ListCommunitiesAdmin(ctx context.Context, keyword, status, privacy string, pageSize, offset int) ([]dto.AdminCommunityListItem, error) {
+	query := r.db.WithContext(ctx).
+		Table("communities").
+		Select(`communities.id, communities.name, communities.creator_id, communities.privacy,
+			communities.status, communities.created_at,
+			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count,
+			COALESCE((SELECT display_name FROM profiles WHERE user_id = communities.creator_id), '') AS creator_name`)
+
+	if keyword != "" {
+		query = query.Where("communities.name LIKE ?", "%"+keyword+"%")
+	}
+	if status != "" {
+		query = query.Where("communities.status = ?", status)
+	}
+	if privacy != "" {
+		query = query.Where("communities.privacy = ?", privacy)
+	}
+
+	type communityRow struct {
+		ID          string    `gorm:"column:id"`
+		Name        string    `gorm:"column:name"`
+		CreatorID   string    `gorm:"column:creator_id"`
+		CreatorName string    `gorm:"column:creator_name"`
+		MemberCount int       `gorm:"column:member_count"`
+		Privacy     string    `gorm:"column:privacy"`
+		Status      string    `gorm:"column:status"`
+		CreatedAt   time.Time `gorm:"column:created_at"`
+	}
+	var rows []communityRow
+	if err := query.Order("communities.created_at DESC").Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list communities admin: %w", err)
+	}
+
+	items := make([]dto.AdminCommunityListItem, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, dto.AdminCommunityListItem{
+			ID:          r.ID,
+			Name:        r.Name,
+			CreatorID:   r.CreatorID,
+			CreatorName: r.CreatorName,
+			MemberCount: r.MemberCount,
+			Privacy:     r.Privacy,
+			Status:      r.Status,
+			CreatedAt:   r.CreatedAt,
+		})
+	}
+	return items, nil
+}
+
+func (r *CommunityRepository) CountCommunitiesAdmin(ctx context.Context, keyword, status, privacy string) (int64, error) {
+	query := r.db.WithContext(ctx).Model(&models.Community{})
+	if keyword != "" {
+		query = query.Where("name LIKE ?", "%"+keyword+"%")
+	}
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if privacy != "" {
+		query = query.Where("privacy = ?", privacy)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return 0, fmt.Errorf("count communities admin: %w", err)
+	}
+	return total, nil
+}
+
+func (r *CommunityRepository) UpdateStatus(ctx context.Context, communityID string, status models.CommunityStatus) error {
+	return r.db.WithContext(ctx).Model(&models.Community{}).Where("id = ?", communityID).Update("status", status).Error
+}
+
+func (r *CommunityRepository) FindCommunityMembersWithProfiles(ctx context.Context, communityID string) ([]dto.AdminCommunityMember, error) {
+	type memberRow struct {
+		UserID      string `gorm:"column:user_id"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+		Role        string `gorm:"column:role_name"`
+	}
+	var rows []memberRow
+	err := r.db.WithContext(ctx).
+		Table("group_members").
+		Select(`DISTINCT group_members.user_id,
+			COALESCE(profiles.display_name, '') AS display_name,
+			COALESCE(profiles.avatar_uri, '') AS avatar_uri,
+			COALESCE((SELECT roles.name FROM user_roles
+				JOIN roles ON roles.id = user_roles.role_id
+				WHERE user_roles.user_id = group_members.user_id
+				AND user_roles.scope_id = ? AND user_roles.scope_type = ?
+				ORDER BY CASE roles.name
+					WHEN 'COMMUNITY_ADMIN' THEN 1
+					WHEN 'GROUP_ADMIN' THEN 2
+					WHEN 'GROUP_MOD' THEN 3
+					ELSE 4 END
+				LIMIT 1), 'GROUP_MEMBER') AS role_name`, communityID, models.ScopeTypeCommunity).
+		Joins("LEFT JOIN profiles ON profiles.user_id = group_members.user_id").
+		Where("group_members.community_id = ?", communityID).
+		Order("group_members.joined_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("find community members with profiles: %w", err)
+	}
+
+	items := make([]dto.AdminCommunityMember, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, dto.AdminCommunityMember{
+			UserID:      r.UserID,
+			DisplayName: r.DisplayName,
+			AvatarURI:   r.AvatarURI,
+			Role:        r.Role,
+		})
+	}
+	return items, nil
 }
 
 // mapRoleNameToGroupRole ánh xạ role name từ roles table sang GroupRole enum.

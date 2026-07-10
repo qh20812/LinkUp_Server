@@ -19,6 +19,7 @@ func RegisterGroupChatRoutes(router *gin.Engine, ctrl *controllers.GroupChatCont
 		groupChatGroup.POST("/:chatID/ban", ctrl.BanMember)
 		groupChatGroup.POST("/:chatID/messages", ctrl.SendGroupMessage)
 		groupChatGroup.POST("/:chatID/transfer-admin", ctrl.TransferAdmin)
+		groupChatGroup.POST("/:chatID/transfer-ownership", ctrl.TransferOwnership)
 		groupChatGroup.GET("/:chatID/settings", ctrl.GetSettings)
 		groupChatGroup.PUT("/:chatID/settings", ctrl.UpdateSettings)
 		groupChatGroup.POST("/:chatID/mute", ctrl.MuteMember)

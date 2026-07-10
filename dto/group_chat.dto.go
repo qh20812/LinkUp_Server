@@ -55,3 +55,9 @@ type MuteMemberInput struct {
 type UnmuteMemberInput struct {
 	UserID string `json:"user_id" binding:"required"`
 }
+
+// GroupChatTransferOwnershipInput là input cho tính năng chuyển quyền sở hữu nhóm chat.
+type GroupChatTransferOwnershipInput struct {
+	TargetUserID string `json:"target_user_id" binding:"required"`
+	KeepAdmin    bool   `json:"keep_admin"`
+}

@@ -531,6 +531,9 @@ Trong Postman:
 
 ### 11.2. Gửi signal (caller → callee)
 
+chức năng gửi signal (offer/answer/ice-candidate) qua WebSocket là gì?
+trả lời: Khi call đã connected, gửi message signal để trao đổi thông tin WebRTC giữa caller và callee. mục đích là để thiết lập kết nối peer-to-peer cho cuộc gọi.
+
 Sau khi call đã connected, gửi message:
 
 ```json

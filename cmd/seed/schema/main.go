@@ -776,5 +776,36 @@ if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFA
 	return fmt.Errorf("schema: add is_encrypted: %w", err)
 }
 
+// Phase 1: Admin Manage Groups/Communities — idempotent column additions
+
+// chats.creator_id: who created the group (NULL for direct chats)
+if err := addColumnIfMissing(database, "chats", "creator_id", "VARCHAR(36) NULL"); err != nil {
+	return fmt.Errorf("schema: add chats.creator_id: %w", err)
+}
+// chats.status: moderation state for group chats
+if err := addColumnIfMissing(database, "chats", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+	return fmt.Errorf("schema: add chats.status: %w", err)
+}
+// communities.status: moderation state for communities
+if err := addColumnIfMissing(database, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+	return fmt.Errorf("schema: add communities.status: %w", err)
+}
+
+// FK from chats.creator_id to users.id
+if err := addForeignKeyIfMissing(database, "chats", "fk_chats_creator",
+	"CONSTRAINT fk_chats_creator FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE SET NULL"); err != nil {
+	return fmt.Errorf("schema: add fk_chats_creator: %w", err)
+}
+// index for chats.creator_id
+if err := addIndexIfMissing(database, "chats", "idx_chats_creator_id",
+	"INDEX idx_chats_creator_id (creator_id)"); err != nil {
+	return fmt.Errorf("schema: add idx_chats_creator_id: %w", err)
+}
+// index for communities.status (faster admin filtering)
+if err := addIndexIfMissing(database, "communities", "idx_communities_status",
+	"INDEX idx_communities_status (status)"); err != nil {
+	return fmt.Errorf("schema: add idx_communities_status: %w", err)
+}
+
 return nil
 }

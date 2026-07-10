@@ -25,4 +25,26 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.GET("/reports", adminController.ListReports)
 	adminGroup.GET("/reports/:reportID", adminController.GetReportDetail)
 	adminGroup.PUT("/reports/:reportID/decision", adminController.ReviewReport)
+
+	// ── Admin Groups ──
+	adminGroup.GET("/groups", adminController.ListGroups)
+	adminGroup.GET("/groups/:chatID", adminController.GetGroupDetail)
+	adminGroup.GET("/groups/:chatID/members", adminController.ListGroupMembers)
+	adminGroup.GET("/groups/:chatID/logs", adminController.GetGroupModerationLogs)
+	adminGroup.POST("/groups/:chatID/hide", adminController.HideGroup)
+	adminGroup.POST("/groups/:chatID/unhide", adminController.UnhideGroup)
+	adminGroup.POST("/groups/:chatID/archive", adminController.ArchiveGroup)
+	adminGroup.POST("/groups/:chatID/warn", adminController.WarnGroup)
+
+	// ── Admin Communities ──
+	adminGroup.GET("/communities", adminController.ListCommunities)
+	adminGroup.GET("/communities/:id", adminController.GetCommunityDetail)
+	adminGroup.GET("/communities/:id/members", adminController.ListCommunityMembers)
+	adminGroup.GET("/communities/:id/logs", adminController.GetCommunityModerationLogs)
+	adminGroup.POST("/communities/:id/hide", adminController.HideCommunity)
+	adminGroup.POST("/communities/:id/unhide", adminController.UnhideCommunity)
+	adminGroup.POST("/communities/:id/archive", adminController.ArchiveCommunity)
+	adminGroup.POST("/communities/:id/warn", adminController.WarnCommunity)
+	adminGroup.DELETE("/groups/:chatID", adminController.DeleteGroup)
+	adminGroup.DELETE("/communities/:id", adminController.DeleteCommunity)
 }

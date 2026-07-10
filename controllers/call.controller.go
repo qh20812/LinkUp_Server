@@ -9,6 +9,7 @@ import (
 	"linkup/dto"
 	"linkup/repository"
 	"linkup/services"
+	"linkup/utils"
 	"linkup/ws"
 
 	"github.com/gin-gonic/gin"
@@ -63,11 +64,27 @@ func (ctrl *VoiceCallController) GetIceServers(c *gin.Context) {
 
 func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
+	var userID string
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
-		return
+		tokenString := c.Query("token")
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+			return
+		}
+		token, err := utils.ParseToken(ctrl.env.JWTSecret, tokenString)
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token không hợp lệ"})
+			return
+		}
+		claims := token.Claims.(*utils.TokenClaims)
+		if claims.TokenType != "access" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token không hợp lệ"})
+			return
+		}
+		userID = claims.UserID
+	} else {
+		userID = fmt.Sprintf("%v", userIDVal)
 	}
-	userID := fmt.Sprintf("%v", userIDVal)
 
 	conn, err := callUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {

@@ -9,11 +9,13 @@ import (
 )
 
 func RegisterCallRoutes(router *gin.Engine, ctrl *controllers.VoiceCallController, env config.Env) {
+	// WS endpoint — auth handled via ?token= (not AuthMiddleware)
+	router.GET("/api/calls/ws", ctrl.HandleWebsocket)
+
 	callGroup := router.Group("/api/calls")
 	callGroup.Use(middlewares.AuthMiddleware(env))
 	{
 		callGroup.GET("/ice-servers", ctrl.GetIceServers)
-		callGroup.GET("/ws", ctrl.HandleWebsocket)
 		callGroup.GET("/history", ctrl.GetCallHistory)
 
 		// Missed-call badge — registered before /:callID to avoid route shadowing.
