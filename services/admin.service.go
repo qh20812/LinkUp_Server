@@ -573,6 +573,10 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		return errors.New("action không hợp lệ, chỉ chấp nhận cancel, hide hoặc ban")
 	}
 
+	if (action == "hide" || action == "ban") && strings.TrimSpace(input.Reason) == "" {
+		return errors.New("lý do là bắt buộc cho hành động hide hoặc ban")
+	}
+
 	status := models.ReportStatusRejected
 	if action == "hide" {
 		if report.TargetPostID != nil {

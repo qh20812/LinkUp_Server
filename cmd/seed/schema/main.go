@@ -429,9 +429,11 @@ func Run(env config.Env) error {
 			reason_detail TEXT,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
 			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
 			FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_reports_reporter (reporter_id),
-			INDEX idx_reports_status (status)
+			INDEX idx_reports_status (status),
+			INDEX idx_reports_reporter_status (reporter_id, status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 21. Depends on users

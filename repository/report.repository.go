@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"linkup/dto"
 	"linkup/models"
@@ -43,6 +44,48 @@ func (r *ReportRepository) UpdateStatus(ctx context.Context, reportID string, st
 	tx := r.db.WithContext(ctx).Model(&models.Report{}).Where("id = ?", reportID).Update("status", status)
 	if tx.Error != nil {
 		return fmt.Errorf("update report status: %w", tx.Error)
+	}
+	return nil
+}
+
+func (r *ReportRepository) FindPendingByReporterAndTarget(ctx context.Context, reporterID, targetType, targetID string) (*models.Report, error) {
+	var report models.Report
+	q := r.db.WithContext(ctx).Where("reporter_id = ? AND status = ?", reporterID, models.ReportStatusPending)
+
+	switch targetType {
+	case "user":
+		q = q.Where("target_user_id = ?", targetID)
+	case "post":
+		q = q.Where("target_post_id = ?", targetID)
+	case "comment":
+		q = q.Where("target_comment_id = ?", targetID)
+	}
+
+	err := q.First(&report).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find pending report: %w", err)
+	}
+	return &report, nil
+}
+
+func (r *ReportRepository) Update(ctx context.Context, reportID, reportType, reasonDetail string, violationRuleID *string) error {
+	updates := map[string]interface{}{
+		"report_type":   reportType,
+		"reason_detail": reasonDetail,
+	}
+	if violationRuleID != nil {
+		updates["violation_rule_id"] = *violationRuleID
+	} else {
+		updates["violation_rule_id"] = nil
+	}
+	updates["updated_at"] = time.Now().UTC()
+
+	tx := r.db.WithContext(ctx).Model(&models.Report{}).Where("id = ?", reportID).Updates(updates)
+	if tx.Error != nil {
+		return fmt.Errorf("update report: %w", tx.Error)
 	}
 	return nil
 }
