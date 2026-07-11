@@ -26,14 +26,15 @@ type Hub struct {
 }
 
 type GroupCallSession struct {
-	CallID       string
-	ChatID       string
-	CallerID     string
-	CallType     string
-	Participants map[string]struct{}
-	Joined       map[string]struct{}
-	CreatedAt    time.Time
-	Status       string
+	CallID          string
+	ChatID          string
+	CallerID        string
+	CallType        string
+	Participants    map[string]struct{}
+	PendingRequests map[string]struct{}
+	Joined          map[string]struct{}
+	CreatedAt       time.Time
+	Status          string
 }
 
 func (s *GroupCallSession) ParticipantIDs() []string {
@@ -147,6 +148,7 @@ func (h *Hub) Broadcast(chatID string, msg any) {
 
 func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs, memberIDs []string) (*GroupCallSession, error) {
 	selected := make(map[string]struct{})
+
 	memberSet := make(map[string]struct{}, len(memberIDs))
 	for _, id := range memberIDs {
 		if id == "" {
@@ -174,14 +176,15 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 	selected[callerID] = struct{}{}
 
 	session := &GroupCallSession{
-		CallID:       utils.GenerateUUID(),
-		ChatID:       chatID,
-		CallerID:     callerID,
-		CallType:     callType,
-		Participants: selected,
-		Joined:       map[string]struct{}{callerID: {}},
-		CreatedAt:    time.Now().UTC(),
-		Status:       "calling",
+		CallID:          utils.GenerateUUID(),
+		ChatID:          chatID,
+		CallerID:        callerID,
+		CallType:        callType,
+		Participants:    selected,
+		PendingRequests: make(map[string]struct{}),
+		Joined:          map[string]struct{}{callerID: {}},
+		CreatedAt:       time.Now().UTC(),
+		Status:          "calling",
 	}
 
 	h.mu.Lock()
@@ -191,7 +194,7 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 	return session, nil
 }
 
-func (h *Hub) JoinGroupCall(userID, callID string) (*GroupCallSession, error) {
+func (h *Hub) RequestJoinCall(userID, callID string) (*GroupCallSession, error) {
 	h.mu.RLock()
 	session, ok := h.groupCalls[callID]
 	h.mu.RUnlock()
@@ -199,18 +202,89 @@ func (h *Hub) JoinGroupCall(userID, callID string) (*GroupCallSession, error) {
 		return nil, errors.New("cuộc gọi không tồn tại")
 	}
 
-	if _, ok := session.Participants[userID]; !ok {
-		return nil, errors.New("bạn không phải thành viên của cuộc gọi")
+	if _, invited := session.Participants[userID]; invited {
+		h.mu.Lock()
+		if session.Joined == nil {
+			session.Joined = make(map[string]struct{})
+		}
+		session.Joined[userID] = struct{}{}
+		h.mu.Unlock()
+		return session, nil
 	}
 
 	h.mu.Lock()
-	if session.Joined == nil {
-		session.Joined = make(map[string]struct{})
-	}
-	session.Joined[userID] = struct{}{}
+	session.PendingRequests[userID] = struct{}{}
 	h.mu.Unlock()
+	return session, nil
+}
+
+func (h *Hub) ApproveJoinCall(creatorID, userID, callID string) (*GroupCallSession, error) {
+	h.mu.RLock()
+	session, ok := h.groupCalls[callID]
+	h.mu.RUnlock()
+	if !ok {
+		return nil, errors.New("cuộc gọi không tồn tại")
+	}
+	if session.CallerID != creatorID {
+		return nil, errors.New("chỉ người tạo cuộc gọi mới được duyệt")
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if _, ok := session.PendingRequests[userID]; !ok {
+		return nil, errors.New("người này không có yêu cầu tham gia")
+	}
+
+	delete(session.PendingRequests, userID)
+	session.Participants[userID] = struct{}{}
+	session.Joined[userID] = struct{}{}
 
 	return session, nil
+}
+
+func (h *Hub) RejectJoinCall(creatorID, userID, callID string) (*GroupCallSession, error) {
+	h.mu.RLock()
+	session, ok := h.groupCalls[callID]
+	h.mu.RUnlock()
+	if !ok {
+		return nil, errors.New("cuộc gọi không tồn tại")
+	}
+	if session.CallerID != creatorID {
+		return nil, errors.New("chỉ người tạo cuộc gọi mới được từ chối")
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	delete(session.PendingRequests, userID)
+	return session, nil
+}
+
+func (h *Hub) EndCallByUser(enderID, callID string) (bool, *GroupCallSession, error) {
+	h.mu.RLock()
+	session, ok := h.groupCalls[callID]
+	h.mu.RUnlock()
+	if !ok {
+		return false, nil, errors.New("cuộc gọi không tồn tại")
+	}
+
+	// nếu ender là creator -> end call
+	if session.CallerID == enderID {
+		h.mu.Lock()
+		delete(h.groupCalls, callID)
+		h.mu.Unlock()
+		return true, session, nil
+	}
+
+	// nếu không phải creator -> remove from Joined (if present)
+	h.mu.Lock()
+	if session.Joined != nil {
+		delete(session.Joined, enderID)
+	}
+	h.mu.Unlock()
+
+	return false, session, nil
 }
 
 func (h *Hub) GetGroupCall(callID string) (*GroupCallSession, error) {

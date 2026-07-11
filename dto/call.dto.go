@@ -62,18 +62,26 @@ type ToggleVideoRequest struct {
 	VideoEnabled bool `json:"video_enabled"`
 }
 
+// ==== GROUP CALL DTO ====
 type GroupCallInitiatePayload struct {
 	ChatID         string   `json:"chat_id"`
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
-	CallType       string   `json:"call_type,omitempty"`
 }
 
-type GroupCallJoinPayload struct {
-	ChatID string `json:"chat_id"`
+type GroupCallJoinRequestPayload struct {
 	CallID string `json:"call_id"`
+}
+
+type GroupCallApprovePayload struct {
+	CallID string `json:"call_id"`
+	UserID string `json:"user_id"`
 }
 
 type GroupCallSignalPayload struct {
 	CallID string          `json:"call_id"`
 	Signal json.RawMessage `json:"signal"`
+}
+
+type GroupCallEndPayload struct {
+	CallID string `json:"call_id"`
 }

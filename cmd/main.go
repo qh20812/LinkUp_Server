@@ -218,6 +218,12 @@ func main() {
 		callService := services.NewVoiceCallService(callRepository, friendRepository, hub)
 		callController := controllers.NewVoiceCallController(hub, callService, env)
 		routes.RegisterCallRoutes(router, callController, env)
+
+		// ===== GROUP CALL =====
+		groupCallHub := groupws.NewHub()
+		go groupCallHub.Run()
+
+		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng

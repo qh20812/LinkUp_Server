@@ -31,15 +31,19 @@ type Client struct {
 	send           chan []byte
 	joinedChats    map[string]struct{}
 	typingChats    map[string]bool
+	mode           string
+	groupChatHub   *Hub
 }
 
-func NewClient(
+func NewClientWithMode(
 	ctx context.Context,
 	conn *websocket.Conn,
 	hub *Hub,
 	messageService *services.GroupMessageService,
 	groupService *services.GroupChatService,
 	userID string,
+	mode string,
+	groupChatHub *Hub,
 ) *Client {
 	return &Client{
 		ctx:            ctx,
@@ -51,7 +55,20 @@ func NewClient(
 		send:           make(chan []byte, 256),
 		joinedChats:    make(map[string]struct{}),
 		typingChats:    make(map[string]bool),
+		mode:           mode,
+		groupChatHub:   groupChatHub,
 	}
+}
+
+func NewClient(
+	ctx context.Context,
+	conn *websocket.Conn,
+	hub *Hub,
+	messageService *services.GroupMessageService,
+	groupService *services.GroupChatService,
+	userID string,
+) *Client {
+	return NewClientWithMode(ctx, conn, hub, messageService, groupService, userID, "chat", nil)
 }
 
 func (c *Client) ReadPump() {
@@ -80,6 +97,15 @@ func (c *Client) ReadPump() {
 		if err := json.Unmarshal(raw, &event); err != nil {
 			c.sendError("định dạng tin nhắn không hợp lệ")
 			continue
+		}
+
+		if c.mode == "call" {
+			switch event.Type {
+			case "group:call:create", "group:call:request-join", "group:call:approve-join", "group:call:reject-join", "group:call:signal", "group:call:end":
+			default:
+				c.sendError("event này chỉ dùng trên endpoint call riêng")
+				continue
+			}
 		}
 
 		switch event.Type {
@@ -375,10 +401,10 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(settings),
 			})
 
-		case "group:call:initiate":
+		case "group:call:create":
 			var payload dto.GroupCallInitiatePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("dữ liệu gọi nhóm không hợp lệ")
+				c.sendError("dữ liệu tạo cuộc gọi không hợp lệ")
 				continue
 			}
 
@@ -388,20 +414,37 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			session, err := c.hub.CreateGroupCall(payload.ChatID, c.userID, payload.CallType, payload.ParticipantIDs, memberIDs)
+			session, err := c.hub.CreateGroupCall(payload.ChatID, c.userID, "video", payload.ParticipantIDs, memberIDs)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			c.sendEvent("group:call:created", map[string]any{
+			createdPayload := map[string]any{
 				"call_id":      session.CallID,
 				"chat_id":      session.ChatID,
 				"caller_id":    session.CallerID,
 				"participants": session.ParticipantIDs(),
-				"call_type":    session.CallType,
-			})
+				"is_video":     true,
+			}
 
+			c.sendEvent("group:call:created", createdPayload)
+
+			// Phát thông báo vào group chat như tin nhắn mới
+			if c.groupChatHub != nil {
+				c.groupChatHub.Broadcast(payload.ChatID, dto.WsEvent{
+					Type: "group:call:incoming",
+					Payload: mustMarshal(map[string]any{
+						"call_id":      session.CallID,
+						"chat_id":      session.ChatID,
+						"caller_id":    session.CallerID,
+						"participants": session.ParticipantIDs(),
+						"is_video":     true,
+					}),
+				})
+			}
+
+			// Gửi tới các người được mời
 			for participantID := range session.Participants {
 				if participantID == c.userID {
 					continue
@@ -413,42 +456,111 @@ func (c *Client) ReadPump() {
 						"chat_id":      session.ChatID,
 						"caller_id":    session.CallerID,
 						"participants": session.ParticipantIDs(),
-						"call_type":    session.CallType,
+						"is_video":     true,
 					}),
 				})
 			}
 
-		case "group:call:join":
-			var payload dto.GroupCallJoinPayload
+		case "group:call:request-join":
+			var payload dto.GroupCallJoinRequestPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("dữ liệu tham gia cuộc gọi không hợp lệ")
+				c.sendError("dữ liệu xin join không hợp lệ")
 				continue
 			}
 
-			session, err := c.hub.JoinGroupCall(c.userID, payload.CallID)
+			session, err := c.hub.RequestJoinCall(c.userID, payload.CallID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			c.hub.Broadcast(session.ChatID, dto.WsEvent{
+			// Kiểm tra nếu user đã được join (nếu họ là invited thì hub đã thêm vào Joined)
+			if _, joined := session.Joined[c.userID]; joined {
+				// thông báo cho tất cả participants rằng user đã join
+				c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+					Type: "group:call:joined",
+					Payload: mustMarshal(map[string]any{
+						"call_id": session.CallID,
+						"chat_id": session.ChatID,
+						"user_id": c.userID,
+					}),
+				})
+				// ack cho user
+				c.sendEvent("group:call:joined_ack", map[string]any{
+					"call_id": session.CallID,
+					"chat_id": session.ChatID,
+				})
+			} else {
+				// là request -> notify creator
+				c.hub.SendToUser(session.CallerID, dto.WsEvent{
+					Type: "group:call:join-request",
+					Payload: mustMarshal(map[string]any{
+						"call_id": session.CallID,
+						"chat_id": session.ChatID,
+						"user_id": c.userID,
+					}),
+				})
+				c.sendEvent("group:call:join-request-sent", map[string]any{
+					"call_id": session.CallID,
+				})
+			}
+
+		case "group:call:approve-join":
+			var payload dto.GroupCallApprovePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu duyệt join không hợp lệ")
+				continue
+			}
+
+			session, err := c.hub.ApproveJoinCall(c.userID, payload.UserID, payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.SendToUser(payload.UserID, dto.WsEvent{
 				Type: "group:call:joined",
 				Payload: mustMarshal(map[string]any{
 					"call_id": session.CallID,
 					"chat_id": session.ChatID,
-					"user_id": c.userID,
+					"user_id": payload.UserID,
 				}),
 			})
 
-			c.sendEvent("group:call:joined_ack", map[string]any{
-				"call_id": session.CallID,
-				"chat_id": session.ChatID,
+			c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+				Type: "group:call:joined",
+				Payload: mustMarshal(map[string]any{
+					"call_id": session.CallID,
+					"chat_id": session.ChatID,
+					"user_id": payload.UserID,
+				}),
+			})
+
+		case "group:call:reject-join":
+			var payload dto.GroupCallApprovePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu từ chối join không hợp lệ")
+				continue
+			}
+
+			_, err := c.hub.RejectJoinCall(c.userID, payload.UserID, payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.SendToUser(payload.UserID, dto.WsEvent{
+				Type: "group:call:join-rejected",
+				Payload: mustMarshal(map[string]any{
+					"call_id": payload.CallID,
+					"user_id": payload.UserID,
+				}),
 			})
 
 		case "group:call:signal":
 			var payload dto.GroupCallSignalPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("dữ liệu tín hiệu cuộc gọi không hợp lệ")
+				c.sendError("dữ liệu signal không hợp lệ")
 				continue
 			}
 
@@ -468,6 +580,39 @@ func (c *Client) ReadPump() {
 						"call_id":   payload.CallID,
 						"sender_id": c.userID,
 						"signal":    payload.Signal,
+					}),
+				})
+			}
+
+		case "group:call:end":
+			var payload dto.GroupCallEndPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu kết thúc cuộc gọi không hợp lệ")
+				continue
+			}
+
+			ended, session, err := c.hub.EndCallByUser(c.userID, payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if ended {
+				// creator đã kết thúc -> notify tất cả participants cuộc gọi kết thúc
+				c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+					Type: "group:call:ended",
+					Payload: mustMarshal(map[string]any{
+						"call_id": payload.CallID,
+						"by":      c.userID,
+					}),
+				})
+			} else {
+				// một user rời cuộc gọi -> notify remaining participants
+				c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+					Type: "group:call:left",
+					Payload: mustMarshal(map[string]any{
+						"call_id": payload.CallID,
+						"user_id": c.userID,
 					}),
 				})
 			}
