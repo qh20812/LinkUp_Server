@@ -1,13 +1,17 @@
 package repository
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"fmt"
 
-    "linkup/models"
+	"linkup/models"
 
-    "gorm.io/gorm"
+	"gorm.io/gorm"
 )
+
+// MaxFindByIDs is the maximum number of user IDs accepted in a single
+// FindByIDs call. Caller must split larger batches into chunks.
+const MaxFindByIDs = 100
 
 type ProfileRepository struct {
     db *gorm.DB
@@ -25,12 +29,15 @@ func (r *ProfileRepository) Create(ctx context.Context, profile *models.Profile)
     return profile, nil
 }
 
+// FindByUserID returns the profile for the given user ID.
+// Returns (nil, nil) when no profile exists — consistent with FindByPhoneNumber.
+// Callers must check both err and the returned profile for nil.
 func (r *ProfileRepository) FindByUserID(ctx context.Context, userID string) (*models.Profile, error) {
     var profile models.Profile
     tx := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&profile)
     if tx.Error != nil {
         if tx.Error == gorm.ErrRecordNotFound {
-		return nil, fmt.Errorf("không tìm thấy hồ sơ")
+            return nil, nil
         }
         return nil, fmt.Errorf("find profile: %w", tx.Error)
     }
@@ -52,12 +59,53 @@ func (r *ProfileRepository) FindByPhoneNumber(ctx context.Context, phoneNumber s
 }
 
 func (r *ProfileRepository) Update(ctx context.Context, userID string, profile *models.Profile) (*models.Profile, error) {
-    tx := r.db.WithContext(ctx).Where("user_id = ?", userID).Updates(profile)
-    if tx.Error != nil {
-        return nil, fmt.Errorf("update profile: %w", tx.Error)
-    }
-    if tx.RowsAffected == 0 {
-        return nil, fmt.Errorf("profile not found")
-    }
-    return profile, nil
+	tx := r.db.WithContext(ctx).Where("user_id = ?", userID).Updates(profile)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("update profile: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return nil, fmt.Errorf("profile not found")
+	}
+	return profile, nil
+}
+
+// FindByIDs returns profiles for the given user IDs.
+// Deduplicates input and queries in chunks of MaxFindByIDs to handle
+// arbitrarily large input without silent truncation.
+// Returns an empty slice (not nil) when no profiles match.
+func (r *ProfileRepository) FindByIDs(ctx context.Context, userIDs []string) ([]models.Profile, error) {
+	if len(userIDs) == 0 {
+		return []models.Profile{}, nil
+	}
+
+	seen := make(map[string]struct{}, len(userIDs))
+	unique := make([]string, 0, len(userIDs))
+	for _, id := range userIDs {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+
+	// Query in chunks of MaxFindByIDs to avoid oversized IN clauses.
+	var allProfiles []models.Profile
+	for i := 0; i < len(unique); i += MaxFindByIDs {
+		end := i + MaxFindByIDs
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[i:end]
+
+		var profiles []models.Profile
+		tx := r.db.WithContext(ctx).
+			Where("user_id IN ?", chunk).
+			Find(&profiles)
+		if tx.Error != nil {
+			return nil, fmt.Errorf("find profiles by ids: %w", tx.Error)
+		}
+		allProfiles = append(allProfiles, profiles...)
+	}
+
+	return allProfiles, nil
 }

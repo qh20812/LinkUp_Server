@@ -11,6 +11,7 @@ const (
 	MediaStatusPending  MediaStatus = "pending"
 	MediaStatusApproved MediaStatus = "approved"
 	MediaStatusRejected MediaStatus = "rejected"
+	MediaStatusFlagged  MediaStatus = "flagged"
 )
 
 type Media struct {
@@ -47,7 +48,9 @@ func ParseMediaStatus(value string) MediaStatus {
 		return MediaStatusApproved
 	case string(MediaStatusRejected):
 		return MediaStatusRejected
+	case string(MediaStatusFlagged):
+		return MediaStatusFlagged
 	default:
-		return MediaStatusApproved
+		return MediaStatusPending
 	}
 }

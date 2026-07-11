@@ -13,6 +13,7 @@ type Profile struct {
 	IsPrivateProfile           bool       `json:"is_private_profile"`
 	IsPrivatePosts             bool       `json:"is_private_posts"`
 	AllowStrangerFriendRequest bool       `json:"allow_stranger_friend_request"`
+	LastReadMissedAt           *time.Time `json:"last_read_missed_at,omitempty"`
 	UpdatedAt                  *time.Time `json:"updated_at,omitempty"`
 }
 

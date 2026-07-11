@@ -15,13 +15,14 @@ const (
 )
 
 const (
-	CallStatusCalling   CallStatus = "calling"
-	CallStatusRinging   CallStatus = "ringing"
-	CallStatusConnected CallStatus = "connected"
-	CallStatusEnded     CallStatus = "ended"
-	CallStatusMissed    CallStatus = "missed"
-	CallStatusRejected  CallStatus = "rejected"
-	CallStatusBusy      CallStatus = "busy"
+	CallStatusCalling    CallStatus = "calling"
+	CallStatusRinging    CallStatus = "ringing"
+	CallStatusConnected  CallStatus = "connected"
+	CallStatusEnded      CallStatus = "ended"
+	CallStatusMissed     CallStatus = "missed"
+	CallStatusRejected   CallStatus = "rejected"
+	CallStatusBusy       CallStatus = "busy"
+	CallStatusCancelled  CallStatus = "cancelled"
 )
 
 type Call struct {
@@ -92,6 +93,8 @@ func ParseCallStatus(value string) CallStatus {
 		return CallStatusRejected
 	case string(CallStatusBusy):
 		return CallStatusBusy
+	case string(CallStatusCancelled):
+		return CallStatusCancelled
 	default:
 		return CallStatusEnded
 	}

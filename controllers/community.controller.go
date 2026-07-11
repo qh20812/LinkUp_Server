@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	"linkup/models"
 	"linkup/services"
 	"net/http"
 
@@ -39,6 +40,10 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Tải ảnh đại diện thất bại"})
+			return
+		}
+		if media.Status == models.MediaStatusRejected {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Ảnh đại diện vi phạm tiêu chuẩn cộng đồng"})
 			return
 		}
 		avatarURI = media.FileURI
@@ -281,6 +286,34 @@ func (ctrl *CommunityController) LeaveCommunity(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Rời cộng đồng thành công!"})
+}
+
+func (ctrl *CommunityController) TransferOwnership(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		return
+	}
+	requesterID := val.(string)
+
+	communityID := c.Param("communityID")
+	if communityID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		return
+	}
+
+	var input dto.CommunityTransferOwnershipInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp target_user_id"})
+		return
+	}
+
+	if err := ctrl.communityService.TransferOwnership(c.Request.Context(), requesterID, communityID, input.TargetUserID, input.KeepAdmin); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chuyển quyền sở hữu cộng đồng thành công!"})
 }
 
 // ── Invite code handlers ────────────────────────────────────────────────────

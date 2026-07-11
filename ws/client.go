@@ -307,7 +307,31 @@ func (c *Client) ReadPump() {
 				c.sendError("dữ liệu tín hiệu không hợp lệ")
 				continue
 			}
+			// Phase 4 fix: Validate signal payload size to prevent DoS
+			// via oversized payloads forwarded to the other user.
+			if err := payload.Validate(); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
 			if err := c.callService.HandleSignal(c.ctx, c.userID, payload.CallID, payload.Signal); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:toggle_mute":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload struct {
+				CallID string `json:"call_id"`
+				Muted  bool   `json:"muted"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu mute không hợp lệ")
+				continue
+			}
+			if err := c.callService.ToggleMute(c.ctx, c.userID, payload.CallID, payload.Muted); err != nil {
 				c.sendError(err.Error())
 				continue
 			}
@@ -331,12 +355,11 @@ func (c *Client) ReadPump() {
 			}
 
 		default:
+			// Phase 1 fix: Removed the extra ReadMessage() call that was here.
+			// The outer for-loop already calls ReadMessage() at the top of
+			// each iteration. The previous code consumed the next client
+			// message, silently dropping it with no error response.
 			c.sendError("loại sự kiện không xác định")
-			_, _, err := c.conn.ReadMessage()
-			if err != nil {
-				log.Printf("ws read error: %v", err)
-				return
-			}
 		}
 	}
 }

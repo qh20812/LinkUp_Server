@@ -36,7 +36,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 
 	if _, err := s.authRepo.FindByEmail(ctx, email); err == nil {
 		return dto.AuthResponse{}, errors.New("email đã tồn tại")
-	} else if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+	} else if !errors.Is(err, repository.ErrUserNotFound) {
 		return dto.AuthResponse{}, err
 	}
 

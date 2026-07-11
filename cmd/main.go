@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -118,9 +119,12 @@ func main() {
 		followController := controllers.NewFollowController(followService)
 		routes.RegisterFollowRoutes(router, followController, env)
 
-		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ẢNH/FILE TRÊN CLOUDINARY) =====
+		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ÁNH/FILE TRÊN CLOUDINARY) =====
 		mediaRepository := repository.NewMediaRepository(gormDB)
-		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
+		cldForMedia, _ := cloudinary.NewFromURL(env.CloudinaryEnv)
+		aiModerationService := services.NewCloudinaryModerationService(cldForMedia)
+		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv, aiModerationService, notificationService)
+		mediaService.SetModerationRepo(repository.NewModerationRepository(gormDB))
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
 
@@ -209,13 +213,15 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, notificationService)
+		adminRepository := repository.NewAdminRepository(gormDB)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, notificationService)
+		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)
-		callService := services.NewVoiceCallService(callRepository, friendRepository, hub)
+		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, hub)
 		callController := controllers.NewVoiceCallController(hub, callService, env)
 		routes.RegisterCallRoutes(router, callController, env)
 

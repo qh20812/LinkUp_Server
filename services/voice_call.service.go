@@ -17,14 +17,16 @@ import (
 type VoiceCallService struct {
 	callRepo   *repository.CallRepository
 	friendRepo *repository.FriendRepository
+	profileRepo *repository.ProfileRepository
 	hub        *ws.Hub
 }
 
-func NewVoiceCallService(callRepo *repository.CallRepository, friendRepo *repository.FriendRepository, hub *ws.Hub) *VoiceCallService {
+func NewVoiceCallService(callRepo *repository.CallRepository, friendRepo *repository.FriendRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub) *VoiceCallService {
 	return &VoiceCallService{
-		callRepo:   callRepo,
-		friendRepo: friendRepo,
-		hub:        hub,
+		callRepo:    callRepo,
+		friendRepo:  friendRepo,
+		profileRepo: profileRepo,
+		hub:         hub,
 	}
 }
 
@@ -34,14 +36,6 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 	}
 
 	callType := models.ParseCallType(payload.CallType)
-
-	activeAsCaller, err := s.callRepo.FindActiveByUserID(ctx, callerID)
-	if err != nil {
-		return nil, fmt.Errorf("kiểm tra trạng thái: %w", err)
-	}
-	if activeAsCaller != nil {
-		return nil, errors.New("bạn đang có cuộc gọi khác")
-	}
 
 	isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, callerID, payload.CalleeID)
 	if err != nil {
@@ -107,26 +101,16 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 	return call, nil
 }
 
+// AcceptCall atomically transitions a call to connected status.
 func (s *VoiceCallService) AcceptCall(ctx context.Context, userID string, callID string) error {
-	call, err := s.callRepo.FindByID(ctx, callID)
+	// The atomic method handles: call existence check, callee ownership check,
+	// status validation, and update — all in a single conditional UPDATE.
+	call, err := s.callRepo.AcceptCallAtomic(ctx, callID, userID)
 	if err != nil {
-		return fmt.Errorf("tìm cuộc gọi: %w", err)
-	}
-	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
-	}
-	if userID != call.CalleeID {
-		return errors.New("chỉ người nhận mới có thể chấp nhận cuộc gọi")
-	}
-	if call.Status != models.CallStatusCalling && call.Status != models.CallStatusRinging {
-		return errors.New("cuộc gọi không ở trạng thái chờ")
+		return err
 	}
 
 	now := time.Now().UTC()
-	if err := s.callRepo.UpdateStatus(ctx, callID, models.CallStatusConnected, &now, nil, 0); err != nil {
-		return fmt.Errorf("cập nhật trạng thái: %w", err)
-	}
-
 	payload := dto.CallStatusPayload{
 		CallID:             call.ID,
 		Status:             string(models.CallStatusConnected),
@@ -146,26 +130,14 @@ func (s *VoiceCallService) AcceptCall(ctx context.Context, userID string, callID
 	return nil
 }
 
+// RejectCall atomically transitions a call to rejected status.
 func (s *VoiceCallService) RejectCall(ctx context.Context, userID string, callID string) error {
-	call, err := s.callRepo.FindByID(ctx, callID)
+	call, err := s.callRepo.RejectCallAtomic(ctx, callID, userID)
 	if err != nil {
-		return fmt.Errorf("tìm cuộc gọi: %w", err)
-	}
-	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
-	}
-	if userID != call.CalleeID {
-		return errors.New("chỉ người nhận mới có thể từ chối cuộc gọi")
-	}
-	if call.Status != models.CallStatusCalling && call.Status != models.CallStatusRinging {
-		return errors.New("cuộc gọi không ở trạng thái chờ")
+		return err
 	}
 
 	now := time.Now().UTC()
-	if err := s.callRepo.UpdateStatus(ctx, callID, models.CallStatusRejected, nil, &now, 0); err != nil {
-		return fmt.Errorf("cập nhật trạng thái: %w", err)
-	}
-
 	payload := dto.CallStatusPayload{
 		CallID:             call.ID,
 		Status:             string(models.CallStatusRejected),
@@ -196,7 +168,7 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 	if userID != call.CallerID && userID != call.CalleeID {
 		return errors.New("không phải người tham gia cuộc gọi")
 	}
-	if call.Status == models.CallStatusEnded || call.Status == models.CallStatusRejected || call.Status == models.CallStatusMissed {
+	if call.Status == models.CallStatusEnded || call.Status == models.CallStatusRejected || call.Status == models.CallStatusMissed || call.Status == models.CallStatusCancelled {
 		return errors.New("cuộc gọi đã kết thúc")
 	}
 
@@ -208,7 +180,11 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 
 	newStatus := models.CallStatusEnded
 	if call.Status == models.CallStatusCalling || call.Status == models.CallStatusRinging {
-		newStatus = models.CallStatusMissed
+		if userID == call.CallerID {
+			newStatus = models.CallStatusCancelled
+		} else {
+			newStatus = models.CallStatusMissed
+		}
 	}
 
 	if err := s.callRepo.UpdateStatus(ctx, callID, newStatus, nil, &now, duration); err != nil {
@@ -232,6 +208,30 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 		Data: payload,
 	})
 
+	// Real-time push: notify the other party based on who ended the call.
+	switch newStatus {
+	case models.CallStatusMissed:
+		// Callee didn't answer — notify callee of missed call.
+		s.hub.SendToUser(call.CalleeID, ws.OutgoingMessage{
+			Type: "call:missed",
+			Data: dto.CallMissedPayload{
+				CallID:    call.ID,
+				CallerID:  call.CallerID,
+				Timestamp: now.UnixMilli(),
+			},
+		})
+	case models.CallStatusCancelled:
+		// Caller cancelled before answer — notify callee of cancelled call.
+		s.hub.SendToUser(call.CalleeID, ws.OutgoingMessage{
+			Type: "call:cancelled",
+			Data: dto.CallMissedPayload{
+				CallID:    call.ID,
+				CallerID:  call.CallerID,
+				Timestamp: now.UnixMilli(),
+			},
+		})
+	}
+
 	return nil
 }
 
@@ -245,6 +245,138 @@ func (s *VoiceCallService) GetCallHistory(ctx context.Context, userID string, li
 		return nil, 0, fmt.Errorf("đếm lịch sử cuộc gọi: %w", err)
 	}
 	return calls, total, nil
+}
+
+// GetCallHistoryFiltered returns paginated, filtered call history enriched
+// with the other party's profile info (display name, avatar).
+func (s *VoiceCallService) GetCallHistoryFiltered(ctx context.Context, userID string, f repository.CallHistoryFilter) ([]dto.CallHistoryItem, int64, error) {
+	calls, err := s.callRepo.GetHistoryFiltered(ctx, userID, f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("lấy lịch sử cuộc gọi: %w", err)
+	}
+	total, err := s.callRepo.CountHistoryFiltered(ctx, userID, f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("đếm lịch sử cuộc gọi: %w", err)
+	}
+	if len(calls) == 0 {
+		return []dto.CallHistoryItem{}, total, nil
+	}
+
+	// Batch-load profiles of the "other user" for each call.
+	otherIDs := make([]string, 0, len(calls))
+	for i := range calls {
+		if calls[i].CalleeID == userID {
+			otherIDs = append(otherIDs, calls[i].CallerID)
+		} else {
+			otherIDs = append(otherIDs, calls[i].CalleeID)
+		}
+	}
+
+	profiles, err := s.profileRepo.FindByIDs(ctx, otherIDs)
+	if err != nil {
+		return nil, 0, fmt.Errorf("lấy hồ sơ người dùng: %w", err)
+	}
+	profileMap := make(map[string]models.Profile, len(profiles))
+	for _, p := range profiles {
+		profileMap[p.UserID] = p
+	}
+
+	items := make([]dto.CallHistoryItem, len(calls))
+	for i, c := range calls {
+		otherID := c.CallerID
+		if c.CallerID == userID {
+			otherID = c.CalleeID
+		}
+
+		brief := dto.UserBrief{ID: otherID, DisplayName: "Người dùng"}
+		if p, ok := profileMap[otherID]; ok {
+			brief = dto.UserBrief{
+				ID:          otherID,
+				DisplayName: p.DisplayName,
+				AvatarURL:   p.AvatarURI,
+			}
+		}
+
+		direction := "outgoing"
+		if c.CallerID != userID {
+			direction = "incoming"
+		}
+
+		var startedAt, endedAt *int64
+		if c.StartedAt != nil {
+			startedAt = ptr(c.StartedAt.UnixMilli())
+		}
+		if c.EndedAt != nil {
+			endedAt = ptr(c.EndedAt.UnixMilli())
+		}
+
+		items[i] = dto.CallHistoryItem{
+			ID:        c.ID,
+			OtherUser: brief,
+			CallType:  string(c.CallType),
+			Direction: direction,
+			Status:    string(c.Status),
+			IsMissed:  c.Status == models.CallStatusMissed,
+			Duration:  c.Duration,
+			StartedAt: startedAt,
+			EndedAt:   endedAt,
+			CreatedAt: c.CreatedAt.UnixMilli(),
+		}
+	}
+	return items, total, nil
+}
+
+// GetMissedCallCount returns the number of unread missed calls for the user.
+// Reads the user's last_read_missed_at timestamp from their profile.
+func (s *VoiceCallService) GetMissedCallCount(ctx context.Context, userID string) (int64, error) {
+	profile, err := s.profileRepo.FindByUserID(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("lấy hồ sơ: %w", err)
+	}
+	if profile == nil {
+		return 0, nil
+	}
+
+	var since *time.Time
+	if profile.LastReadMissedAt != nil {
+		since = profile.LastReadMissedAt
+	}
+
+	count, err := s.callRepo.CountMissedSince(ctx, userID, since)
+	if err != nil {
+		return 0, fmt.Errorf("đếm cuộc gọi nhỡ: %w", err)
+	}
+	return count, nil
+}
+
+// MarkMissedAsRead records the current time as the user's last-read marker
+// so future GetMissedCallCount only counts calls after this moment.
+func (s *VoiceCallService) MarkMissedAsRead(ctx context.Context, userID string) error {
+	if err := s.callRepo.MarkMissedRead(ctx, userID); err != nil {
+		return fmt.Errorf("đánh dấu đã đọc: %w", err)
+	}
+	return nil
+}
+
+// HideCallFromHistory removes a call from the user's history view.
+// The call remains visible to the other party.
+func (s *VoiceCallService) HideCallFromHistory(ctx context.Context, userID, callID string) error {
+	// Verify the user is a participant of this call.
+	call, err := s.callRepo.FindByID(ctx, callID)
+	if err != nil {
+		return fmt.Errorf("tìm cuộc gọi: %w", err)
+	}
+	if call == nil {
+		return errors.New("cuộc gọi không tồn tại")
+	}
+	if userID != call.CallerID && userID != call.CalleeID {
+		return errors.New("không phải người tham gia cuộc gọi")
+	}
+
+	if err := s.callRepo.HideCall(ctx, userID, callID); err != nil {
+		return fmt.Errorf("ẩn cuộc gọi: %w", err)
+	}
+	return nil
 }
 
 func (s *VoiceCallService) ToggleMute(ctx context.Context, userID string, callID string, muted bool) error {
