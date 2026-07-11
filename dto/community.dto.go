@@ -94,3 +94,9 @@ type JoinCommunityInput struct {
 	InviteCode   string `json:"code,omitempty" binding:"omitempty,min=6,max=6"`
 	InvitationID string `json:"invitation_id,omitempty" binding:"omitempty,uuid"`
 }
+
+// CommunityTransferOwnershipInput là input cho tính năng chuyển quyền sở hữu cộng đồng.
+type CommunityTransferOwnershipInput struct {
+	TargetUserID string `json:"target_user_id" binding:"required"`
+	KeepAdmin    bool   `json:"keep_admin"`
+}

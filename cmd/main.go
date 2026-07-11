@@ -11,6 +11,8 @@ import (
 	"linkup/config"
 	"linkup/controllers"
 	"linkup/db"
+	"linkup/groupws"
+	"linkup/models"
 	"linkup/repository"
 	"linkup/routes"
 	"linkup/services"
@@ -60,6 +62,16 @@ func main() {
 			log.Fatalf("failed to init gorm: %v", err)
 		}
 
+		// ====================================================================
+		// TỰ ĐỘNG TẠO BẢNG STORY VIEWS & CẬP NHẬT LẠI CẤU TRÚC BẢNG INTERACT
+		// ====================================================================
+		log.Println("Running database auto-migration for Stories...")
+		err = gormDB.AutoMigrate(&models.StoryView{}, &models.StoryInteract{})
+		if err != nil {
+			log.Printf("Warning: Migration failed: %v", err)
+		}
+		// ====================================================================
+
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
@@ -83,7 +95,6 @@ func main() {
 		routes.RegisterNotificationRoutes(router, notificationController, env)
 
 		// ===== KHỞI TẠO TẦNG TAG (HASHTAG & MENTION) =====
-		// Lưu ý: Đặt trước cụm Post để Tiêm (Inject) TagService vào trong PostService tự động bóc tách
 		tagRepository := repository.NewTagRepository(gormDB)
 		tagService := services.NewTagService(tagRepository)
 		tagController := controllers.NewTagController(tagService)
@@ -107,11 +118,17 @@ func main() {
 		followController := controllers.NewFollowController(followService)
 		routes.RegisterFollowRoutes(router, followController, env)
 
-		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ẢNH/FILE TRÊN CLOUDINARY) =====
+		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ÁNH/FILE TRÊN CLOUDINARY) =====
 		mediaRepository := repository.NewMediaRepository(gormDB)
 		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
+
+		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
+		storyRepository := repository.NewStoryRepository(gormDB)
+		storyService := services.NewStoryService(storyRepository)
+		storyController := controllers.NewStoryController(storyService)
+		routes.RegisterStoryRoutes(router, storyController, env)
 
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
 		reportRepository := repository.NewReportRepository(gormDB)
@@ -153,12 +170,14 @@ func main() {
 		routes.RegisterChatRoutes(router, chatController, env)
 
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
+		groupHub := groupws.NewHub()
+		go groupHub.Run()
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
-		// Tiêm thêm chatRepository để xử lý dữ liệu bảng chats chung
 		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, notificationService, validations.NewGroupChatValidation())
-		// Tiêm thêm chatService phục vụ tính năng gửi tin nhắn nhóm mã hóa bảo mật
 		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env)
+		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, notificationService, chatValidation)
+		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env)
 
 		// ===== KHỞI TẠO COMMUNITY (NHÓM CỘNG ĐỒNG BÀI VIẾT) =====
 		communityRepository := repository.NewCommunityRepository(gormDB)
@@ -190,9 +209,16 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, notificationService)
+		adminRepository := repository.NewAdminRepository(gormDB)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, notificationService)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
+
+		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
+		callRepository := repository.NewCallRepository(gormDB)
+		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, hub)
+		callController := controllers.NewVoiceCallController(hub, callService, env)
+		routes.RegisterCallRoutes(router, callController, env)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng

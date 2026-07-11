@@ -54,7 +54,6 @@ func (ctrl *GroupChatController) AddMember(c *gin.Context) {
 		return
 	}
 	requesterID := fmt.Sprintf("%v", requesterIDVal)
-
 	chatID := c.Param("chatID")
 
 	var input dto.AddMemberInput
@@ -63,32 +62,16 @@ func (ctrl *GroupChatController) AddMember(c *gin.Context) {
 		return
 	}
 
-	err := ctrl.groupService.AddMember(c.Request.Context(), chatID, requesterID, input.UserID)
+	requestID, err := ctrl.groupService.AddMemberWithRequestID(c.Request.Context(), chatID, requesterID, input.UserID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Thêm thành viên vào nhóm thành công!"})
-}
-
-func (ctrl *GroupChatController) LeaveGroup(c *gin.Context) {
-	userIDVal, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực"})
-		return
-	}
-	userID := fmt.Sprintf("%v", userIDVal)
-
-	chatID := c.Param("chatID")
-
-	err := ctrl.groupService.LeaveGroup(c.Request.Context(), chatID, userID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Bạn đã rời khỏi nhóm chat thành công"})
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Đã gửi lời mời tham gia nhóm. Chờ người dùng xác nhận.",
+		"request_id": requestID,
+	})
 }
 
 func (ctrl *GroupChatController) BanMember(c *gin.Context) {
@@ -139,6 +122,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		input.Content,
 		input.EmojiID,
 		input.MediaID,
+		input.ReplyToMessageID,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -213,6 +197,28 @@ func (ctrl *GroupChatController) TransferAdmin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền admin thành công"})
 }
 
+func (ctrl *GroupChatController) TransferOwnership(c *gin.Context) {
+	userIDVal, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.GroupChatTransferOwnershipInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp target_user_id"})
+		return
+	}
+
+	if err := ctrl.groupService.TransferOwnership(c.Request.Context(), chatID, userID, input.TargetUserID, input.KeepAdmin); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền sở hữu nhóm thành công"})
+}
+
 func (ctrl *GroupChatController) MuteMember(c *gin.Context) {
 	adminIDVal, exists := c.Get("userID")
 	if !exists {
@@ -258,4 +264,40 @@ func (ctrl *GroupChatController) UnmuteMember(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Đã mở lại quyền gửi tin nhắn cho thành viên"})
+}
+
+func (ctrl *GroupChatController) ApproveMemberRequest(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+	requestID := c.Param("requestID")
+
+	if err := ctrl.groupService.ApproveMemberRequest(c.Request.Context(), chatID, userID, requestID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Bạn đã tham gia nhóm thành công"})
+}
+
+func (ctrl *GroupChatController) RejectMemberRequest(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực"})
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+	requestID := c.Param("requestID")
+
+	if err := ctrl.groupService.RejectMemberRequest(c.Request.Context(), chatID, userID, requestID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Bạn đã từ chối lời mời tham gia nhóm"})
 }

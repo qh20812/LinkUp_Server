@@ -1,0 +1,21 @@
+package ws
+
+import (
+	"context"
+	"encoding/json"
+	"linkup/dto"
+	"linkup/models"
+)
+
+type CallService interface {
+	InitiateCall(ctx context.Context, callerID string, payload dto.CallInitiatePayload) (*models.Call, error)
+	AcceptCall(ctx context.Context, userID string, callID string) error
+	RejectCall(ctx context.Context, userID string, callID string) error
+	EndCall(ctx context.Context, userID string, callID string) error
+	HandleSignal(ctx context.Context, senderID string, callID string, signal json.RawMessage) error
+	ToggleVideo(ctx context.Context, userID string, callID string, videoEnabled bool) error
+	// Phase 5 fix (#18): Added ToggleMute so mute state can be toggled via
+	// WebSocket. Previously only available through the HTTP endpoint, meaning
+	// real-time mute notifications were never sent to the other party.
+	ToggleMute(ctx context.Context, userID string, callID string, muted bool) error
+}

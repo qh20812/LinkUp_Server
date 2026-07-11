@@ -22,6 +22,7 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 		communityGroup.PUT("/:communityID/members/:memberID/role", ctrl.UpdateMemberRole)
 		communityGroup.DELETE("/:communityID/members/:memberID", ctrl.KickMember)
 		communityGroup.DELETE("/:communityID/leave", ctrl.LeaveCommunity)
+		communityGroup.POST("/:communityID/transfer-ownership", ctrl.TransferOwnership)
 
 		// Invite codes management
 		communityGroup.POST("/:communityID/invite-codes", ctrl.CreateInviteCode)

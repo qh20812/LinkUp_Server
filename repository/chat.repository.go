@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/utils"
 	"strings"
@@ -210,7 +211,7 @@ func (r *ChatRepository) DeleteChat(ctx context.Context, chatID string) error {
 			return fmt.Errorf("delete chat participants: %w", err)
 		}
 		if err := tx.Where("id = ?", chatID).Delete(&models.Chat{}).Error; err != nil {
-			return fmt.Errorf("delete chat: %w", &err)
+			return fmt.Errorf("delete chat: %w", err)
 		}
 
 		return nil
@@ -221,6 +222,131 @@ func (r *ChatRepository) DeleteChat(ctx context.Context, chatID string) error {
 
 func (r *ChatRepository) UpdateChat(ctx context.Context, chat *models.Chat) error {
 	return r.db.WithContext(ctx).Save(chat).Error
+}
+
+// FindGroupChatsByCreator lấy danh sách group chat do người dùng tạo.
+func (r *ChatRepository) FindGroupChatsByCreator(ctx context.Context, creatorID string) ([]models.Chat, error) {
+	var chats []models.Chat
+	err := r.db.WithContext(ctx).
+		Where("creator_id = ? AND type = ?", creatorID, models.ChatTypeGroup).
+		Find(&chats).Error
+	if err != nil {
+		return nil, fmt.Errorf("tìm group chat theo người tạo thất bại: %w", err)
+	}
+	return chats, nil
+}
+
+// FindOldestParticipant tìm participant tham gia sớm nhất trong group chat (trừ excludeUserID).
+func (r *ChatRepository) FindOldestParticipant(ctx context.Context, chatID, excludeUserID string) (*models.ChatParticipant, error) {
+	var p models.ChatParticipant
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ? AND user_id <> ?", chatID, excludeUserID).
+		Order("joined_at ASC").
+		First(&p).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("tìm participant cũ nhất thất bại: %w", err)
+	}
+	return &p, nil
+}
+
+// ── Admin: Group management ─────────────────────────────────────────────────
+
+func (r *ChatRepository) ListGroups(ctx context.Context, keyword, status string, pageSize, offset int) ([]dto.AdminGroupListItem, error) {
+	query := r.db.WithContext(ctx).
+		Table("chats").
+		Select(`chats.id, chats.name, chats.creator_id, chats.status, chats.created_at,
+			COALESCE((SELECT COUNT(*) FROM chat_participants WHERE chat_id = chats.id), 0) AS member_count,
+			COALESCE((SELECT display_name FROM profiles WHERE user_id = chats.creator_id), '') AS creator_name`).
+		Where("chats.type = ?", models.ChatTypeGroup)
+
+	if keyword != "" {
+		query = query.Where("chats.name LIKE ?", "%"+keyword+"%")
+	}
+	if status != "" {
+		query = query.Where("chats.status = ?", status)
+	}
+
+	var results []struct {
+		ID          string `gorm:"column:id"`
+		Name        string `gorm:"column:name"`
+		CreatorID   *string `gorm:"column:creator_id"`
+		CreatorName string `gorm:"column:creator_name"`
+		MemberCount int    `gorm:"column:member_count"`
+		Status      string `gorm:"column:status"`
+		CreatedAt   time.Time `gorm:"column:created_at"`
+	}
+	if err := query.Order("chats.created_at DESC").Offset(offset).Limit(pageSize).Scan(&results).Error; err != nil {
+		return nil, fmt.Errorf("list groups: %w", err)
+	}
+
+	items := make([]dto.AdminGroupListItem, 0, len(results))
+	for _, r := range results {
+		items = append(items, dto.AdminGroupListItem{
+			ID:          r.ID,
+			Name:        r.Name,
+			CreatorID:   r.CreatorID,
+			CreatorName: r.CreatorName,
+			MemberCount: r.MemberCount,
+			Status:      r.Status,
+			CreatedAt:   r.CreatedAt,
+		})
+	}
+	return items, nil
+}
+
+func (r *ChatRepository) CountGroups(ctx context.Context, keyword, status string) (int64, error) {
+	query := r.db.WithContext(ctx).Model(&models.Chat{}).Where("type = ?", models.ChatTypeGroup)
+	if keyword != "" {
+		query = query.Where("name LIKE ?", "%"+keyword+"%")
+	}
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return 0, fmt.Errorf("count groups: %w", err)
+	}
+	return total, nil
+}
+
+func (r *ChatRepository) UpdateChatStatus(ctx context.Context, chatID string, status models.ChatStatus) error {
+	return r.db.WithContext(ctx).Model(&models.Chat{}).Where("id = ?", chatID).Update("status", status).Error
+}
+
+func (r *ChatRepository) GetGroupMembers(ctx context.Context, chatID string) ([]dto.AdminGroupMember, error) {
+	type memberRow struct {
+		UserID      string `gorm:"column:user_id"`
+		Role        string `gorm:"column:role"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+	}
+	var rows []memberRow
+	err := r.db.WithContext(ctx).
+		Table("chat_participants").
+		Select(`chat_participants.user_id, chat_participants.role,
+			COALESCE(profiles.display_name, '') AS display_name,
+			COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN profiles ON profiles.user_id = chat_participants.user_id").
+		Where("chat_participants.chat_id = ?", chatID).
+		Order("chat_participants.joined_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("get group members: %w", err)
+	}
+
+	items := make([]dto.AdminGroupMember, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.AdminGroupMember{
+			UserID:      row.UserID,
+			DisplayName: row.DisplayName,
+			AvatarURI:   row.AvatarURI,
+			Role:        row.Role,
+		})
+	}
+	return items, nil
 }
 
 func (r *ChatRepository) GetUserMute(ctx context.Context, chatID, userID string) (*models.GroupChatMute, error) {

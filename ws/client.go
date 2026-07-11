@@ -26,18 +26,20 @@ type Client struct {
 	conn        *websocket.Conn
 	hub         *Hub
 	service     ChatService
+	callService CallService
 	userID      string
 	send        chan []byte
 	joinedChats map[string]struct{}
 	typingChats map[string]bool
 }
 
-func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, userID string) *Client {
+func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, callService CallService, userID string) *Client {
 	return &Client{
 		ctx:         ctx,
 		conn:        conn,
 		hub:         hub,
 		service:     service,
+		callService: callService,
 		userID:      userID,
 		send:        make(chan []byte, 256),
 		joinedChats: make(map[string]struct{}),
@@ -66,14 +68,18 @@ func (c *Client) ReadPump() {
 			return
 		}
 
-		if c.service == nil {
-			continue
-		}
-
 		var event dto.WsEvent
 		if err := json.Unmarshal(raw, &event); err != nil {
 			c.sendError("định dạng tin nhắn không hợp lệ")
 			continue
+		}
+
+		// Chat events cần ChatService. Call events có nil check riêng.
+		if c.service == nil {
+			switch event.Type {
+			case "chat:join", "message:send", "typing:start", "typing:stop", "message:delete", "message:search":
+				continue
+			}
 		}
 
 		switch event.Type {
@@ -90,7 +96,7 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
-			history, err := c.service.GetAllMessagesDecrypted(c.ctx, c.userID, payload.ChatID)
+			history, err := c.service.GetAllMessages(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
 				c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
 				continue
@@ -112,20 +118,21 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
 			messagePayload := dto.MessagePayload{
-				ID:        msg.ID,
-				ChatID:    msg.ChatID,
-				SenderID:  msg.SenderID,
-				Content:   msg.Content,
-				EmojiID:   msg.EmojiID,
-				MediaID:   msg.MediaID,
-				CreatedAt: msg.CreatedAt,
+				ID:               msg.ID,
+				ChatID:           msg.ChatID,
+				SenderID:         msg.SenderID,
+				Content:          msg.Content,
+				EmojiID:          msg.EmojiID,
+				MediaID:          msg.MediaID,
+				ReplyToMessageID: msg.ReplyToMessageID,
+				CreatedAt:        msg.CreatedAt,
 			}
 
 			resp, _ := json.Marshal(dto.WsEvent{
@@ -217,13 +224,142 @@ func (c *Client) ReadPump() {
 			})
 			c.send <- resp
 
-		default:
-			c.sendError("loại sự kiện không xác định")
-			_, _, err := c.conn.ReadMessage()
-			if err != nil {
-				log.Printf("ws read error: %v", err)
-				return
+		case "call:busy":
+			// Client xác nhận đã nhận được thông báo busy — bỏ qua, không cần xử lý thêm
+			continue
+
+		case "call:initiate":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
 			}
+			var payload dto.CallInitiatePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu khởi tạo cuộc gọi không hợp lệ")
+				continue
+			}
+			call, err := c.callService.InitiateCall(c.ctx, c.userID, payload)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if call == nil {
+				continue
+			}
+			resp, _ := json.Marshal(dto.WsEvent{
+				Type:    "call:initiated",
+				Payload: mustMarshal(map[string]string{"call_id": call.ID}),
+			})
+			c.send <- resp
+
+		case "call:accept":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallActionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu chấp nhận không hợp lệ")
+				continue
+			}
+			if err := c.callService.AcceptCall(c.ctx, c.userID, payload.CallID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:reject":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallActionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu từ chối không hợp lệ")
+				continue
+			}
+			if err := c.callService.RejectCall(c.ctx, c.userID, payload.CallID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:end":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallActionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu kết thúc không hợp lệ")
+				continue
+			}
+			if err := c.callService.EndCall(c.ctx, c.userID, payload.CallID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:signal":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload dto.CallSignalPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tín hiệu không hợp lệ")
+				continue
+			}
+			// Phase 4 fix: Validate signal payload size to prevent DoS
+			// via oversized payloads forwarded to the other user.
+			if err := payload.Validate(); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if err := c.callService.HandleSignal(c.ctx, c.userID, payload.CallID, payload.Signal); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:toggle_mute":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload struct {
+				CallID string `json:"call_id"`
+				Muted  bool   `json:"muted"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu mute không hợp lệ")
+				continue
+			}
+			if err := c.callService.ToggleMute(c.ctx, c.userID, payload.CallID, payload.Muted); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		case "call:video_toggle":
+			if c.callService == nil {
+				c.sendError("dịch vụ gọi không khả dụng")
+				continue
+			}
+			var payload struct {
+				CallID       string `json:"call_id"`
+				VideoEnabled bool   `json:"video_enabled"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu video toggle không hợp lệ")
+				continue
+			}
+			if err := c.callService.ToggleVideo(c.ctx, c.userID, payload.CallID, payload.VideoEnabled); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+		default:
+			// Phase 1 fix: Removed the extra ReadMessage() call that was here.
+			// The outer for-loop already calls ReadMessage() at the top of
+			// each iteration. The previous code consumed the next client
+			// message, silently dropping it with no error response.
+			c.sendError("loại sự kiện không xác định")
 		}
 	}
 }
@@ -298,6 +434,7 @@ func toMessagePayloads(messages []models.Message) []dto.MessagePayload {
 			Content:   msg.Content,
 			EmojiID:   msg.EmojiID,
 			MediaID:   msg.MediaID,
+			ReplyToMessageID: msg.ReplyToMessageID,
 			CreatedAt: msg.CreatedAt,
 		})
 	}

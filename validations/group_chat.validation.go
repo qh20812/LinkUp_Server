@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	ErrGroupNameInvalid    = errors.New("tên nhóm chat phải từ 3 đến 50 ký tự")
-	ErrMuteReasonInvalid   = errors.New("lý do tắt tiếng không hợp lệ")
-	ErrMuteDurationInvalid = errors.New("thời lượng tắt tiếng không hợp lệ")
+	ErrGroupNameInvalid       = errors.New("tên nhóm chat phải từ 3 đến 50 ký tự")
+	ErrMuteReasonInvalid      = errors.New("lý do tắt tiếng không hợp lệ")
+	ErrMuteDurationInvalid    = errors.New("thời lượng tắt tiếng không hợp lệ")
+	ErrCreatorCannotLeaveGroup = errors.New("người tạo nhóm không thể rời đi, vui lòng chuyển quyền sở hữu trước")
 )
 
 var AllowedMuteReasons = []string{"spam", "abuse", "harassment", "violation", "other"}

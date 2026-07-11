@@ -1,11 +1,94 @@
 package schema
 
 import (
+	"database/sql"
 	"fmt"
+	"regexp"
 
 	"linkup/cmd/seed/internal"
 	"linkup/config"
 )
+
+// validIdentifier validates that a name contains only alphanumeric characters
+// and underscores — safe for use in DDL statements without parameterization.
+// This prevents SQL injection via table/column names in the idempotent helpers.
+var validIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// validateIdentifier checks that a DDL identifier (table or column name) is
+// safe to embed in a SQL string. DDL does not support parameterized queries,
+// so we enforce a whitelist of allowed characters instead.
+func validateIdentifier(kind, name string) error {
+	if !validIdentifier.MatchString(name) {
+		return fmt.Errorf("invalid %s name %q: must contain only letters, digits, and underscores, and start with a letter or underscore", kind, name)
+	}
+	return nil
+}
+
+// addColumnIfMissing adds a column only if it does not exist,
+// so re-running seed does not error on duplicate column.
+func addColumnIfMissing(database *sql.DB, table, column, definition string) error {
+	if err := validateIdentifier("table", table); err != nil {
+		return err
+	}
+	if err := validateIdentifier("column", column); err != nil {
+		return err
+	}
+	var count int
+	if err := database.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+		table, column,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("check column %s.%s: %w", table, column, err)
+	}
+	if count == 0 {
+		return internal.Exec(database, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	}
+	return nil
+}
+
+// addIndexIfMissing adds an index only if it does not exist,
+// so re-running seed does not error on duplicate index.
+func addIndexIfMissing(database *sql.DB, table, indexName, indexDef string) error {
+	if err := validateIdentifier("table", table); err != nil {
+		return err
+	}
+	if err := validateIdentifier("index", indexName); err != nil {
+		return err
+	}
+	var count int
+	if err := database.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+		table, indexName,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("check index %s.%s: %w", table, indexName, err)
+	}
+	if count == 0 {
+		return internal.Exec(database, fmt.Sprintf("ALTER TABLE %s ADD %s", table, indexDef))
+	}
+	return nil
+}
+
+// addForeignKeyIfMissing adds a foreign key constraint only if it does not exist,
+// so re-running seed does not error on duplicate constraint.
+func addForeignKeyIfMissing(database *sql.DB, table, constraintName, constraintDef string) error {
+	if err := validateIdentifier("table", table); err != nil {
+		return err
+	}
+	if err := validateIdentifier("constraint", constraintName); err != nil {
+		return err
+	}
+	var count int
+	if err := database.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+		table, constraintName,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("check fk %s.%s: %w", table, constraintName, err)
+	}
+	if count == 0 {
+		return internal.Exec(database, fmt.Sprintf("ALTER TABLE %s ADD %s", table, constraintDef))
+	}
+	return nil
+}
 
 func Run(env config.Env) error {
 	database, err := internal.Connect(env)
@@ -97,9 +180,8 @@ func Run(env config.Env) error {
 			INDEX idx_communities_creator (creator_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 4b. FK từ posts đến communities (posts đã có cột, thêm FK sau khi communities tồn tại)
-		`ALTER TABLE posts ADD INDEX idx_posts_community_id (community_id)`,
-		`ALTER TABLE posts ADD CONSTRAINT fk_posts_community FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE SET NULL`,
+		// 4b. FK từ posts đến communities — moved to idempotent helpers below
+		// (raw ALTER TABLE is not idempotent; re-running would fail on duplicate index/constraint)
 
 		// 5. Depends on communities
 		`CREATE TABLE IF NOT EXISTS community_rules (
@@ -385,16 +467,23 @@ func Run(env config.Env) error {
 		// 23. Depends on chats, users
 		`CREATE TABLE IF NOT EXISTS calls (
 			id VARCHAR(36) PRIMARY KEY,
-			chat_id VARCHAR(36) NULL,
 			caller_id VARCHAR(36) NOT NULL,
+			callee_id VARCHAR(36) NOT NULL,
 			call_type VARCHAR(20) NOT NULL DEFAULT 'voice',
 			is_group TINYINT(1) NOT NULL DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'completed',
-			started_at DATETIME NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'calling',
+			started_at DATETIME NULL,
 			ended_at DATETIME NULL,
-			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL,
+			duration INT NOT NULL DEFAULT 0,
+			muted_caller TINYINT(1) NOT NULL DEFAULT 0,
+			muted_callee TINYINT(1) NOT NULL DEFAULT 0,
+			video_enabled_caller TINYINT(1) NOT NULL DEFAULT 0,
+			video_enabled_callee TINYINT(1) NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (caller_id) REFERENCES users(id) ON DELETE CASCADE,
-			INDEX idx_calls_caller (caller_id)
+			FOREIGN KEY (callee_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_calls_caller (caller_id),
+			INDEX idx_calls_callee (callee_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 24. Depends on ads, users
@@ -482,8 +571,7 @@ func Run(env config.Env) error {
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 31. Message Security
-		`ALTER TABLE messages ADD COLUMN is_encrypted BOOLEAN DEFAULT true`,
+		// 31. Message Security — moved to idempotent addColumnIfMissing below
 
 		// 32. group_chat_settings
 		`CREATE TABLE IF NOT EXISTS group_chat_settings (
@@ -622,13 +710,102 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			UNIQUE INDEX idx_challenge_participants_pair (challenge_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 39. Soft-delete for call history (user-level hide, row stays for the other party)
+		`CREATE TABLE IF NOT EXISTS call_hidden (
+			call_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (call_id, user_id),
+			FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		// 39. group_chat_member_request:
+		`CREATE TABLE IF NOT EXISTS group_chat_member_requests (
+			id VARCHAR(36) PRIMARY KEY,
+			chat_id VARCHAR(36) NOT NULL,
+			requester_id VARCHAR(36) NOT NULL,
+			target_user_id VARCHAR(36) NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			created_at DATETIME NOT NULL,
+			responded_at DATETIME NULL,
+			INDEX idx_group_chat_member_requests_chat_id (chat_id),
+			INDEX idx_group_chat_member_requests_requester_id (requester_id),
+			INDEX idx_group_chat_member_requests_target_user_id (target_user_id),
+			INDEX idx_group_chat_member_requests_status (status),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 40. Add 2 columns to messages
+		`ALTER TABLE messages
+		ADD COLUMN is_anonymized TINYINT(1) NOT NULL DEFAULT 0,
+		ADD COLUMN anonymous_name VARCHAR(255) NULL`,
+
+		// 41. Reply Messges
+		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
 	}
 
 	for _, stmt := range statements {
-		if err := internal.Exec(database, stmt); err != nil {
-			return fmt.Errorf("schema: create table: %w", err)
-		}
+	if err := internal.Exec(database, stmt); err != nil {
+		return fmt.Errorf("schema: create table: %w", err)
 	}
+}
 
-	return nil
+// Add last_read_missed_at to profiles (idempotent — skips if already exists)
+if err := addColumnIfMissing(database, "profiles", "last_read_missed_at", "DATETIME NULL"); err != nil {
+	return fmt.Errorf("schema: add last_read_missed_at: %w", err)
+}
+
+// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE
+// that failed on re-run). Now using helpers that check existence first.
+
+// 4b. Index + FK from posts to communities
+if err := addIndexIfMissing(database, "posts", "idx_posts_community_id",
+	"INDEX idx_posts_community_id (community_id)"); err != nil {
+	return fmt.Errorf("schema: add idx_posts_community_id: %w", err)
+}
+if err := addForeignKeyIfMissing(database, "posts", "fk_posts_community",
+	"CONSTRAINT fk_posts_community FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE SET NULL"); err != nil {
+	return fmt.Errorf("schema: add fk_posts_community: %w", err)
+}
+
+// 31. Message encryption column
+if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFAULT true"); err != nil {
+	return fmt.Errorf("schema: add is_encrypted: %w", err)
+}
+
+// Phase 1: Admin Manage Groups/Communities — idempotent column additions
+
+// chats.creator_id: who created the group (NULL for direct chats)
+if err := addColumnIfMissing(database, "chats", "creator_id", "VARCHAR(36) NULL"); err != nil {
+	return fmt.Errorf("schema: add chats.creator_id: %w", err)
+}
+// chats.status: moderation state for group chats
+if err := addColumnIfMissing(database, "chats", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+	return fmt.Errorf("schema: add chats.status: %w", err)
+}
+// communities.status: moderation state for communities
+if err := addColumnIfMissing(database, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+	return fmt.Errorf("schema: add communities.status: %w", err)
+}
+
+// FK from chats.creator_id to users.id
+if err := addForeignKeyIfMissing(database, "chats", "fk_chats_creator",
+	"CONSTRAINT fk_chats_creator FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE SET NULL"); err != nil {
+	return fmt.Errorf("schema: add fk_chats_creator: %w", err)
+}
+// index for chats.creator_id
+if err := addIndexIfMissing(database, "chats", "idx_chats_creator_id",
+	"INDEX idx_chats_creator_id (creator_id)"); err != nil {
+	return fmt.Errorf("schema: add idx_chats_creator_id: %w", err)
+}
+// index for communities.status (faster admin filtering)
+if err := addIndexIfMissing(database, "communities", "idx_communities_status",
+	"INDEX idx_communities_status (status)"); err != nil {
+	return fmt.Errorf("schema: add idx_communities_status: %w", err)
+}
+
+return nil
 }

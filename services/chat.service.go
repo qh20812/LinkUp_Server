@@ -47,7 +47,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID *string) (*models.Message, error) {
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID, replyToMessageID *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -99,6 +99,16 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		}
 	}
 
+	if replyToMessageID != nil && *replyToMessageID != "" {
+		parentMsg, err := s.chatRepo.FindMessageByID(ctx, *replyToMessageID)
+		if err != nil {
+			return nil, errors.New("tin nhắn gốc không tồn tại")
+		}
+		if parentMsg.ChatID != chatID {
+			return nil, errors.New("tin nhắn gốc không thuộc phòng chat này")
+		}
+	}
+
 	// ===== ENCRYPTION =====
 	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	if err != nil {
@@ -110,9 +120,11 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, fmt.Errorf("encrypt message: %w", err)
 	}
 
+
 	msg := models.NewMessage(chatID, userID, encryptedContent, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
+	msg.ReplyToMessageID = replyToMessageID
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
 	if err != nil {
@@ -316,13 +328,13 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 		if msg.DeletedForSender {
 			return nil, errors.New("tin nhắn đã bị xóa")
 		}
-	} else {
-		if msg.DeletedForReceiver {
-			return nil, errors.New("tin nhắn đã bị xóa")
-		}
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
 	}
 
-	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+	if msg.DeletedForReceiver {
+		return nil, errors.New("tin nhắn đã bị xóa")
+	}
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, false, true, nil)
 }
 
 func (s *ChatService) GetAllMessages(ctx context.Context, userID, chatID string) ([]models.Message, error) {
