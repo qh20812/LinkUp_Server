@@ -219,7 +219,7 @@ func Run(env config.Env) error {
 			file_uri VARCHAR(512) NOT NULL,
 			file_type VARCHAR(50) NOT NULL DEFAULT '',
 			file_size DOUBLE NOT NULL DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'approved',
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
@@ -429,9 +429,11 @@ func Run(env config.Env) error {
 			reason_detail TEXT,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
 			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
 			FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_reports_reporter (reporter_id),
-			INDEX idx_reports_status (status)
+			INDEX idx_reports_status (status),
+			INDEX idx_reports_reporter_status (reporter_id, status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 21. Depends on users

@@ -25,6 +25,7 @@ type Report struct {
 	ReasonDetail    string       `json:"reason_detail"`
 	Status          ReportStatus `json:"status"`
 	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       *time.Time   `json:"updated_at,omitempty"`
 }
 
 func NewReport(reporterID string, reportType, reasonDetail string, violationRuleID *string) Report {

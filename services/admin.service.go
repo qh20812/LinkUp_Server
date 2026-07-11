@@ -8,8 +8,12 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"log"
 	"strings"
 	"time"
+
+	"github.com/cloudinary/cloudinary-go/v2"
+	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 )
 
 var banDurationMap = map[string]time.Duration{
@@ -37,10 +41,12 @@ type AdminService struct {
 	profileRepo         *repository.ProfileRepository
 	groupChatRepo      *repository.GroupChatRepository
 	adminRepo           repository.AdminRepository
+	mediaRepo           *repository.MediaRepository
 	notificationService *NotificationService
+	cloudinary          *cloudinary.Cloudinary
 }
 
-func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, chatRepo *repository.ChatRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, groupChatRepo *repository.GroupChatRepository, adminRepo repository.AdminRepository, notificationService *NotificationService) *AdminService {
+func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, chatRepo *repository.ChatRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, groupChatRepo *repository.GroupChatRepository, adminRepo repository.AdminRepository, mediaRepo *repository.MediaRepository, notificationService *NotificationService) *AdminService {
 	return &AdminService{
 		authRepo:            authRepo,
 		banRepo:             banRepo,
@@ -52,8 +58,14 @@ func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.Ba
 		profileRepo:         profileRepo,
 		groupChatRepo:       groupChatRepo,
 		adminRepo:           adminRepo,
+		mediaRepo:           mediaRepo,
 		notificationService: notificationService,
 	}
+}
+
+// SetCloudinary gán Cloudinary client cho admin service (tránh breaking constructor).
+func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
+	s.cloudinary = cld
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -561,6 +573,10 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		return errors.New("action không hợp lệ, chỉ chấp nhận cancel, hide hoặc ban")
 	}
 
+	if (action == "hide" || action == "ban") && strings.TrimSpace(input.Reason) == "" {
+		return errors.New("lý do là bắt buộc cho hành động hide hoặc ban")
+	}
+
 	status := models.ReportStatusRejected
 	if action == "hide" {
 		if report.TargetPostID != nil {
@@ -647,6 +663,175 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	}
 
 	return nil
+}
+
+// ── Admin Media Management ──
+
+// mediaReviewTransitions defines valid status transitions for admin review.
+var mediaReviewTransitions = map[models.MediaStatus][]models.MediaStatus{
+	models.MediaStatusFlagged: {models.MediaStatusApproved, models.MediaStatusRejected},
+}
+
+func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, input dto.AdminMediaFilterInput) (dto.AdminMediaListResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminMediaListResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	status := models.MediaStatusFlagged
+	if input.Status != "" {
+		status = models.ParseMediaStatus(input.Status)
+	}
+
+	items, total, err := s.mediaRepo.GetByStatus(ctx, status, page, pageSize)
+	if err != nil {
+		return dto.AdminMediaListResponse{}, fmt.Errorf("lấy danh sách media thất bại: %w", err)
+	}
+
+	mediaItems := make([]dto.AdminMediaItem, 0, len(items))
+	for _, m := range items {
+		mediaItems = append(mediaItems, dto.AdminMediaItem{
+			ID:        m.ID,
+			UserID:    m.UserID,
+			FileURI:   m.FileURI,
+			FileType:  m.FileType,
+			FileSize:  m.FileSize,
+			Status:    string(m.Status),
+			CreatedAt: m.CreatedAt.Format(time.RFC3339),
+		})
+	}
+
+	return dto.AdminMediaListResponse{
+		Items: mediaItems,
+		Total: total,
+		Page:  page,
+	}, nil
+}
+
+func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string, input dto.AdminReviewMediaInput) error {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return err
+	}
+
+	media, err := s.mediaRepo.GetByID(ctx, mediaID)
+	if err != nil {
+		return fmt.Errorf("media không tồn tại")
+	}
+
+	var newStatus models.MediaStatus
+	var notificationMsg string
+
+	switch input.Action {
+	case "approve":
+		newStatus = models.MediaStatusApproved
+		notificationMsg = "Ảnh/video của bạn đã được admin phê duyệt."
+	case "reject":
+		newStatus = models.MediaStatusRejected
+		notificationMsg = "Ảnh/video của bạn đã bị admin từ chối: " + input.Reason
+	default:
+		return fmt.Errorf("hành động không hợp lệ: %s", input.Action)
+	}
+
+	allowed, ok := mediaReviewTransitions[media.Status]
+	if !ok {
+		return fmt.Errorf("media ở trạng thái %s không thể review", media.Status)
+	}
+	validTransition := false
+	for _, s := range allowed {
+		if s == newStatus {
+			validTransition = true
+			break
+		}
+	}
+	if !validTransition {
+		return fmt.Errorf("không thể chuyển media từ %s sang %s", media.Status, newStatus)
+	}
+
+	if err := s.mediaRepo.UpdateStatus(ctx, mediaID, newStatus); err != nil {
+		return fmt.Errorf("cập nhật trạng thái media thất bại: %w", err)
+	}
+
+	moderation := models.NewModerationLog(adminID, models.ModerationActionUpdate,
+		models.ModerationTargetMedia, mediaID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return fmt.Errorf("ghi log kiểm duyệt thất bại: %w", err)
+	}
+
+	if _, err := s.notificationService.Create(ctx, media.UserID, &adminID,
+		models.NotificationTypeMessage, notificationMsg, nil, nil, nil); err != nil {
+		return fmt.Errorf("gửi thông báo thất bại: %w", err)
+	}
+
+	// Nếu admin reject, xoá file khỏi Cloudinary để tiết kiệm storage.
+	// Không xoá ở AI reject vì admin có thể manual override.
+	// Side effect — không block response (admin đã reject, DB đã update).
+	if newStatus == models.MediaStatusRejected {
+		if s.cloudinary == nil {
+			log.Printf("[Admin] cảnh báo: Cloudinary chưa được cấu hình — không thể xoá media %s khỏi Cloudinary", mediaID)
+		} else {
+			publicID, resourceType, parseErr := parseCloudinaryPublicID(media.FileURI)
+			if parseErr == nil {
+				if _, err := s.cloudinary.Upload.Destroy(ctx, uploader.DestroyParams{
+					PublicID:     publicID,
+					ResourceType: resourceType,
+				}); err != nil {
+					return fmt.Errorf("xoá file khỏi Cloudinary thất bại: %w", err)
+				}
+				// Xoá URL khỏi DB để tránh record trỏ tới file không còn tồn tại.
+				if err := s.mediaRepo.ClearFileURI(ctx, mediaID); err != nil {
+					log.Printf("[Admin] không thể xoá FileURI của media %s: %v", mediaID, err)
+				}
+			} else {
+				log.Printf("[Admin] không thể xoá media %s khỏi Cloudinary — parse URL thất bại: %v", mediaID, parseErr)
+			}
+		}
+	}
+
+	return nil
+}
+
+// CleanupRejectedMedia xoá tất cả media bị AI reject quá 7 ngày
+// khỏi Cloudinary và DB để giải phóng storage.
+func (s *AdminService) CleanupRejectedMedia(ctx context.Context, adminID string) (int, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return 0, err
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -7)
+	items, err := s.mediaRepo.GetRejectedOlderThan(ctx, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("lấy media reject cũ thất bại: %w", err)
+	}
+
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	cleaned := 0
+	for _, m := range items {
+		if s.cloudinary != nil {
+			publicID, resourceType, parseErr := parseCloudinaryPublicID(m.FileURI)
+			if parseErr == nil {
+				if _, err := s.cloudinary.Upload.Destroy(ctx, uploader.DestroyParams{
+					PublicID:     publicID,
+					ResourceType: resourceType,
+				}); err != nil {
+					log.Printf("[Admin] cleanup — xoá Cloudinary media %s thất bại: %v", m.ID, err)
+				}
+			}
+		}
+
+		if err := s.mediaRepo.DeleteWithStorageAdjustment(ctx, m.UserID, &m); err != nil {
+			log.Printf("[Admin] cleanup — xoá DB media %s thất bại: %v", m.ID, err)
+			continue
+		}
+		cleaned++
+	}
+
+	return cleaned, nil
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────

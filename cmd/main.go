@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -120,7 +121,10 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ÁNH/FILE TRÊN CLOUDINARY) =====
 		mediaRepository := repository.NewMediaRepository(gormDB)
-		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
+		cldForMedia, _ := cloudinary.NewFromURL(env.CloudinaryEnv)
+		aiModerationService := services.NewCloudinaryModerationService(cldForMedia)
+		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv, aiModerationService, notificationService)
+		mediaService.SetModerationRepo(repository.NewModerationRepository(gormDB))
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
 
@@ -210,7 +214,8 @@ func main() {
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
 		adminRepository := repository.NewAdminRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, notificationService)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, notificationService)
+		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env)
 

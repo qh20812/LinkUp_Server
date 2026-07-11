@@ -1,13 +1,13 @@
 # LinkUp Server
 
-Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, tin nhắn real-time (WebSocket), voice/video call (WebRTC + ICE), nhóm cộng đồng, quảng cáo, hệ thống điểm đóng góp, và lịch sử cuộc gọi.
+Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, story 24h, tin nhắn real-time (WebSocket), voice/video call (WebRTC + ICE), nhóm cộng đồng, quảng cáo, hệ thống điểm đóng góp, và lịch sử cuộc gọi.
 
 ## Tech Stack
 
 - **Ngôn ngữ:** Go 1.26.3
 - **Framework:** Gin
 - **Database:** MySQL + GORM
-- **WebSocket:** gorilla/websocket
+- **WebSocket:** gorilla/websocket (2 Hub types: `ws.Hub` + `groupws.Hub`)
 - **Authentication:** JWT (HS256, access + refresh token)
 - **Media:** Cloudinary
 - **Encryption:** AES-256-GCM (tin nhắn chat)
@@ -17,6 +17,7 @@ Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, tin nhắn r
 
 - **Xác thực & Người dùng:** Đăng ký, đăng nhập, refresh token, đặt lại mật khẩu qua email (Gmail SMTP)
 - **Bài viết & Bình luận:** CRUD, react (emoji), chia sẻ, lưu bài, tags
+- **Story 24h:** Đăng tải story, xem (track view), tương tác (react/reply/share), analytics
 - **Profile:** Quản lý thông tin cá nhân, avatar, storage quota, last_read_missed_at
 - **Follow & Bạn bè:** Theo dõi, kết bạn, chặn người dùng (toggle pattern)
 - **Real-time Chat:** Tin nhắn trực tiếp & nhóm, mã hóa AES-256-GCM, typing indicator, tìm kiếm
@@ -24,10 +25,11 @@ Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, tin nhắn r
 - **Cộng đồng:** Nhóm bài viết, quy tắc, lời mời, mã mời (invite code 6 ký tự), join request
 - **Điểm đóng góp:** Policy (post/comment/reaction weight), challenge, leaderboard, badge, auto-promote moderator
 - **Quảng cáo:** Quản lý quảng cáo cho đối tác (RBAC: PARTNER), analytics
-- **Admin:** Kiểm duyệt nội dung, quản lý báo cáo, ban user, moderation log
+- **Admin:** Kiểm duyệt nội dung, quản lý báo cáo, ban user, moderation log, quản lý media flagged/rejected
+- **AI Guardian (Moderation):** Tự động kiểm duyệt ảnh/video khi upload qua Cloudinary + AWS Rekognition, phân luồng (approved/flagged/rejected/pending), ghi moderation log + notification
 - **Tìm kiếm:** Bài viết, người dùng, hashtag
-- **Thông báo:** Real-time notification qua WebSocket (like, comment, follow, friend request, call)
-- **Media:** Upload ảnh/video lên Cloudinary
+- **Thông báo:** Real-time notification qua WebSocket (like, comment, follow, friend request, call, moderation result)
+- **Media:** Upload ảnh/video lên Cloudinary kèm AI moderation (single upload, không double upload)
 
 ## Bắt đầu
 
@@ -94,14 +96,14 @@ FRONTEND_RESET_URL=http://localhost:3000
 
 ### Seed database
 
-Seed gồm 2 bước: (1) schema (tạo 39 bảng + index/FK idempotent) và (2) dữ liệu mẫu.
+Seed gồm 2 bước: (1) schema (tạo 46 bảng + index/FK idempotent) và (2) dữ liệu mẫu.
 
 ```bash
 # Seed toàn bộ (xóa + tạo lại)
 go build ./cmd/seed && ./seed.exe
 ```
 
-Lệnh này xóa toàn bộ dữ liệu cũ và tạo lại 39 bảng với dữ liệu mẫu (users, profiles, posts, communities, calls, ...). Tất cả user seed có mật khẩu `Password123!`. Các ALTER TABLE dùng helper idempotent (`addColumnIfMissing`, `addIndexIfMissing`, `addForeignKeyIfMissing`) — an toàn khi chạy lại.
+Lệnh này xóa toàn bộ dữ liệu cũ và tạo lại 46 bảng với dữ liệu mẫu (users, profiles, posts, communities, calls, ...). Tất cả user seed có mật khẩu `Password123!`. Các ALTER TABLE dùng helper idempotent (`addColumnIfMissing`, `addIndexIfMissing`, `addForeignKeyIfMissing`) — an toàn khi chạy lại.
 
 ## Chạy ứng dụng
 
@@ -126,14 +128,15 @@ go build -o ./tmp/main.exe ./cmd
 │   ├── seed/                   # Seed database (main.go + schema/ sub-package)
 │   └── cloudinary-check/       # Standalone (không dùng trong app)
 ├── config/                     # Env parser (custom, singleton guard)
-├── controllers/                # HTTP handlers (Gin) — 12 files
+├── controllers/                # HTTP handlers (Gin) — 22 files
 ├── dto/                        # Data Transfer Objects (binding tags + validators)
 ├── db/                         # Kết nối MySQL (*sql.DB)
 ├── docs/                       # Tài liệu + test cases (.test-case.md)
+├── groupws/                    # Group chat WebSocket Hub (riêng, không phải ws.Hub)
 ├── middlewares/                # Auth (JWT) & RBAC middleware
-├── models/                     # GORM models — 46 files
+├── models/                     # GORM models — 49 files
 ├── repository/                 # Database access layer (GORM + raw SQL)
-├── routes/                     # Route registration — 20 files
+├── routes/                     # Route registration — 22 files
 ├── services/                   # Business logic (PostService, etc. là interfaces)
 ├── tests/                      # Validation tests (community, contribution, call)
 ├── utils/                      # JWT, encryption (AES-256-GCM), hash, UUID, email
@@ -151,6 +154,7 @@ go build -o ./tmp/main.exe ./cmd
 | GET | `/ws` | WebSocket (notifications) `?token=` |
 | GET | `/posts` | Danh sách bài viết |
 | GET | `/posts/:id` | Chi tiết bài viết |
+| GET | `/stories/feed` | Danh sách story đầu trang chủ |
 | GET | `/api/tags/:name/posts` | Bài viết theo tag |
 | GET | `/api/profile/:userID` | Profile công khai |
 | GET | `/api/search` | Tìm kiếm (posts, users, hashtags) |
@@ -184,6 +188,15 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 | POST | `/posts/:id/share` | Chia sẻ |
 | POST | `/posts/:id/save` | Lưu bài (bookmark) |
 
+#### Stories
+
+| Method | Path | Mô tả |
+|--------|------|-------|
+| POST | `/stories` | Đăng tải story mới |
+| GET | `/stories/:id` | Xem story (ghi nhận view) |
+| POST | `/stories/:id/interact` | Tương tác (react, reply, share) |
+| GET | `/stories/:id/analytics` | Analytics cho chủ story |
+
 #### Profile & Social
 
 | Method | Path | Mô tả |
@@ -213,6 +226,7 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 | GET/POST | `/api/chats/*` | Chat CRUD + tin nhắn |
 | GET | `/api/chats/ws` | WebSocket Chat Hub (Bearer auth) |
 | GET/POST | `/api/group-chats/*` | Group chat settings, members, mutes |
+| GET | `/api/group-chats/ws` | WebSocket Group Chat Hub (`?token=` access JWT) |
 
 #### Communities
 
@@ -233,6 +247,9 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 | Method | Path | Mô tả |
 |--------|------|-------|
 | GET/POST | `/api/admin/*` | Admin dashboard, reports, bans, moderation |
+| GET | `/api/admin/media/flagged` | Danh sách media flagged/rejected (phân trang, filter status) |
+| POST | `/api/admin/media/:id/review` | Duyệt media (approved / rejected) — kèm cleanup Cloudinary + notification |
+| POST | `/api/admin/media/cleanup-rejected` | Dọn dẹp media rejected quá 7 ngày |
 
 #### Calls
 
@@ -249,13 +266,14 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 
 ## WebSocket
 
-Kiến trúc WS: **2 Hub instances, 3 endpoints, unified `ws.Hub` type**.
+Kiến trúc WS: **2 Hub types (`ws.Hub`, `groupws.Hub`), 3 Hub instances, 4 endpoints**.
 
-| Endpoint | Hub | Service | Auth | Mục đích |
-|---|---|---|---|---|
-| `GET /ws` | `hub` (notification) | `service=nil, callService=nil` | `?token=` access JWT | Thông báo real-time |
-| `GET /api/chats/ws` | `chatHub` | `ChatService` set | Bearer | Chat mã hóa |
-| `GET /api/calls/ws` | `hub` (notification, shared) | `callService` set | Bearer | WebRTC signaling |
+| Endpoint | Hub type | Instance | Service | Auth | Mục đích |
+|---|---|---|---|---|---|
+| `GET /ws` | `ws.Hub` | `hub` | `service=nil, callService=nil` | `?token=` access JWT | Thông báo real-time |
+| `GET /api/chats/ws` | `ws.Hub` | `chatHub` | `ChatService` set | Bearer | Chat mã hóa |
+| `GET /api/calls/ws` | `ws.Hub` | `hub` (shared) | `callService` set | Bearer | WebRTC signaling |
+| `GET /api/group-chats/ws` | `groupws.Hub` | `groupHub` | `GroupMessageService` + `GroupChatService` | `?token=` access JWT | Group chat real-time |
 
 ### Notification Hub (`GET /ws`)
 
@@ -276,6 +294,36 @@ Kiến trúc WS: **2 Hub instances, 3 endpoints, unified `ws.Hub` type**.
   - `message:search_result` — kết quả tìm kiếm
   - `typing` — trạng thái đang gõ của user khác
   - `message:history` — lịch sử khi join
+
+### Group Chat Hub (`GET /api/group-chats/ws`)
+
+Sử dụng Hub type riêng (`groupws.Hub`), không phải `ws.Hub`.
+
+- **Client → Server:**
+  - `group:join` — tham gia nhóm chat, nhận lịch sử tin nhắn
+  - `group:message:send` — gửi tin nhắn
+  - `group:typing:start` / `group:typing:stop` — đang gõ
+  - `group:message:search` — tìm kiếm tin nhắn
+  - `group:leave` — rời nhóm (public/quiet, kèm history mode)
+  - `group:member:add` — thêm thành viên
+  - `group:member:ban` — chặn thành viên
+  - `group:member:mute` — mute thành viên (có thời hạn / vĩnh viễn)
+  - `group:member:unmute` — bỏ mute
+  - `group:admin:transfer` — chuyển quyền admin
+  - `group:settings:update` — cập nhật settings nhóm
+
+- **Server → Client:**
+  - `group:history` — lịch sử tin nhắn khi join
+  - `group:message:new` — tin nhắn mới
+  - `group:typing` — trạng thái typing
+  - `group:message:search_result` — kết quả tìm kiếm
+  - `group:member:left` — thành viên rời nhóm (public leave)
+  - `group:member:added` — thành viên mới
+  - `group:member:banned` — thành viên bị ban
+  - `group:member:muted` — member bị mute
+  - `group:member:unmuted` — member được unmute
+  - `group:admin:transferred` — chuyển admin
+  - `group:settings:updated` — settings đã cập nhật
 
 ### Call Hub (`GET /api/calls/ws`)
 
@@ -317,22 +365,27 @@ go test ./services/... -v
 go build ./... && go vet ./...
 ```
 
-Test cases chi tiết cho từng module nằm trong `docs/test-case/`.
+```bash
+# Integration tests — AI moderation (cần TEST_DSN)
+go test ./services/... -run TestAdminService -v
+```
+
+Test cases chi tiết cho từng module nằm trong `docs/test-case/` (xem `docs/test-case/ai-guardian.test-case.md` cho AI moderation).
 
 ## Kiến trúc
 
 ```
 Client → Router (Gin) → Middleware (Auth/RBAC) → Controller → Service → Repository (GORM) → MySQL
-                                                    ↕
-                                              WebSocket Hub (gorilla/websocket)
+                                                     ↕
+                                          WebSocket Hub (ws.Hub / groupws.Hub)
 ```
 
 ### Layers
 
 - **Controller:** Xử lý HTTP request/response, parse input (`ShouldBindJSON`, `ShouldBindQuery`)
-- **Service:** Business logic (interface-based: `PostService`, `MediaService`, `AdService`, `CallService`; concrete struct cho phần còn lại)
+- **Service:** Business logic (interface-based: `PostService`, `MediaService`, `AdService`, `AIModerationService`, `CallService`; concrete struct cho phần còn lại, `AdminService` có setter tiện ích)
 - **Repository:** GORM queries + raw SQL khi cần (innodb lock, batch operations)
-- **WebSocket Hub:** Quản lý kết nối real-time, per-user broadcast + chat rooms
+- **WebSocket Hub:** `ws.Hub` cho notification/chat/call, `groupws.Hub` riêng cho group chat real-time
 
 ### Design patterns
 
@@ -341,6 +394,9 @@ Client → Router (Gin) → Middleware (Auth/RBAC) → Controller → Service �
 - **Concurrency guard:** `CreateIfNotBusy` dùng `SELECT COUNT(*) ... FOR UPDATE` (gap lock) để ngăn duplicate call
 - **Soft-delete call history:** Bảng `call_hidden` (composite PK `call_id, user_id`), không xóa row khỏi `calls`
 - **Batch profile load:** 2-query pattern (SELECT * FROM profiles WHERE user_id IN ?) thay vì JOIN
+- **Single-upload moderation:** Upload lên Cloudinary với `Moderation: "aws_rek"`, Cloudinary tự gọi AWS Rekognition → trả về SecureURL + PublicID + moderation result trong 1 response (không upload 2 lần)
+- **Transition whitelist:** `ReviewMedia` dùng map `mediaReviewTransitions` — chỉ cho phép `flagged → approved | rejected`
+- **Cleanup on reject:** Admin reject → destroy Cloudinary file + clear `FileURI` trong DB + notification phân biệt AI vs Admin
 - **Idempotent schema:** `addColumnIfMissing` / `addIndexIfMissing` / `addForeignKeyIfMissing` kiểm tra `information_schema` trước khi ALTER
 - **SQL injection prevention:** DDL identifiers được whitelist qua regex `^[a-zA-Z_][a-zA-Z0-9_]*$`
 

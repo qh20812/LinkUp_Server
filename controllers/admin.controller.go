@@ -600,3 +600,50 @@ func (ctrl *AdminController) ReviewReport(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "xử lý báo cáo thành công"})
 }
+
+// ── Media: Admin handlers ────────────────────────────────────────────────
+
+func (ctrl *AdminController) ListFlaggedMedia(c *gin.Context) {
+	adminID := c.GetString("userID")
+
+	var input dto.AdminMediaFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số không hợp lệ"})
+		return
+	}
+
+	result, err := ctrl.adminService.ListFlaggedMedia(c.Request.Context(), adminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *AdminController) ReviewMedia(c *gin.Context) {
+	adminID := c.GetString("userID")
+	mediaID := c.Param("id")
+
+	var input dto.AdminReviewMediaInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := ctrl.adminService.ReviewMedia(c.Request.Context(), adminID, mediaID, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Xử lý media thành công"})
+}
+
+func (ctrl *AdminController) CleanupRejectedMedia(c *gin.Context) {
+	adminID := c.GetString("userID")
+
+	cleaned, err := ctrl.adminService.CleanupRejectedMedia(c.Request.Context(), adminID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Dọn dẹp media thành công", "cleaned": cleaned})
+}

@@ -24,7 +24,12 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 
 	adminGroup.GET("/reports", adminController.ListReports)
 	adminGroup.GET("/reports/:reportID", adminController.GetReportDetail)
-	adminGroup.PUT("/reports/:reportID/decision", adminController.ReviewReport)
+	adminGroup.POST("/reports/:reportID/decision", adminController.ReviewReport)
+
+	// ── Admin Media ──
+	adminGroup.GET("/media/flagged", adminController.ListFlaggedMedia)
+	adminGroup.POST("/media/:id/review", adminController.ReviewMedia)
+	adminGroup.POST("/media/cleanup-rejected", adminController.CleanupRejectedMedia)
 
 	// ── Admin Groups ──
 	adminGroup.GET("/groups", adminController.ListGroups)
