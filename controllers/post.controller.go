@@ -5,6 +5,7 @@ import (
 	"linkup/dto"
 	"linkup/services"
 	"linkup/validations"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 
@@ -21,12 +22,12 @@ func NewPostController(service services.PostService) *PostController {
 
 func (ctrl *PostController) CreatePost(c *gin.Context) {
 	var input dto.CreatePostInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng JSON gửi lên không hợp lệ"})
+	// Sử dụng ShouldBind để xử lý đồng thời text fields và file upload dạng form-data
+	if err := c.ShouldBind(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng dữ liệu form-data gửi lên không hợp lệ"})
 		return
 	}
 
-	// Gọi Validation kiểm tra độ dài ký tự và trạng thái hợp lệ
 	if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -39,7 +40,14 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID)
+	// Lấy danh sách tệp đính kèm gửi lên qua form-data với key đặt tên là "media"
+	var files []*multipart.FileHeader
+	form, err := c.MultipartForm()
+	if err == nil && form != nil {
+		files = form.File["media"]
+	}
+
+	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -133,7 +141,6 @@ func (ctrl *PostController) CreateComment(c *gin.Context) {
 		return
 	}
 
-	// Gọi Validation kiểm tra độ dài ký tự của bình luận
 	if err := validations.ValidateCreateComment(input.Content); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -181,7 +188,12 @@ func (ctrl *PostController) SharePost(c *gin.Context) {
 	val, _ := c.Get("userID")
 	userID := fmt.Sprintf("%v", val)
 
-	err := ctrl.service.SharePost(c.Request.Context(), userID, postID)
+	var input dto.SharePostInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		input.Content = "" // Nếu không viết Caption thì mặc định rỗng
+	}
+
+	err := ctrl.service.SharePost(c.Request.Context(), userID, postID, input.Content)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -195,11 +207,49 @@ func (ctrl *PostController) SavePost(c *gin.Context) {
 	val, _ := c.Get("userID")
 	userID := fmt.Sprintf("%v", val)
 
-	err := ctrl.service.SavePost(c.Request.Context(), userID, postID)
+	action, err := ctrl.service.SavePost(c.Request.Context(), userID, postID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Đã lưu bài viết!"})
+	if action == "removed" {
+		c.JSON(http.StatusOK, gin.H{"action": action, "message": "Đã bỏ lưu bài viết khỏi mục Bookmark!"})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"action": action, "message": "Đã lưu bài viết vào mục Bookmark thành công!"})
+	}
+}
+
+// Xóa bài viết
+func (ctrl *PostController) DeletePost(c *gin.Context) {
+	postID := c.Param("id")
+	val, _ := c.Get("userID")
+	userID := fmt.Sprintf("%v", val)
+
+	if err := ctrl.service.DeletePost(c.Request.Context(), userID, postID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã xóa bài viết và cập nhật dữ liệu liên kết thành công!"})
+}
+
+// Lấy danh sách bài viết theo thẻ Hashtag
+func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
+	name := c.Param("name")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	posts, err := ctrl.service.GetPostsByHashtag(c.Request.Context(), name, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"hashtag":   name,
+		"page":      page,
+		"page_size": pageSize,
+		"data":      posts,
+	})
 }

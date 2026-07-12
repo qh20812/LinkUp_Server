@@ -8,18 +8,22 @@ import (
 	"linkup/utils"
 	"linkup/validations"
 	"log"
+	"mime/multipart"
 	"time"
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string) (*models.Post, error)
+	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error)
 	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
 	GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, error)
-	SharePost(ctx context.Context, userID, postID string) error
-	SavePost(ctx context.Context, userID, postID string) error
+	SharePost(ctx context.Context, userID, postID, content string) error
+	SavePost(ctx context.Context, userID, postID string) (action string, err error)
+	DeletePost(ctx context.Context, userID, postID string) error
+	GetPostsByHashtag(ctx context.Context, hashtag string, page, pageSize int) ([]models.Post, error)
+	SetMediaService(mediaService MediaService)
 }
 
 type postService struct {
@@ -27,6 +31,7 @@ type postService struct {
 	notifService        *NotificationService
 	tagService          *TagService
 	contributionService *ContributionService
+	mediaService        MediaService
 	validation          *validations.PostValidation
 }
 
@@ -38,7 +43,11 @@ func (s *postService) SetContributionService(contributionService *ContributionSe
 	s.contributionService = contributionService
 }
 
-func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string) (*models.Post, error) {
+func (s *postService) SetMediaService(mediaService MediaService) {
+	s.mediaService = mediaService
+}
+
+func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error) {
 	if communityID != nil {
 		if s.contributionService == nil {
 			return nil, errors.New("dịch vụ contribution chưa được khởi tạo")
@@ -58,6 +67,22 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 
 	if err := s.repo.Create(ctx, &post); err != nil {
 		return nil, err
+	}
+
+	// Xử lý upload danh sách hình ảnh/video đa phần từ form-data lên Cloudinary
+	if len(files) > 0 && s.mediaService != nil {
+		var mediaIDs []string
+		for _, file := range files {
+			uploadedMedia, err := s.mediaService.UploadMedia(ctx, userID, file)
+			if err == nil && uploadedMedia != nil {
+				mediaIDs = append(mediaIDs, uploadedMedia.ID)
+			} else if err != nil {
+				log.Printf("[Media Upload Error] Lỗi tải file lên: %v", err)
+			}
+		}
+		if len(mediaIDs) > 0 {
+			_ = s.repo.LinkMediaToPost(ctx, mediaIDs, post.ID)
+		}
 	}
 
 	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
@@ -85,7 +110,6 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 
 func (s *postService) GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error) {
 	page, pageSize = s.validation.NormalizePagination(page, pageSize)
-
 	offset := (page - 1) * pageSize
 	return s.repo.FetchActive(ctx, pageSize, offset)
 }
@@ -123,7 +147,6 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 			return "", "", errDelete
 		}
 
-		// Decrement positive_reactions when removing a reaction from another user's post.
 		if post, err := s.repo.FindByID(ctx, postID); err == nil && post != nil && post.UserID != userID {
 			if s.contributionService != nil && post.CommunityID != nil {
 				go func() {
@@ -246,25 +269,36 @@ func (s *postService) GetCommentList(ctx context.Context, postID string, page, p
 	return s.repo.FetchCommentsByPostID(ctx, postID, pageSize, offset)
 }
 
-func (s *postService) SharePost(ctx context.Context, userID, postID string) error {
+func (s *postService) SharePost(ctx context.Context, userID, postID, content string) error {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
 		return errors.New("bài viết không tồn tại hoặc không cho phép chia sẻ")
 	}
 
-	share := models.NewPostShare(userID, postID)
+	share := models.NewPostShare(userID, postID, content)
 	share.ID = utils.GenerateUUID()
 	share.CreatedAt = time.Now()
 
 	return s.repo.CreateShare(ctx, share)
 }
 
-func (s *postService) SavePost(ctx context.Context, userID, postID string) error {
+// Bấm lưu bài viết lần nữa hệ thống tự hiểu và xóa (Toggle Bookmark)
+func (s *postService) SavePost(ctx context.Context, userID, postID string) (string, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return errors.New("bài viết không tồn tại hoặc đã bị ẩn")
+		return "", errors.New("bài viết không tồn tại hoặc đã bị ẩn")
 	}
 
+	existingBookmark, err := s.repo.FindBookmark(ctx, userID, postID)
+	if err == nil && existingBookmark != nil {
+		// Đã lưu từ trước -> Thực hiện xóa
+		if errDelete := s.repo.DeleteBookmark(ctx, existingBookmark.ID); errDelete != nil {
+			return "", errDelete
+		}
+		return "removed", nil
+	}
+
+	// Chưa từng lưu -> Tạo mới
 	bookmark := models.Bookmark{
 		ID:        utils.GenerateUUID(),
 		UserID:    userID,
@@ -272,5 +306,62 @@ func (s *postService) SavePost(ctx context.Context, userID, postID string) error
 		CreatedAt: time.Now(),
 	}
 
-	return s.repo.CreateSave(ctx, bookmark)
+	if errCreate := s.repo.CreateSave(ctx, bookmark); errCreate != nil {
+		return "", errCreate
+	}
+	return "saved", nil
+}
+
+// Xóa bài viết và thông báo tới toàn bộ những tài khoản đã lưu bài viết này
+func (s *postService) DeletePost(ctx context.Context, userID, postID string) error {
+	post, err := s.repo.FindByID(ctx, postID)
+	if err != nil {
+		return errors.New("bài viết không tồn tại")
+	}
+
+	if post.UserID != userID {
+		return errors.New("bạn không có quyền thực hiện xóa bài viết của người khác")
+	}
+
+	bookmarkedUserIDs, err := s.repo.DeletePostWithAssociations(ctx, postID)
+	if err != nil {
+		return err
+	}
+
+	// SỬA TẠI ĐÂY: Đẩy luồng thông báo bất đồng bộ an toàn tuyệt đối (Đã sửa kiểu dữ liệu ID về dạng string)
+	go func(targetIDs []string, currentUserID string) {
+		// Dùng Context độc lập để luồng ngầm không bị hủy khi HTTP Request của Gin kết thúc
+		bgCtx := context.Background()
+
+		for _, targetUserID := range targetIDs {
+			if targetUserID != currentUserID { // Không gửi cho chính chủ bài viết
+
+				// Tạo biến cục bộ trong mỗi vòng lặp để lấy con trỏ an toàn, chống dữ liệu bị ghi đè (Data Race)
+				senderID := currentUserID
+
+				s.notifService.Create(
+					bgCtx,
+					targetUserID,
+					&senderID,
+					models.NotificationTypeMessage,
+					"Một bài viết trong danh sách dấu trang (Bookmark) của bạn đã bị chủ sở hữu xóa.",
+					nil, nil, nil,
+				)
+			}
+		}
+	}(bookmarkedUserIDs, userID)
+
+	return nil
+}
+
+// Tìm bài viết theo từ khóa Hashtag
+func (s *postService) GetPostsByHashtag(ctx context.Context, hashtag string, page, pageSize int) ([]models.Post, error) {
+	page, pageSize = s.validation.NormalizePagination(page, pageSize)
+	offset := (page - 1) * pageSize
+	postIDs, err := s.tagService.GetPostIDsByHashtag(ctx, hashtag)
+	if err != nil || len(postIDs) == 0 {
+		return []models.Post{}, nil
+	}
+	posts, err := s.repo.FetchByIDs(ctx, postIDs, pageSize, offset)
+	return posts, err
 }

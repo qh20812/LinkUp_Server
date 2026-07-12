@@ -121,6 +121,7 @@ func main() {
 		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ÁNH/FILE TRÊN CLOUDINARY) =====
 		mediaRepository := repository.NewMediaRepository(gormDB)
 		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv)
+		postService.SetMediaService(mediaService)
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env)
 

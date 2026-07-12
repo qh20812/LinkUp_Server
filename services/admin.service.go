@@ -33,9 +33,9 @@ type AdminService struct {
 	reportRepo          *repository.ReportRepository
 	moderationRepo      *repository.ModerationRepository
 	chatRepo            *repository.ChatRepository
-	communityRepo       	*repository.CommunityRepository
+	communityRepo       *repository.CommunityRepository
 	profileRepo         *repository.ProfileRepository
-	groupChatRepo      *repository.GroupChatRepository
+	groupChatRepo       *repository.GroupChatRepository
 	adminRepo           repository.AdminRepository
 	notificationService *NotificationService
 }
@@ -277,8 +277,7 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 	status := strings.TrimSpace(strings.ToLower(input.Status))
 	if status != "" {
 		switch status {
-		case string(models.PostStatusActive),
-			string(models.PostStatusPublic),
+		case string(models.PostStatusPublic),
 			string(models.PostStatusPrivate),
 			string(models.PostStatusHidden),
 			string(models.PostStatusFriend),
@@ -384,7 +383,7 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 
 	statusValue := strings.TrimSpace(strings.ToLower(input.Status))
 	switch statusValue {
-	case string(models.PostStatusActive),
+	case
 		string(models.PostStatusPublic),
 		string(models.PostStatusPrivate),
 		string(models.PostStatusHidden),

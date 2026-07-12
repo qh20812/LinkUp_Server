@@ -81,7 +81,6 @@ func ValidateCreatePost(title, content, status string) error {
 
 	// Kiểm tra trạng thái bài viết hợp lệ
 	validStatuses := map[models.PostStatus]bool{
-		models.PostStatusActive:  true,
 		models.PostStatusPublic:  true,
 		models.PostStatusPrivate: true,
 		models.PostStatusHidden:  true,
