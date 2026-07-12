@@ -142,15 +142,15 @@ type CallMissedPayload struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// GroupCallToggleMicPayload toggles the local microphone state inside a group call.
-// This is the preferred event shape for video-only calls.
-type GroupCallToggleMicPayload struct {
-	CallID string `json:"call_id"`
-	Muted  bool   `json:"muted"`
-}
-
 // Nâng cấp groupcall
 type GroupCallToggleMutePayload struct {
+	CallID       string `json:"call_id"`
+	TargetUserID string `json:"target_user_id"`
+	Muted        bool   `json:"muted"`
+}
+
+// GroupCallToggleMicPayload lets a call participant change their own microphone state.
+type GroupCallToggleMicPayload struct {
 	CallID string `json:"call_id"`
 	Muted  bool   `json:"muted"`
 }

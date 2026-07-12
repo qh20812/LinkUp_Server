@@ -185,6 +185,19 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 		return nil, errors.New("group call hiện chỉ hỗ trợ video")
 	}
 
+	// Trong cùng một group chat chỉ cho phép một cuộc gọi đang hoạt động tại một thời điểm.
+	h.mu.RLock()
+	for _, session := range h.groupCalls {
+		if session == nil {
+			continue
+		}
+		if session.ChatID == chatID {
+			h.mu.RUnlock()
+			return nil, errors.New("group chat này đã có cuộc gọi đang diễn ra")
+		}
+	}
+	h.mu.RUnlock()
+
 	selected := make(map[string]struct{})
 
 	memberSet := make(map[string]struct{}, len(memberIDs))

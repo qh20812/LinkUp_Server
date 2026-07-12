@@ -690,7 +690,7 @@ func (c *Client) ReadPump() {
 			}
 			c.clearActiveCall()
 
-		case "group:call:toggle-mute", "group:call:toggle-mic":
+		case "group:call:toggle-mute":
 			var payload dto.GroupCallToggleMutePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				c.sendError("dữ liệu tắt/mở mic không hợp lệ")
@@ -712,15 +712,80 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			// Chỉ creator mới được quyền điều khiển mute của cuộc gọi để tránh người khác can thiệp trái phép.
+			if session.CallerID != c.userID {
+				c.sendError("chỉ người tạo cuộc gọi mới được tắt/mở mic")
+				continue
+			}
+
+			if payload.TargetUserID == "" {
+				c.sendError("thiếu target_user_id")
+				continue
+			}
+			if payload.TargetUserID == c.userID {
+				c.sendError("creator hãy dùng toggle-mic cho chính mình")
+				continue
+			}
+			if !session.IsParticipant(payload.TargetUserID) {
+				c.sendError("người dùng không thuộc cuộc gọi này")
+				continue
+			}
+
+			// Không broadcast nếu trạng thái mic không thay đổi, tránh spam event vô ích.
+			if currentMuted, ok := session.Muted[payload.TargetUserID]; ok && currentMuted == payload.Muted {
+				continue
+			}
+
+			session.Muted[payload.TargetUserID] = payload.Muted
+			session.UpdateActivity()
+
+			c.hub.SendToUsers(session.JoinedIDs(), dto.WsEvent{
+				Type: "group:call:mic",
+				Payload: mustMarshal(map[string]any{
+					"call_id":    payload.CallID,
+					"user_id":    payload.TargetUserID,
+					"muted":      payload.Muted,
+					"changed_by": c.userID,
+				}),
+			})
+
+		case "group:call:toggle-mic":
+			var payload dto.GroupCallToggleMicPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu toggle mic không hợp lệ")
+				continue
+			}
+
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			// toggle-mic chỉ áp dụng cho chính người gửi.
+			if currentMuted, ok := session.Muted[c.userID]; ok && currentMuted == payload.Muted {
+				continue
+			}
+
 			session.Muted[c.userID] = payload.Muted
 			session.UpdateActivity()
 
 			c.hub.SendToUsers(session.JoinedIDs(), dto.WsEvent{
 				Type: "group:call:mic",
 				Payload: mustMarshal(map[string]any{
-					"call_id": payload.CallID,
-					"user_id": c.userID,
-					"muted":   payload.Muted,
+					"call_id":    payload.CallID,
+					"user_id":    c.userID,
+					"muted":      payload.Muted,
+					"changed_by": c.userID,
 				}),
 			})
 
@@ -742,6 +807,11 @@ func (c *Client) ReadPump() {
 			}
 			if !session.IsParticipant(c.userID) {
 				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			// Không broadcast nếu trạng thái video không thay đổi, tránh làm nhiễu các participant.
+			if currentVideo, ok := session.VideoEnabled[c.userID]; ok && currentVideo == payload.VideoEnabled {
 				continue
 			}
 
