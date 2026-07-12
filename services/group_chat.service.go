@@ -602,3 +602,14 @@ func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targ
 
 	return s.groupRepo.RejectMemberRequest(ctx, requestID)
 }
+
+func (s *GroupChatService) EnsureGroupMember(ctx context.Context, chatID, userID string) error {
+	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, userID)
+	if err != nil {
+		return fmt.Errorf("kiểm tra thành viên nhóm thất bại: %w", err)
+	}
+	if !isMember {
+		return errors.New("bạn không phải thành viên của nhóm này")
+	}
+	return nil
+}
