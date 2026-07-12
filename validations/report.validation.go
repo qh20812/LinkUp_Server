@@ -42,3 +42,15 @@ func (v *ReportValidation) ValidateCreateReport(targetType, targetID, reportType
 
 	return nil
 }
+
+func (v *ReportValidation) ValidateUpdateReport(reportType, reasonDetail string) error {
+	if strings.TrimSpace(reportType) == "" {
+		return ErrReportTypeRequired
+	}
+
+	if strings.TrimSpace(reasonDetail) == "" {
+		return ErrReasonRequired
+	}
+
+	return nil
+}

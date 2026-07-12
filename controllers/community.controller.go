@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	"linkup/models"
 	"linkup/services"
 	"net/http"
 
@@ -39,6 +40,10 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Tải ảnh đại diện thất bại"})
+			return
+		}
+		if media.Status == models.MediaStatusRejected {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Ảnh đại diện vi phạm tiêu chuẩn cộng đồng"})
 			return
 		}
 		avatarURI = media.FileURI

@@ -39,16 +39,16 @@ type CallIncomingPayload struct {
 }
 
 type CallStatusPayload struct {
-	CallID             string  `json:"call_id"`
-	Status             string  `json:"status"`
-	CallerID           string  `json:"caller_id"`
-	CalleeID           string  `json:"callee_id"`
-	CallType           string  `json:"call_type"`
-	VideoEnabledCaller bool    `json:"video_enabled_caller"`
-	VideoEnabledCallee bool    `json:"video_enabled_callee"`
-	StartedAt          *int64  `json:"started_at,omitempty"`
-	EndedAt            *int64  `json:"ended_at,omitempty"`
-	Duration           int     `json:"duration,omitempty"`
+	CallID             string `json:"call_id"`
+	Status             string `json:"status"`
+	CallerID           string `json:"caller_id"`
+	CalleeID           string `json:"callee_id"`
+	CallType           string `json:"call_type"`
+	VideoEnabledCaller bool   `json:"video_enabled_caller"`
+	VideoEnabledCallee bool   `json:"video_enabled_callee"`
+	StartedAt          *int64 `json:"started_at,omitempty"`
+	EndedAt            *int64 `json:"ended_at,omitempty"`
+	Duration           int    `json:"duration,omitempty"`
 }
 
 type CallBusyPayload struct {
@@ -77,6 +77,29 @@ type ToggleVideoRequest struct {
 	VideoEnabled bool `json:"video_enabled"`
 }
 
+// ==== GROUP CALL DTO ====
+type GroupCallInitiatePayload struct {
+	ChatID         string   `json:"chat_id"`
+	ParticipantIDs []string `json:"participant_ids,omitempty"`
+}
+
+type GroupCallJoinRequestPayload struct {
+	CallID string `json:"call_id"`
+}
+
+type GroupCallApprovePayload struct {
+	CallID string `json:"call_id"`
+	UserID string `json:"user_id"`
+}
+
+type GroupCallSignalPayload struct {
+	CallID string          `json:"call_id"`
+	Signal json.RawMessage `json:"signal"`
+}
+
+type GroupCallEndPayload struct {
+	CallID string `json:"call_id"`
+}
 // ─── Call History ────────────────────────────────────────────────
 
 // CallHistoryQuery binds to GET query params for call history list.
