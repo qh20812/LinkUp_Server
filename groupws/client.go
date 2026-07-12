@@ -687,10 +687,6 @@ func (c *Client) ReadPump() {
 					}),
 				}
 				c.hub.SendToUsers(session.JoinedIDs(), event)
-				if c.groupChatHub != nil {
-					c.groupChatHub.Broadcast(session.ChatID, event)
-				}
-				c.sendGroupChatSystemMessage(session.ChatID, fmt.Sprintf("%s đã rời cuộc gọi", c.userID))
 			}
 			c.clearActiveCall()
 
@@ -898,10 +894,6 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 			}),
 		}
 		c.hub.SendToUsers(current.JoinedIDs(), event)
-		if c.groupChatHub != nil {
-			c.groupChatHub.Broadcast(current.ChatID, event)
-		}
-		c.sendGroupChatSystemMessage(current.ChatID, fmt.Sprintf("%s đã rời cuộc gọi", c.userID))
 	}
 
 	c.clearActiveCall()
