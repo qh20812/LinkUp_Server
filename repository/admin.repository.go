@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"time"
 	"linkup/dto"
 	"linkup/models"
 
@@ -11,6 +12,7 @@ type AdminRepository interface {
 	GetTotalUsers() (int64, error)
 	GetTotalPosts() (int64, error)
 	GetTotalReports() (int64, error)
+	GetCountBeforeDate(tableName string, date time.Time) (int64, error)
 	GetChartData(tableName string, startDate, endDate string) ([]dto.ChartDataPoint, error)
 }
 
@@ -38,6 +40,14 @@ func (r *adminRepository) GetTotalPosts() (int64, error) {
 func (r *adminRepository) GetTotalReports() (int64, error) {
 	var count int64
 	err := r.db.Model(&models.Report{}).Count(&count).Error
+	return count, err
+}
+
+func (r *adminRepository) GetCountBeforeDate(tableName string, date time.Time) (int64, error) {
+	var count int64
+	err := r.db.Table(tableName).
+		Where("created_at < ?", date).
+		Count(&count).Error
 	return count, err
 }
 
