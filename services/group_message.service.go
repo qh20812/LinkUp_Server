@@ -243,3 +243,10 @@ func (s *GroupMessageService) ListGroupMemberIDs(ctx context.Context, userID, ch
 	}
 	return s.chatRepo.GetParticipantIDs(ctx, chatID)
 }
+
+func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, content string) (*models.Message, error) {
+	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+	msg.ID = utils.GenerateUUID()
+	msg.CreatedAt = time.Now().UTC()
+	return s.chatRepo.CreateMessage(ctx, &msg)
+}
