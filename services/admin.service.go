@@ -118,17 +118,30 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 	}
 
 	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
-	if err != nil {
-		chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
-	}
+		if err != nil {
+			chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
+		}
 
-	return dto.AdminAnalyticsResponse{
-		TotalUsers:   totalUsers,
-		TotalPosts:   totalPosts,
-		TotalReports: totalReports,
-		ChartData:    chartData,
-		GeneratedAt:  time.Now().UTC(),
-	}, nil
+		// Tính phần trăm thay đổi so với 1 tháng trước
+		oneMonthAgo := now.AddDate(0, -1, 0)
+		prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
+		prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
+		prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
+
+		usersChangePct := calcPercentChange(totalUsers, prevUsers)
+		postsChangePct := calcPercentChange(totalPosts, prevPosts)
+		reportsChangePct := calcPercentChange(totalReports, prevReports)
+
+		return dto.AdminAnalyticsResponse{
+			TotalUsers:           totalUsers,
+			TotalPosts:           totalPosts,
+			TotalReports:         totalReports,
+			UsersChangePercent:   usersChangePct,
+			PostsChangePercent:   postsChangePct,
+			ReportsChangePercent: reportsChangePct,
+			ChartData:            chartData,
+			GeneratedAt:          time.Now().UTC(),
+		}, nil
 }
 
 func (s *AdminService) ListUsers(ctx context.Context, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
@@ -1288,6 +1301,16 @@ func reportTargetType(report *models.Report) string {
 		return "comment"
 	}
 	return "unknown"
+}
+
+func calcPercentChange(current, previous int64) float64 {
+	if previous == 0 {
+		if current == 0 {
+			return 0
+		}
+		return 100
+	}
+	return float64(current-previous) / float64(previous) * 100
 }
 
 func isReportFinalStatus(status models.ReportStatus) bool {
