@@ -304,9 +304,12 @@ type ChartDataPoint struct {
 }
 
 type AdminAnalyticsResponse struct {
-	TotalUsers   int64            `json:"total_users"`
-	TotalPosts   int64            `json:"total_posts"`
-	TotalReports int64            `json:"total_reports"`
-	ChartData    []ChartDataPoint `json:"chart_data,omitempty"`
-	GeneratedAt  time.Time        `json:"generated_at"`
+	TotalUsers            int64            `json:"total_users"`
+	TotalPosts            int64            `json:"total_posts"`
+	TotalReports          int64            `json:"total_reports"`
+	UsersChangePercent    float64          `json:"users_change_percent"`
+	PostsChangePercent    float64          `json:"posts_change_percent"`
+	ReportsChangePercent  float64          `json:"reports_change_percent"`
+	ChartData             []ChartDataPoint `json:"chart_data,omitempty"`
+	GeneratedAt           time.Time        `json:"generated_at"`
 }
