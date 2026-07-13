@@ -144,7 +144,11 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 		}, nil
 }
 
-func (s *AdminService) ListUsers(ctx context.Context, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
+func (s *AdminService) ListUsers(ctx context.Context, userID string, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
+	if err := s.ensureAdmin(ctx, userID); err != nil {
+		return dto.AdminUserListResponse{}, err
+	}
+
 	page := input.Page
 	if page <= 0 {
 		page = 1
@@ -240,6 +244,22 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
 	if err != nil {
 		return dto.AdminBanUserResponse{}, err
+	}
+
+	isTargetSuperAdmin, err := s.authRepo.HasRole(ctx, targetUserID, models.RoleSuperAdmin)
+	if err != nil {
+		return dto.AdminBanUserResponse{}, err
+	}
+	if isTargetSuperAdmin {
+		return dto.AdminBanUserResponse{}, fmt.Errorf("không thể ban superadmin")
+	}
+
+	isTargetAdmin, err := s.authRepo.HasRole(ctx, targetUserID, models.RoleAdmin)
+	if err != nil {
+		return dto.AdminBanUserResponse{}, err
+	}
+	if isTargetAdmin {
+		return dto.AdminBanUserResponse{}, fmt.Errorf("không thể ban admin")
 	}
 
 	if targetUser.Status == models.UserStatusBanned {

@@ -4,13 +4,16 @@ import (
 	"linkup/config"
 	"linkup/controllers"
 	"linkup/middlewares"
+	"linkup/models"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminController, env config.Env) {
+func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminController, env config.Env, db *gorm.DB) {
 	adminGroup := router.Group("/api/admin")
 	adminGroup.Use(middlewares.AuthMiddleware(env))
+	adminGroup.Use(middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin))
 
 	adminGroup.GET("/analytics", adminController.GetDashboardAnalytics)
 

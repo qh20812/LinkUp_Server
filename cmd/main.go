@@ -218,7 +218,7 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
-		routes.RegisterAdminRoutes(router, adminController, env)
+		routes.RegisterAdminRoutes(router, adminController, env, gormDB)
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)
