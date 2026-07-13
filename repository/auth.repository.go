@@ -149,7 +149,8 @@ func (r *AuthRepository) AssignUserRole(ctx context.Context, userID string, role
 func (r *AuthRepository) CountUsers(ctx context.Context, keyword string, status string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&models.User{}).
-		Joins("LEFT JOIN profiles ON profiles.user_id = users.id")
+		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Where("users.id NOT IN (SELECT user_roles.user_id FROM user_roles JOIN roles ON roles.id = user_roles.role_id WHERE roles.name IN ('SUPER_ADMIN', 'ADMIN') AND user_roles.scope_id IS NULL)")
 
 	if keyword != "" {
 		like := "%" + keyword + "%"
@@ -172,6 +173,7 @@ func (r *AuthRepository) ListUsers(ctx context.Context, keyword string, status s
 		Model(&models.User{}).
 		Select("users.id, users.username, users.email, users.status, COALESCE(profiles.display_name, '') AS display_name, COALESCE(profiles.avatar_uri, '') AS avatar_uri, users.created_at, users.updated_at").
 		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Where("users.id NOT IN (SELECT user_roles.user_id FROM user_roles JOIN roles ON roles.id = user_roles.role_id WHERE roles.name IN ('SUPER_ADMIN', 'ADMIN') AND user_roles.scope_id IS NULL)").
 		Order("users.created_at DESC").
 		Limit(limit).
 		Offset(offset)

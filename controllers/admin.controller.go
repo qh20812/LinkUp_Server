@@ -41,13 +41,19 @@ func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 }
 
 func (ctrl *AdminController) ListUsers(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
 	var input dto.AdminUserFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
 		return
 	}
 
-	result, err := ctrl.adminService.ListUsers(c.Request.Context(), input)
+	result, err := ctrl.adminService.ListUsers(c.Request.Context(), userID, input)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
