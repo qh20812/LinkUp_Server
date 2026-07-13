@@ -1,11 +1,15 @@
 package groupws
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"linkup/dto"
+	"linkup/models"
+	"linkup/services"
 	"linkup/utils"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -17,15 +21,28 @@ type BroadcastMessage struct {
 	Data   []byte
 }
 
+type callStore interface {
+	Create(ctx context.Context, call *models.Call) error
+	UpdateStatus(ctx context.Context, id string, status models.CallStatus, startedAt, endedAt *time.Time, duration int) error
+}
+
 type Hub struct {
-	rooms        map[string]map[*Client]bool
-	clients      map[string]map[*Client]bool
-	register     chan *Client
-	unregister   chan *Client
-	broadcast    chan *BroadcastMessage
-	groupCalls   map[string]*GroupCallSession
-	groupChatHub *Hub
-	mu           sync.RWMutex
+	rooms          map[string]map[*Client]bool
+	clients        map[string]map[*Client]bool
+	register       chan *Client
+	unregister     chan *Client
+	broadcast      chan *BroadcastMessage
+	groupCalls     map[string]*GroupCallSession
+	groupChatHub   *Hub
+	messageService *services.GroupMessageService
+	callStore      callStore
+	mu             sync.RWMutex
+}
+
+func (h *Hub) SetMessageService(svc *services.GroupMessageService) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.messageService = svc
 }
 
 type GroupCallSession struct {
@@ -63,6 +80,51 @@ func (s *GroupCallSession) ActiveParticipantIDs() []string {
 	return ids
 }
 
+// GroupCallSnapshot là bản sao read-only của session để dùng ngoài hub lock.
+type GroupCallSnapshot struct {
+	CallID             string
+	ChatID             string
+	CallerID           string
+	Participants       []string
+	Joined             []string
+	ActiveParticipants []string
+}
+
+type RequestJoinResult struct {
+	ChatID    string
+	CallerID  string
+	JoinedNow bool
+	JoinedIDs []string
+}
+
+type ApproveJoinResult struct {
+	CallID         string
+	ChatID         string
+	ParticipantIDs []string
+	JoinedIDs      []string
+}
+
+type EndCallResult struct {
+	Ended         bool
+	ChatID        string
+	CallID        string
+	NotifyUserIDs []string
+}
+
+func (h *Hub) snapshotSessionLocked(session *GroupCallSession) GroupCallSnapshot {
+	if session == nil {
+		return GroupCallSnapshot{}
+	}
+	return GroupCallSnapshot{
+		CallID:             session.CallID,
+		ChatID:             session.ChatID,
+		CallerID:           session.CallerID,
+		Participants:       session.ParticipantIDs(),
+		Joined:             session.JoinedIDs(),
+		ActiveParticipants: session.ActiveParticipantIDs(),
+	}
+}
+
 func NewHub() *Hub {
 	return &Hub{
 		rooms:      make(map[string]map[*Client]bool),
@@ -78,6 +140,12 @@ func (h *Hub) SetGroupChatHub(groupChatHub *Hub) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.groupChatHub = groupChatHub
+}
+
+func (h *Hub) SetCallStore(store callStore) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.callStore = store
 }
 
 func (h *Hub) Run() {
@@ -254,19 +322,73 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 	h.groupCalls[session.CallID] = session
 	h.mu.Unlock()
 
+	if h.callStore != nil {
+		calleeID := callerID
+		for _, id := range participantIDs {
+			if strings.TrimSpace(id) == "" || id == callerID {
+				continue
+			}
+			calleeID = id
+			break
+		}
+		if calleeID == callerID {
+			for _, id := range memberIDs {
+				if strings.TrimSpace(id) == "" || id == callerID {
+					continue
+				}
+				calleeID = id
+				break
+			}
+		}
+
+		call := &models.Call{
+			ID:                 session.CallID,
+			CallerID:           callerID,
+			CalleeID:           calleeID,
+			CallType:           models.CallTypeVideo,
+			IsGroup:            true,
+			Status:             models.CallStatusCalling,
+			VideoEnabledCaller: false,
+			VideoEnabledCallee: false,
+			CreatedAt:          time.Now().UTC(),
+		}
+		if err := h.callStore.Create(context.Background(), call); err != nil {
+			h.mu.Lock()
+			delete(h.groupCalls, session.CallID)
+			h.mu.Unlock()
+			return nil, fmt.Errorf("lưu cuộc gọi nhóm: %w", err)
+		}
+	}
+
 	return session, nil
 }
 
-func (h *Hub) RequestJoinCall(userID, callID string) (*GroupCallSession, error) {
+func (h *Hub) GetGroupCallSnapshot(callID string) (GroupCallSnapshot, error) {
 	h.mu.RLock()
+	defer h.mu.RUnlock()
+
 	session, ok := h.groupCalls[callID]
-	h.mu.RUnlock()
 	if !ok {
-		return nil, errors.New("cuộc gọi không tồn tại")
+		return GroupCallSnapshot{}, errors.New("cuộc gọi không tồn tại")
+	}
+	return h.snapshotSessionLocked(session), nil
+}
+
+func (h *Hub) RequestJoinCall(userID, callID string) (RequestJoinResult, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	session, ok := h.groupCalls[callID]
+	if !ok {
+		return RequestJoinResult{}, errors.New("cuộc gọi không tồn tại")
+	}
+
+	result := RequestJoinResult{
+		ChatID:   session.ChatID,
+		CallerID: session.CallerID,
 	}
 
 	if _, invited := session.Participants[userID]; invited {
-		h.mu.Lock()
 		if session.Joined == nil {
 			session.Joined = make(map[string]struct{})
 		}
@@ -277,36 +399,33 @@ func (h *Hub) RequestJoinCall(userID, callID string) (*GroupCallSession, error) 
 			session.ExpiresAt = nil
 		}
 		session.UpdateActivity()
-		h.mu.Unlock()
-		return session, nil
+		result.JoinedNow = true
+		result.JoinedIDs = session.JoinedIDs()
+		return result, nil
 	}
 
-	h.mu.Lock()
 	if session.PendingRequests == nil {
 		session.PendingRequests = make(map[string]time.Time)
 	}
 	session.PendingRequests[userID] = time.Now().UTC()
 	session.UpdateActivity()
-	h.mu.Unlock()
-	return session, nil
+	return result, nil
 }
 
-func (h *Hub) ApproveJoinCall(creatorID, userID, callID string) (*GroupCallSession, error) {
-	h.mu.RLock()
-	session, ok := h.groupCalls[callID]
-	h.mu.RUnlock()
-	if !ok {
-		return nil, errors.New("cuộc gọi không tồn tại")
-	}
-	if session.CallerID != creatorID {
-		return nil, errors.New("chỉ người tạo cuộc gọi mới được duyệt")
-	}
-
+func (h *Hub) ApproveJoinCall(creatorID, userID, callID string) (ApproveJoinResult, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	session, ok := h.groupCalls[callID]
+	if !ok {
+		return ApproveJoinResult{}, errors.New("cuộc gọi không tồn tại")
+	}
+	if session.CallerID != creatorID {
+		return ApproveJoinResult{}, errors.New("chỉ người tạo cuộc gọi mới được duyệt")
+	}
+
 	if _, ok := session.PendingRequests[userID]; !ok {
-		return nil, errors.New("người này không có yêu cầu tham gia")
+		return ApproveJoinResult{}, errors.New("người này không có yêu cầu tham gia")
 	}
 
 	delete(session.PendingRequests, userID)
@@ -318,25 +437,28 @@ func (h *Hub) ApproveJoinCall(creatorID, userID, callID string) (*GroupCallSessi
 	}
 	session.UpdateActivity()
 
-	return session, nil
+	return ApproveJoinResult{
+		CallID:         session.CallID,
+		ChatID:         session.ChatID,
+		ParticipantIDs: session.ParticipantIDs(),
+		JoinedIDs:      session.JoinedIDs(),
+	}, nil
 }
 
-func (h *Hub) RejectJoinCall(creatorID, userID, callID string) (*GroupCallSession, error) {
-	h.mu.RLock()
-	session, ok := h.groupCalls[callID]
-	h.mu.RUnlock()
-	if !ok {
-		return nil, errors.New("cuộc gọi không tồn tại")
-	}
-	if session.CallerID != creatorID {
-		return nil, errors.New("chỉ người tạo cuộc gọi mới được từ chối")
-	}
-
+func (h *Hub) RejectJoinCall(creatorID, userID, callID string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	session, ok := h.groupCalls[callID]
+	if !ok {
+		return errors.New("cuộc gọi không tồn tại")
+	}
+	if session.CallerID != creatorID {
+		return errors.New("chỉ người tạo cuộc gọi mới được từ chối")
+	}
+
 	delete(session.PendingRequests, userID)
-	return session, nil
+	return nil
 }
 
 // touchCallSessionLocked cập nhật hoạt động của session khi đã giữ mutex của hub.
@@ -347,73 +469,198 @@ func (h *Hub) touchCallSessionLocked(session *GroupCallSession) {
 	session.LastActivity = time.Now().UTC()
 }
 
-func (h *Hub) EndCallByUser(enderID, callID string) (bool, *GroupCallSession, error) {
-	h.mu.RLock()
+func (h *Hub) EndCallByUser(enderID, callID string) (EndCallResult, error) {
+	h.mu.Lock()
+
 	session, ok := h.groupCalls[callID]
-	h.mu.RUnlock()
 	if !ok {
-		return false, nil, errors.New("cuộc gọi không tồn tại")
+		h.mu.Unlock()
+		return EndCallResult{}, errors.New("cuộc gọi không tồn tại")
 	}
+	if !session.IsJoined(enderID) {
+		h.mu.Unlock()
+		return EndCallResult{}, errors.New("bạn chưa tham gia cuộc gọi này")
+	}
+
+	result := EndCallResult{
+		ChatID: session.ChatID,
+		CallID: session.CallID,
+	}
+
+	var persistSession *GroupCallSession
 
 	// Nếu creator kết thúc thì đóng toàn bộ session ngay lập tức.
 	if session.CallerID == enderID {
-		h.mu.Lock()
+		result.NotifyUserIDs = session.JoinedIDs()
+		result.Ended = true
+		persistSession = session
 		delete(h.groupCalls, callID)
 		h.mu.Unlock()
-		return true, session, nil
+		h.persistCallEnd(persistSession)
+		return result, nil
 	}
 
 	// Người dùng thường chỉ rời khỏi session của họ.
-	h.mu.Lock()
 	if session.Joined != nil {
 		delete(session.Joined, enderID)
 	}
 	if session.ActiveParticipants != nil {
 		delete(session.ActiveParticipants, enderID)
 	}
-	ended := len(session.Joined) == 0
-	if ended {
+	result.NotifyUserIDs = session.JoinedIDs()
+	result.Ended = len(session.Joined) == 0
+	if result.Ended {
+		persistSession = session
 		delete(h.groupCalls, callID)
 	}
 	h.mu.Unlock()
 
-	return ended, session, nil
+	if persistSession != nil {
+		h.persistCallEnd(persistSession)
+	}
+	return result, nil
 }
 
-// MarkParticipantActive đánh dấu user đã kết nối media thành công trong call.
-func (h *Hub) MarkParticipantActive(callID, userID string) error {
+func (h *Hub) persistCallEnd(session *GroupCallSession) {
+	if h.callStore == nil || session == nil {
+		return
+	}
+	now := time.Now().UTC()
+	newStatus := models.CallStatusEnded
+	if session.ActiveParticipants == nil || len(session.ActiveParticipants) == 0 {
+		newStatus = models.CallStatusCancelled
+	}
+	if err := h.callStore.UpdateStatus(context.Background(), session.CallID, newStatus, nil, &now, 0); err != nil {
+		log.Printf("group call: update status failed for %s: %v", session.CallID, err)
+	}
+}
+
+// RelaySignalTargets đánh dấu participant active và trả danh sách người nhận signal.
+func (h *Hub) RelaySignalTargets(callID, senderID string) (chatID string, recipients []string, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	session, ok := h.groupCalls[callID]
 	if !ok {
-		return errors.New("cuộc gọi không tồn tại")
+		return "", nil, errors.New("cuộc gọi không tồn tại")
 	}
-	if !session.IsParticipant(userID) {
-		return errors.New("người dùng không thuộc cuộc gọi này")
+	if !session.IsParticipant(senderID) {
+		return "", nil, errors.New("bạn không tham gia cuộc gọi này")
 	}
+	if !session.IsJoined(senderID) {
+		return "", nil, errors.New("bạn chưa tham gia cuộc gọi này")
+	}
+
+	chatID = session.ChatID
 	if session.ActiveParticipants == nil {
 		session.ActiveParticipants = make(map[string]struct{})
 	}
-	session.ActiveParticipants[userID] = struct{}{}
+	session.ActiveParticipants[senderID] = struct{}{}
 	session.UpdateActivity()
-	return nil
+
+	recipients = make([]string, 0, len(session.Joined))
+	for id := range session.Joined {
+		if id != senderID {
+			recipients = append(recipients, id)
+		}
+	}
+	sort.Strings(recipients)
+	return chatID, recipients, nil
 }
 
-// ListCallsByUser trả về snapshot các session mà user đang còn tham gia để cleanup an toàn khi mất kết nối.
-func (h *Hub) ListCallsByUser(userID string) []*GroupCallSession {
+// SetParticipantMuted cập nhật trạng thái mic dưới hub lock.
+func (h *Hub) SetParticipantMuted(callID, actorID, targetUserID string, muted, requireCreator bool) (changed bool, notifyIDs []string, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	session, ok := h.groupCalls[callID]
+	if !ok {
+		return false, nil, errors.New("cuộc gọi không tồn tại")
+	}
+	if !session.IsParticipant(actorID) {
+		return false, nil, errors.New("bạn không tham gia cuộc gọi này")
+	}
+	if requireCreator {
+		if session.CallerID != actorID {
+			return false, nil, errors.New("chỉ người tạo cuộc gọi mới được tắt/mở mic")
+		}
+		if targetUserID == "" {
+			return false, nil, errors.New("thiếu target_user_id")
+		}
+		if targetUserID == actorID {
+			return false, nil, errors.New("creator hãy dùng toggle-mic cho chính mình")
+		}
+		if !session.IsParticipant(targetUserID) {
+			return false, nil, errors.New("người dùng không thuộc cuộc gọi này")
+		}
+	} else {
+		targetUserID = actorID
+	}
+
+	if currentMuted, ok := session.Muted[targetUserID]; ok && currentMuted == muted {
+		return false, nil, nil
+	}
+	session.Muted[targetUserID] = muted
+	session.UpdateActivity()
+	return true, session.JoinedIDs(), nil
+}
+
+// SetParticipantVideo cập nhật trạng thái video dưới hub lock.
+func (h *Hub) SetParticipantVideo(callID, userID string, videoEnabled bool) (changed bool, notifyIDs []string, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	session, ok := h.groupCalls[callID]
+	if !ok {
+		return false, nil, errors.New("cuộc gọi không tồn tại")
+	}
+	if !session.IsParticipant(userID) {
+		return false, nil, errors.New("bạn không tham gia cuộc gọi này")
+	}
+
+	if currentVideo, ok := session.VideoEnabled[userID]; ok && currentVideo == videoEnabled {
+		return false, nil, nil
+	}
+	session.VideoEnabled[userID] = videoEnabled
+	session.UpdateActivity()
+	return true, session.JoinedIDs(), nil
+}
+
+func (h *Hub) GetParticipantsSnapshot(callID, userID string) (dto.GroupCallParticipantsResponse, error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	result := make([]*GroupCallSession, 0)
-	for _, session := range h.groupCalls {
+	session, ok := h.groupCalls[callID]
+	if !ok {
+		return dto.GroupCallParticipantsResponse{}, errors.New("cuộc gọi không tồn tại")
+	}
+	if !session.IsParticipant(userID) {
+		return dto.GroupCallParticipantsResponse{}, errors.New("bạn không tham gia cuộc gọi này")
+	}
+
+	return dto.GroupCallParticipantsResponse{
+		CallID:             callID,
+		Participants:       session.ParticipantIDs(),
+		Joined:             session.JoinedIDs(),
+		ActiveParticipants: session.ActiveParticipantIDs(),
+	}, nil
+}
+
+// ListCallIDsByUser trả về các call mà user đang trong Joined để cleanup khi mất kết nối.
+func (h *Hub) ListCallIDsByUser(userID string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	result := make([]string, 0)
+	for callID, session := range h.groupCalls {
 		if session == nil {
 			continue
 		}
 		if _, ok := session.Joined[userID]; ok {
-			result = append(result, session)
+			result = append(result, callID)
 		}
 	}
+	sort.Strings(result)
 	return result
 }
 
@@ -482,18 +729,17 @@ func (h *Hub) CleanupStaleCalls() {
 		if h.groupChatHub != nil {
 			h.groupChatHub.Broadcast(session.ChatID, event)
 		}
-	}
-}
 
-func (h *Hub) GetGroupCall(callID string) (*GroupCallSession, error) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+		// Persist a system message into the group chat so members see the end notification.
+		if h.messageService != nil {
+			_, err := h.messageService.CreateSystemMessage(context.Background(), session.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc do hết thời gian chờ (call %s)", session.CallID))
+			if err != nil {
+				log.Printf("group call: create system message: %v", err)
+			}
+		}
 
-	session, ok := h.groupCalls[callID]
-	if !ok {
-		return nil, errors.New("cuộc gọi không tồn tại")
+		h.persistCallEnd(session)
 	}
-	return session, nil
 }
 
 func (h *Hub) SendToUser(userID string, msg any) {
