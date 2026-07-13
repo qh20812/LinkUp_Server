@@ -33,6 +33,8 @@ type Client struct {
 	typingChats    map[string]bool
 	mode           string
 	groupChatHub   *Hub
+	activeCallID   string
+	callCreator    bool
 }
 
 func NewClientWithMode(
@@ -73,6 +75,8 @@ func NewClient(
 
 func (c *Client) ReadPump() {
 	defer func() {
+		// Khi socket rơi đột ngột, dọn toàn bộ session mà user đang tham gia để tránh treo call.
+		c.cleanupDisconnectedCallSessions()
 		c.hub.UnregisterClient(c)
 		c.conn.Close()
 	}()
@@ -101,7 +105,7 @@ func (c *Client) ReadPump() {
 
 		if c.mode == "call" {
 			switch event.Type {
-			case "group:call:create", "group:call:request-join", "group:call:approve-join", "group:call:reject-join", "group:call:signal", "group:call:end":
+			case "group:call:create", "group:call:request-join", "group:call:approve-join", "group:call:reject-join", "group:call:signal", "group:call:end", "group:call:toggle-mic", "group:call:toggle-mute", "group:call:toggle-video", "group:call:list-participants", "group:call:get-participants":
 			default:
 				c.sendError("event này chỉ dùng trên endpoint call riêng")
 				continue
@@ -408,17 +412,34 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, payload.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
 			memberIDs, err := c.messageService.ListGroupMemberIDs(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			session, err := c.hub.CreateGroupCall(payload.ChatID, c.userID, "video", payload.ParticipantIDs, memberIDs)
+			// Chỉ hỗ trợ video: nếu payload không truyền thì mặc định video để giữ tương thích.
+			callType := strings.TrimSpace(payload.CallType)
+			if callType == "" {
+				callType = "video"
+			}
+			if !strings.EqualFold(callType, "video") {
+				c.sendError("group call hiện chỉ hỗ trợ video")
+				continue
+			}
+
+			session, err := c.hub.CreateGroupCall(payload.ChatID, c.userID, callType, payload.ParticipantIDs, memberIDs)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
+
+			c.markCallActive(session.CallID, true)
 
 			createdPayload := map[string]any{
 				"call_id":      session.CallID,
@@ -429,42 +450,36 @@ func (c *Client) ReadPump() {
 			}
 
 			c.sendEvent("group:call:created", createdPayload)
-
-			// Phát thông báo vào group chat như tin nhắn mới
-			if c.groupChatHub != nil {
-				c.groupChatHub.Broadcast(payload.ChatID, dto.WsEvent{
-					Type: "group:call:incoming",
-					Payload: mustMarshal(map[string]any{
-						"call_id":      session.CallID,
-						"chat_id":      session.ChatID,
-						"caller_id":    session.CallerID,
-						"participants": session.ParticipantIDs(),
-						"is_video":     true,
-					}),
-				})
-			}
-
-			// Gửi tới các người được mời
+			c.groupChatHub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:call:incoming",
+				Payload: mustMarshal(createdPayload),
+			})
 			for participantID := range session.Participants {
 				if participantID == c.userID {
 					continue
 				}
 				c.hub.SendToUser(participantID, dto.WsEvent{
-					Type: "group:call:incoming",
-					Payload: mustMarshal(map[string]any{
-						"call_id":      session.CallID,
-						"chat_id":      session.ChatID,
-						"caller_id":    session.CallerID,
-						"participants": session.ParticipantIDs(),
-						"is_video":     true,
-					}),
+					Type:    "group:call:incoming",
+					Payload: mustMarshal(createdPayload),
 				})
 			}
+			c.sendGroupChatSystemMessage(payload.ChatID, "Cuộc gọi đã được bắt đầu")
 
 		case "group:call:request-join":
 			var payload dto.GroupCallJoinRequestPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				c.sendError("dữ liệu xin join không hợp lệ")
+				continue
+			}
+
+			sessions, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, sessions.ChatID); err != nil {
+				c.sendError(err.Error())
 				continue
 			}
 
@@ -476,34 +491,33 @@ func (c *Client) ReadPump() {
 
 			// Kiểm tra nếu user đã được join (nếu họ là invited thì hub đã thêm vào Joined)
 			if _, joined := session.Joined[c.userID]; joined {
-				// thông báo cho tất cả participants rằng user đã join
-				c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+				c.markCallActive(payload.CallID, false)
+				c.sendEvent("group:call:joined_ack", map[string]any{
+					"call_id": payload.CallID,
+					"chat_id": session.ChatID,
+				})
+				c.hub.SendToUsers(session.JoinedIDs(), dto.WsEvent{
 					Type: "group:call:joined",
 					Payload: mustMarshal(map[string]any{
-						"call_id": session.CallID,
+						"call_id": payload.CallID,
 						"chat_id": session.ChatID,
 						"user_id": c.userID,
 					}),
 				})
-				// ack cho user
-				c.sendEvent("group:call:joined_ack", map[string]any{
-					"call_id": session.CallID,
-					"chat_id": session.ChatID,
-				})
 			} else {
-				// là request -> notify creator
 				c.hub.SendToUser(session.CallerID, dto.WsEvent{
 					Type: "group:call:join-request",
 					Payload: mustMarshal(map[string]any{
-						"call_id": session.CallID,
+						"call_id": payload.CallID,
 						"chat_id": session.ChatID,
 						"user_id": c.userID,
 					}),
 				})
 				c.sendEvent("group:call:join-request-sent", map[string]any{
-					"call_id": session.CallID,
+					"call_id": payload.CallID,
 				})
 			}
+			session.UpdateActivity()
 
 		case "group:call:approve-join":
 			var payload dto.GroupCallApprovePayload
@@ -512,11 +526,24 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			session, err := c.hub.ApproveJoinCall(c.userID, payload.UserID, payload.CallID)
+			session, err := c.hub.GetGroupCall(payload.CallID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			session, err = c.hub.ApproveJoinCall(c.userID, payload.UserID, payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			session.UpdateActivity()
 
 			c.hub.SendToUser(payload.UserID, dto.WsEvent{
 				Type: "group:call:joined",
@@ -543,7 +570,18 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			_, err := c.hub.RejectJoinCall(c.userID, payload.UserID, payload.CallID)
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			_, err = c.hub.RejectJoinCall(c.userID, payload.UserID, payload.CallID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
@@ -570,7 +608,22 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			for participantID := range session.Participants {
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			if err := c.hub.MarkParticipantActive(payload.CallID, c.userID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			session.UpdateActivity()
+
+			for _, participantID := range session.JoinedIDs() {
 				if participantID == c.userID {
 					continue
 				}
@@ -591,6 +644,21 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
 			ended, session, err := c.hub.EndCallByUser(c.userID, payload.CallID)
 			if err != nil {
 				c.sendError(err.Error())
@@ -598,24 +666,194 @@ func (c *Client) ReadPump() {
 			}
 
 			if ended {
-				// creator đã kết thúc -> notify tất cả participants cuộc gọi kết thúc
-				c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+				event := dto.WsEvent{
 					Type: "group:call:ended",
 					Payload: mustMarshal(map[string]any{
 						"call_id": payload.CallID,
 						"by":      c.userID,
 					}),
-				})
+				}
+				c.hub.SendToUsers(session.JoinedIDs(), event)
+				if c.groupChatHub != nil {
+					c.groupChatHub.Broadcast(session.ChatID, event)
+				}
+				c.sendGroupChatSystemMessage(session.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc bởi %s", c.userID))
 			} else {
-				// một user rời cuộc gọi -> notify remaining participants
-				c.hub.SendToUsers(session.ParticipantIDs(), dto.WsEvent{
+				event := dto.WsEvent{
 					Type: "group:call:left",
 					Payload: mustMarshal(map[string]any{
 						"call_id": payload.CallID,
 						"user_id": c.userID,
 					}),
-				})
+				}
+				c.hub.SendToUsers(session.JoinedIDs(), event)
 			}
+			c.clearActiveCall()
+
+		case "group:call:toggle-mute":
+			var payload dto.GroupCallToggleMutePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tắt/mở mic không hợp lệ")
+				continue
+			}
+
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			// Chỉ creator mới được quyền điều khiển mute của cuộc gọi để tránh người khác can thiệp trái phép.
+			if session.CallerID != c.userID {
+				c.sendError("chỉ người tạo cuộc gọi mới được tắt/mở mic")
+				continue
+			}
+
+			if payload.TargetUserID == "" {
+				c.sendError("thiếu target_user_id")
+				continue
+			}
+			if payload.TargetUserID == c.userID {
+				c.sendError("creator hãy dùng toggle-mic cho chính mình")
+				continue
+			}
+			if !session.IsParticipant(payload.TargetUserID) {
+				c.sendError("người dùng không thuộc cuộc gọi này")
+				continue
+			}
+
+			// Không broadcast nếu trạng thái mic không thay đổi, tránh spam event vô ích.
+			if currentMuted, ok := session.Muted[payload.TargetUserID]; ok && currentMuted == payload.Muted {
+				continue
+			}
+
+			session.Muted[payload.TargetUserID] = payload.Muted
+			session.UpdateActivity()
+
+			c.hub.SendToUsers(session.JoinedIDs(), dto.WsEvent{
+				Type: "group:call:mic",
+				Payload: mustMarshal(map[string]any{
+					"call_id":    payload.CallID,
+					"user_id":    payload.TargetUserID,
+					"muted":      payload.Muted,
+					"changed_by": c.userID,
+				}),
+			})
+
+		case "group:call:toggle-mic":
+			var payload dto.GroupCallToggleMicPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu toggle mic không hợp lệ")
+				continue
+			}
+
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			// toggle-mic chỉ áp dụng cho chính người gửi.
+			if currentMuted, ok := session.Muted[c.userID]; ok && currentMuted == payload.Muted {
+				continue
+			}
+
+			session.Muted[c.userID] = payload.Muted
+			session.UpdateActivity()
+
+			c.hub.SendToUsers(session.JoinedIDs(), dto.WsEvent{
+				Type: "group:call:mic",
+				Payload: mustMarshal(map[string]any{
+					"call_id":    payload.CallID,
+					"user_id":    c.userID,
+					"muted":      payload.Muted,
+					"changed_by": c.userID,
+				}),
+			})
+
+		case "group:call:toggle-video":
+			var payload dto.GroupCallToggleVideoPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu kết thúc cuộc gọi không hợp lệ")
+				continue
+			}
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			// Không broadcast nếu trạng thái video không thay đổi, tránh làm nhiễu các participant.
+			if currentVideo, ok := session.VideoEnabled[c.userID]; ok && currentVideo == payload.VideoEnabled {
+				continue
+			}
+
+			session.VideoEnabled[c.userID] = payload.VideoEnabled
+			session.UpdateActivity()
+
+			c.hub.SendToUsers(session.JoinedIDs(), dto.WsEvent{
+				Type: "group:call:video",
+				Payload: mustMarshal(map[string]any{
+					"call_id":       payload.CallID,
+					"user_id":       c.userID,
+					"video_enabled": payload.VideoEnabled,
+				}),
+			})
+
+		case "group:call:list-participants", "group:call:get-participants":
+			var payload dto.GroupCallParticipantsPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu lấy danh sách participant không hợp lệ")
+				continue
+			}
+			session, err := c.hub.GetGroupCall(payload.CallID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			if err := c.messageService.JoinRoom(c.ctx, c.userID, session.ChatID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if !session.IsParticipant(c.userID) {
+				c.sendError("bạn không tham gia cuộc gọi này")
+				continue
+			}
+
+			c.sendEvent("group:call:participants", dto.GroupCallParticipantsResponse{
+				CallID:             payload.CallID,
+				Participants:       session.ParticipantIDs(),
+				Joined:             session.JoinedIDs(),
+				ActiveParticipants: session.ActiveParticipantIDs(),
+			})
 
 		default:
 			c.sendError("loại sự kiện không xác định")
@@ -673,4 +911,67 @@ func (c *Client) sendError(text string) {
 func mustMarshal(v any) []byte {
 	out, _ := json.Marshal(v)
 	return out
+}
+
+func (c *Client) cleanupCallSession() {
+	// Backward-compatible shim: cleanup hiện được xử lý theo toàn bộ session user đang tham gia.
+	c.cleanupDisconnectedCallSessions()
+}
+
+func (c *Client) markCallActive(callID string, creator bool) {
+	c.activeCallID = callID
+	c.callCreator = creator
+}
+
+func (c *Client) clearActiveCall() {
+	c.activeCallID = ""
+	c.callCreator = false
+}
+
+func (c *Client) cleanupDisconnectedCallSessions() {
+	if c.mode != "call" {
+		return
+	}
+
+	sessions := c.hub.ListCallsByUser(c.userID)
+	for _, session := range sessions {
+		ended, current, err := c.hub.EndCallByUser(c.userID, session.CallID)
+		if err != nil || current == nil {
+			continue
+		}
+
+		if ended {
+			event := dto.WsEvent{
+				Type: "group:call:ended",
+				Payload: mustMarshal(map[string]any{
+					"call_id": session.CallID,
+					"by":      c.userID,
+				}),
+			}
+			c.hub.SendToUsers(current.JoinedIDs(), event)
+			if c.groupChatHub != nil {
+				c.groupChatHub.Broadcast(current.ChatID, event)
+			}
+			c.sendGroupChatSystemMessage(current.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc bởi %s", c.userID))
+			continue
+		}
+
+		event := dto.WsEvent{
+			Type: "group:call:left",
+			Payload: mustMarshal(map[string]any{
+				"call_id": session.CallID,
+				"user_id": c.userID,
+			}),
+		}
+		c.hub.SendToUsers(current.JoinedIDs(), event)
+	}
+
+	c.clearActiveCall()
+}
+
+func (c *Client) sendGroupChatSystemMessage(chatID, content string) {
+	if c.messageService == nil {
+		return
+	}
+	_, _ = c.messageService.CreateSystemMessage(c.ctx, chatID, content)
 }

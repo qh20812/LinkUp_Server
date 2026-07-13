@@ -80,6 +80,7 @@ type ToggleVideoRequest struct {
 // ==== GROUP CALL DTO ====
 type GroupCallInitiatePayload struct {
 	ChatID         string   `json:"chat_id"`
+	CallType       string   `json:"call_type,omitempty"`
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
 }
 
@@ -100,6 +101,7 @@ type GroupCallSignalPayload struct {
 type GroupCallEndPayload struct {
 	CallID string `json:"call_id"`
 }
+
 // ─── Call History ────────────────────────────────────────────────
 
 // CallHistoryQuery binds to GET query params for call history list.
@@ -121,16 +123,16 @@ type UserBrief struct {
 
 // CallHistoryItem is a single entry in the call history list.
 type CallHistoryItem struct {
-	ID          string    `json:"id"`
-	OtherUser   UserBrief `json:"other_user"`
-	CallType    string    `json:"call_type"`
-	Direction   string    `json:"direction"` // "outgoing" | "incoming"
-	Status      string    `json:"status"`
-	IsMissed    bool      `json:"is_missed"`
-	Duration    int       `json:"duration"`
-	StartedAt   *int64    `json:"started_at,omitempty"`
-	EndedAt     *int64    `json:"ended_at,omitempty"`
-	CreatedAt   int64     `json:"created_at"`
+	ID        string    `json:"id"`
+	OtherUser UserBrief `json:"other_user"`
+	CallType  string    `json:"call_type"`
+	Direction string    `json:"direction"` // "outgoing" | "incoming"
+	Status    string    `json:"status"`
+	IsMissed  bool      `json:"is_missed"`
+	Duration  int       `json:"duration"`
+	StartedAt *int64    `json:"started_at,omitempty"`
+	EndedAt   *int64    `json:"ended_at,omitempty"`
+	CreatedAt int64     `json:"created_at"`
 }
 
 // CallMissedPayload is the real-time WS event sent when a call is missed.
@@ -138,4 +140,33 @@ type CallMissedPayload struct {
 	CallID    string `json:"call_id"`
 	CallerID  string `json:"caller_id"`
 	Timestamp int64  `json:"timestamp"`
+}
+
+// Nâng cấp groupcall
+type GroupCallToggleMutePayload struct {
+	CallID       string `json:"call_id"`
+	TargetUserID string `json:"target_user_id"`
+	Muted        bool   `json:"muted"`
+}
+
+// GroupCallToggleMicPayload lets a call participant change their own microphone state.
+type GroupCallToggleMicPayload struct {
+	CallID string `json:"call_id"`
+	Muted  bool   `json:"muted"`
+}
+
+type GroupCallToggleVideoPayload struct {
+	CallID       string `json:"call_id"`
+	VideoEnabled bool   `json:"video_enabled"`
+}
+
+type GroupCallParticipantsPayload struct {
+	CallID string `json:"call_id"`
+}
+
+type GroupCallParticipantsResponse struct {
+	CallID             string   `json:"call_id"`
+	Participants       []string `json:"participants"`
+	Joined             []string `json:"joined"`
+	ActiveParticipants []string `json:"active_participants"`
 }

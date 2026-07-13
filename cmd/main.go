@@ -229,7 +229,7 @@ func main() {
 		// ===== GROUP CALL =====
 		groupCallHub := groupws.NewHub()
 		go groupCallHub.Run()
-
+		groupCallHub.SetGroupChatHub(groupHub)
 		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env)
 	}
 
