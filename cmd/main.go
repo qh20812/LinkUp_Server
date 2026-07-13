@@ -230,6 +230,9 @@ func main() {
 		groupCallHub := groupws.NewHub()
 		go groupCallHub.Run()
 		groupCallHub.SetGroupChatHub(groupHub)
+		groupCallHub.SetCallStore(callRepository)
+		// allow hub to persist chat system messages when calls expire
+		groupCallHub.SetMessageService(groupMessageService)
 		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env)
 	}
 
