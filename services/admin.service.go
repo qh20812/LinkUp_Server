@@ -68,13 +68,11 @@ func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
 	s.cloudinary = cld
 }
 
-func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
-	// Kiểm tra quyền hạn SuperAdmin trước khi tính toán dữ liệu
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return dto.AdminAnalyticsResponse{}, err
 	}
 
-	// Xử lý bộ lọc thời gian mặc định (7 ngày gần nhất nếu bỏ trống)
 	now := time.Now().UTC()
 	if input.EndDate == "" {
 		input.EndDate = now.Format("2006-01-02")
@@ -101,6 +99,21 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số báo cáo thất bại: %w", err)
 	}
 
+	totalComments, _ := s.adminRepo.GetTotalComments()
+	totalMedia, _ := s.adminRepo.GetTotalMedia()
+	totalGroups, _ := s.adminRepo.GetTotalGroups()
+	totalCommunities, _ := s.adminRepo.GetTotalCommunities()
+	activeBanCount, _ := s.adminRepo.GetActiveBanCount()
+	pendingReports, _ := s.adminRepo.GetPendingReportCount()
+	flaggedMedia, _ := s.adminRepo.GetFlaggedMediaCount()
+	activeUsersToday, _ := s.adminRepo.GetActiveUsersToday()
+	totalLikes, _ := s.adminRepo.GetTotalLikes()
+	totalShares, _ := s.adminRepo.GetTotalShares()
+	topUsers, _ := s.adminRepo.GetTopActiveUsers(5)
+	topPosts, _ := s.adminRepo.GetTopEngagedPosts(5)
+	userDist, _ := s.adminRepo.GetUserStatusDistribution()
+	reportDist, _ := s.adminRepo.GetReportStatusDistribution()
+
 	var chartData []dto.ChartDataPoint
 	tableName := ""
 
@@ -112,36 +125,61 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 	case "reports":
 		tableName = "reports"
 	case "all":
-		tableName = "posts"
+		tableName = "comments"
 	default:
-		tableName = "posts"
+		tableName = "comments"
 	}
 
 	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
-		if err != nil {
-			chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
-		}
+	if err != nil {
+		chartData = []dto.ChartDataPoint{}
+	}
 
-		// Tính phần trăm thay đổi so với 1 tháng trước
-		oneMonthAgo := now.AddDate(0, -1, 0)
-		prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
-		prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
-		prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
+	oneMonthAgo := now.AddDate(0, -1, 0)
+	prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
+	prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
+	prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
+	prevComments, _ := s.adminRepo.GetCountBeforeDate("comments", oneMonthAgo)
+	prevMedia, _ := s.adminRepo.GetCountBeforeDate("media", oneMonthAgo)
+	prevGroups, _ := s.adminRepo.GetCountBeforeDate("chats", oneMonthAgo)
+	prevCommunities, _ := s.adminRepo.GetCountBeforeDate("communities", oneMonthAgo)
 
-		usersChangePct := calcPercentChange(totalUsers, prevUsers)
-		postsChangePct := calcPercentChange(totalPosts, prevPosts)
-		reportsChangePct := calcPercentChange(totalReports, prevReports)
+	usersChangePct := calcPercentChange(totalUsers, prevUsers)
+	postsChangePct := calcPercentChange(totalPosts, prevPosts)
+	reportsChangePct := calcPercentChange(totalReports, prevReports)
+	commentsChangePct := calcPercentChange(totalComments, prevComments)
+	mediaChangePct := calcPercentChange(totalMedia, prevMedia)
+	groupsChangePct := calcPercentChange(totalGroups, prevGroups)
+	communitiesChangePct := calcPercentChange(totalCommunities, prevCommunities)
 
-		return dto.AdminAnalyticsResponse{
-			TotalUsers:           totalUsers,
-			TotalPosts:           totalPosts,
-			TotalReports:         totalReports,
-			UsersChangePercent:   usersChangePct,
-			PostsChangePercent:   postsChangePct,
-			ReportsChangePercent: reportsChangePct,
-			ChartData:            chartData,
-			GeneratedAt:          time.Now().UTC(),
-		}, nil
+	return dto.AdminAnalyticsResponse{
+		TotalUsers:              totalUsers,
+		TotalPosts:              totalPosts,
+		TotalReports:            totalReports,
+		TotalComments:           totalComments,
+		TotalMedia:              totalMedia,
+		TotalGroups:             totalGroups,
+		TotalCommunities:        totalCommunities,
+		TotalActiveBans:         activeBanCount,
+		PendingReports:          pendingReports,
+		FlaggedMediaCount:       flaggedMedia,
+		ActiveUsersToday:        activeUsersToday,
+		TotalLikes:              totalLikes,
+		TotalShares:             totalShares,
+		UsersChangePercent:      usersChangePct,
+		PostsChangePercent:      postsChangePct,
+		ReportsChangePercent:    reportsChangePct,
+		CommentsChangePercent:   commentsChangePct,
+		MediaChangePercent:      mediaChangePct,
+		GroupsChangePercent:     groupsChangePct,
+		CommunitiesChangePercent: communitiesChangePct,
+		ChartData:               chartData,
+		TopUsers:                topUsers,
+		TopPosts:                topPosts,
+		UserStatusDistribution:  userDist,
+		ReportStatusDistribution: reportDist,
+		GeneratedAt:             time.Now().UTC(),
+	}, nil
 }
 
 func (s *AdminService) ListUsers(ctx context.Context, userID string, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
