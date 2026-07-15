@@ -91,7 +91,11 @@ func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaSt
 	var items []models.Media
 	var total int64
 
-	base := r.db.WithContext(ctx).Model(&models.Media{}).Where("status = ?", status)
+	base := r.db.WithContext(ctx).Model(&models.Media{})
+	if status != "" {
+		base = base.Where("status = ?", status)
+	}
+	
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

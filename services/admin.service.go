@@ -711,8 +711,8 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 
 	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
 
-	status := models.MediaStatusFlagged
-	if input.Status != "" {
+	var status models.MediaStatus
+	if input.Status != "" && !strings.EqualFold(input.Status, "all") {
 		status = models.ParseMediaStatus(input.Status)
 	}
 
@@ -1504,6 +1504,11 @@ func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID strin
 	}
 
 	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	statusParam := strings.TrimSpace(input.Status)
+	if strings.EqualFold(statusParam, "all") || statusParam == "" {
+		statusParam = ""
+	}
 
 	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, page, pageSize)
 	if err != nil {
