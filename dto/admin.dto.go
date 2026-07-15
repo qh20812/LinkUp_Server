@@ -304,12 +304,33 @@ type ChartDataPoint struct {
 }
 
 type AdminAnalyticsResponse struct {
-	TotalUsers            int64            `json:"total_users"`
-	TotalPosts            int64            `json:"total_posts"`
-	TotalReports          int64            `json:"total_reports"`
-	UsersChangePercent    float64          `json:"users_change_percent"`
-	PostsChangePercent    float64          `json:"posts_change_percent"`
-	ReportsChangePercent  float64          `json:"reports_change_percent"`
-	ChartData             []ChartDataPoint `json:"chart_data,omitempty"`
-	GeneratedAt           time.Time        `json:"generated_at"`
+	TotalUsers           int64            `json:"total_users"`
+	TotalPosts           int64            `json:"total_posts"`
+	TotalReports         int64            `json:"total_reports"`
+	UsersChangePercent   float64          `json:"users_change_percent"`
+	PostsChangePercent   float64          `json:"posts_change_percent"`
+	ReportsChangePercent float64          `json:"reports_change_percent"`
+	ChartData            []ChartDataPoint `json:"chart_data,omitempty"`
+	GeneratedAt          time.Time        `json:"generated_at"`
+}
+
+type AdminMediaGroupFilterInput struct {
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size" binding:"max=100"`
+	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved"`
+}
+
+type AdminMediaGroupItem struct {
+	UserID      string           `json:"user_id"`
+	Username    string           `json:"username"`
+	DisplayName string           `json:"display_name"`
+	AvatarURI   string           `json:"avatar_uri"`
+	Media       []AdminMediaItem `json:"media"`
+}
+
+type AdminMediaGroupedResponse struct {
+	Groups   []AdminMediaGroupItem `json:"groups"`
+	Total    int64                 `json:"total"`
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"page_size"`
 }

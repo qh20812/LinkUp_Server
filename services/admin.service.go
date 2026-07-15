@@ -118,30 +118,30 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 	}
 
 	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
-		if err != nil {
-			chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
-		}
+	if err != nil {
+		chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
+	}
 
-		// Tính phần trăm thay đổi so với 1 tháng trước
-		oneMonthAgo := now.AddDate(0, -1, 0)
-		prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
-		prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
-		prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
+	// Tính phần trăm thay đổi so với 1 tháng trước
+	oneMonthAgo := now.AddDate(0, -1, 0)
+	prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
+	prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
+	prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
 
-		usersChangePct := calcPercentChange(totalUsers, prevUsers)
-		postsChangePct := calcPercentChange(totalPosts, prevPosts)
-		reportsChangePct := calcPercentChange(totalReports, prevReports)
+	usersChangePct := calcPercentChange(totalUsers, prevUsers)
+	postsChangePct := calcPercentChange(totalPosts, prevPosts)
+	reportsChangePct := calcPercentChange(totalReports, prevReports)
 
-		return dto.AdminAnalyticsResponse{
-			TotalUsers:           totalUsers,
-			TotalPosts:           totalPosts,
-			TotalReports:         totalReports,
-			UsersChangePercent:   usersChangePct,
-			PostsChangePercent:   postsChangePct,
-			ReportsChangePercent: reportsChangePct,
-			ChartData:            chartData,
-			GeneratedAt:          time.Now().UTC(),
-		}, nil
+	return dto.AdminAnalyticsResponse{
+		TotalUsers:           totalUsers,
+		TotalPosts:           totalPosts,
+		TotalReports:         totalReports,
+		UsersChangePercent:   usersChangePct,
+		PostsChangePercent:   postsChangePct,
+		ReportsChangePercent: reportsChangePct,
+		ChartData:            chartData,
+		GeneratedAt:          time.Now().UTC(),
+	}, nil
 }
 
 func (s *AdminService) ListUsers(ctx context.Context, userID string, input dto.AdminUserFilterInput) (dto.AdminUserListResponse, error) {
@@ -1496,4 +1496,48 @@ func (s *AdminService) DeleteCommunity(ctx context.Context, superAdminID, commun
 	}
 
 	return s.communityRepo.RemoveMember(ctx, communityID, community.CreatorID)
+}
+
+func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID string, input dto.AdminMediaGroupFilterInput) (dto.AdminMediaGroupedResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminMediaGroupedResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, page, pageSize)
+	if err != nil {
+		return dto.AdminMediaGroupedResponse{}, fmt.Errorf("lấy media theo user thất bại: %w", err)
+	}
+
+	resultGroups := make([]dto.AdminMediaGroupItem, 0, len(groups))
+	for _, g := range groups {
+		items := make([]dto.AdminMediaItem, 0, len(g.Media))
+		for _, m := range g.Media {
+			items = append(items, dto.AdminMediaItem{
+				ID:        m.ID,
+				UserID:    m.UserID,
+				FileURI:   m.FileURI,
+				FileType:  m.FileType,
+				FileSize:  m.FileSize,
+				Status:    string(m.Status),
+				CreatedAt: m.CreatedAt.Format(time.RFC3339),
+			})
+		}
+
+		resultGroups = append(resultGroups, dto.AdminMediaGroupItem{
+			UserID:      g.UserID,
+			Username:    g.Username,
+			DisplayName: g.DisplayName,
+			AvatarURI:   g.AvatarURI,
+			Media:       items,
+		})
+	}
+
+	return dto.AdminMediaGroupedResponse{
+		Groups:   resultGroups,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
 }
