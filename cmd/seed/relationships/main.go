@@ -19,11 +19,11 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	superAdminID := state.UserIDs[0]
 
-	communityAdminRoleID := state.RoleIDs[8]
-	communityMemberRoleID := state.RoleIDs[9]
-	groupAdminRoleID := state.RoleIDs[5]
-	groupModRoleID := state.RoleIDs[6]
-	groupMemberRoleID := state.RoleIDs[7]
+	communityAdminRoleID := state.RoleIDs[9]
+	communityMemberRoleID := state.RoleIDs[10]
+	groupAdminRoleID := state.RoleIDs[6]
+	groupModRoleID := state.RoleIDs[7]
+	groupMemberRoleID := state.RoleIDs[8]
 
 	userRoleAssigned := map[string]bool{}
 

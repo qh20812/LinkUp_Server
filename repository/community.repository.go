@@ -794,15 +794,16 @@ func (r *CommunityRepository) UpdateStatus(ctx context.Context, communityID stri
 
 func (r *CommunityRepository) FindCommunityMembersWithProfiles(ctx context.Context, communityID string) ([]dto.AdminCommunityMember, error) {
 	type memberRow struct {
-		UserID      string `gorm:"column:user_id"`
-		DisplayName string `gorm:"column:display_name"`
-		AvatarURI   string `gorm:"column:avatar_uri"`
-		Role        string `gorm:"column:role_name"`
+		UserID      string    `gorm:"column:user_id"`
+		DisplayName string    `gorm:"column:display_name"`
+		AvatarURI   string    `gorm:"column:avatar_uri"`
+		Role        string    `gorm:"column:role_name"`
+		JoinedAt    time.Time `gorm:"column:joined_at"`
 	}
 	var rows []memberRow
 	err := r.db.WithContext(ctx).
 		Table("group_members").
-		Select(`DISTINCT group_members.user_id,
+		Select(`DISTINCT group_members.user_id, group_members.joined_at,
 			COALESCE(profiles.display_name, '') AS display_name,
 			COALESCE(profiles.avatar_uri, '') AS avatar_uri,
 			COALESCE((SELECT roles.name FROM user_roles
