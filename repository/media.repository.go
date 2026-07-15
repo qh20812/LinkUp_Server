@@ -12,6 +12,21 @@ type MediaRepository struct {
 	db *gorm.DB
 }
 
+type userInfo struct {
+	ID          string
+	Username    string
+	DisplayName string
+	AvatarURI   string
+}
+
+type userMediaGroup struct {
+	UserID      string
+	Username    string
+	DisplayName string
+	AvatarURI   string
+	Media       []models.Media
+}
+
 func NewMediaRepository(db *gorm.DB) *MediaRepository {
 	return &MediaRepository{db: db}
 }
@@ -123,4 +138,90 @@ func (r *MediaRepository) DeleteWithStorageAdjustment(ctx context.Context, userI
 			Update("storage_used_bytes", gorm.Expr("GREATEST(storage_used_bytes - ?, 0)", int64(media.FileSize))).
 			Error
 	})
+}
+
+func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status string, page, pageSize int) ([]userMediaGroup, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	var total int64
+	base := r.db.WithContext(ctx).Model(&models.Media{})
+	if status != "" {
+		base = base.Where("status = ?", status)
+	}
+
+	if err := base.Distinct("user_id").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var userIDs []string
+	userQuery := r.db.WithContext(ctx).Model(&models.Media{}).
+		Select("DISTINCT(user_id)").
+		Order("user_id ASC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize)
+
+	if status != "" {
+		userQuery = userQuery.Where("status = ?", status)
+	}
+
+	if err := userQuery.Pluck("user_id", &userIDs).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if len(userIDs) == 0 {
+		return []userMediaGroup{}, total, nil
+	}
+
+	type userInfo struct {
+		ID          string
+		Username    string
+		DisplayName string
+		AvatarURI   string
+	}
+
+	var users []userInfo
+	if err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Select("users.id, users.username, COALESCE(profiles.display_name, '') AS display_name, COALESCE(profiles.avatar_uri, '') AS avatar_uri").
+		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Where("users.id IN ?", userIDs).
+		Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var medias []models.Media
+	mediaQuery := r.db.WithContext(ctx).Where("user_id IN ?", userIDs)
+	if status != "" {
+		mediaQuery = mediaQuery.Where("status = ?", status)
+	}
+	if err := mediaQuery.Order("user_id ASC, created_at DESC").Find(&medias).Error; err != nil {
+		return nil, 0, err
+	}
+
+	groups := make([]userMediaGroup, 0, len(users))
+	userMap := make(map[string]userMediaGroup, len(users))
+	for _, u := range users {
+		userMap[u.ID] = userMediaGroup{
+			UserID:      u.ID,
+			Username:    u.Username,
+			DisplayName: u.DisplayName,
+			AvatarURI:   u.AvatarURI,
+			Media:       []models.Media{},
+		}
+	}
+	for _, m := range medias {
+		grp := userMap[m.UserID]
+		grp.Media = append(grp.Media, m)
+		userMap[m.UserID] = grp
+	}
+	for _, u := range users {
+		groups = append(groups, userMap[u.ID])
+	}
+
+	return groups, total, nil
 }

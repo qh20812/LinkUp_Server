@@ -653,3 +653,20 @@ func (ctrl *AdminController) CleanupRejectedMedia(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Dọn dẹp media thành công", "cleaned": cleaned})
 }
+
+func (ctrl *AdminController) ListMediaGroupedByUser(c *gin.Context) {
+	adminID := c.GetString("userID")
+
+	var input dto.AdminMediaGroupFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số không hợp lệ"})
+		return
+	}
+
+	result, err := ctrl.adminService.ListMediaGroupedByUser(c.Request.Context(), adminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

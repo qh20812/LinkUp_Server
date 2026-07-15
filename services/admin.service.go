@@ -132,9 +132,10 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 
 	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
 	if err != nil {
-		chartData = []dto.ChartDataPoint{}
+		chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
 	}
 
+	// Tính phần trăm thay đổi so với 1 tháng trước
 	oneMonthAgo := now.AddDate(0, -1, 0)
 	prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
 	prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
@@ -1534,4 +1535,48 @@ func (s *AdminService) DeleteCommunity(ctx context.Context, superAdminID, commun
 	}
 
 	return s.communityRepo.RemoveMember(ctx, communityID, community.CreatorID)
+}
+
+func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID string, input dto.AdminMediaGroupFilterInput) (dto.AdminMediaGroupedResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminMediaGroupedResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+
+	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, page, pageSize)
+	if err != nil {
+		return dto.AdminMediaGroupedResponse{}, fmt.Errorf("lấy media theo user thất bại: %w", err)
+	}
+
+	resultGroups := make([]dto.AdminMediaGroupItem, 0, len(groups))
+	for _, g := range groups {
+		items := make([]dto.AdminMediaItem, 0, len(g.Media))
+		for _, m := range g.Media {
+			items = append(items, dto.AdminMediaItem{
+				ID:        m.ID,
+				UserID:    m.UserID,
+				FileURI:   m.FileURI,
+				FileType:  m.FileType,
+				FileSize:  m.FileSize,
+				Status:    string(m.Status),
+				CreatedAt: m.CreatedAt.Format(time.RFC3339),
+			})
+		}
+
+		resultGroups = append(resultGroups, dto.AdminMediaGroupItem{
+			UserID:      g.UserID,
+			Username:    g.Username,
+			DisplayName: g.DisplayName,
+			AvatarURI:   g.AvatarURI,
+			Media:       items,
+		})
+	}
+
+	return dto.AdminMediaGroupedResponse{
+		Groups:   resultGroups,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
 }
