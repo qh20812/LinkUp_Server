@@ -187,7 +187,7 @@ type AdminGroupMember struct {
 type AdminMediaFilterInput struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size" binding:"max=100"`
-	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected"`
+	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
 }
 
 type AdminMediaItem struct {
@@ -358,7 +358,7 @@ type AdminAnalyticsResponse struct {
 type AdminMediaGroupFilterInput struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size" binding:"max=100"`
-	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved"`
+	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
 }
 
 type AdminMediaGroupItem struct {
