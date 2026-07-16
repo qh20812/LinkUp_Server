@@ -224,6 +224,7 @@ type AdminCommunityFilterInput struct {
 type AdminCommunityListItem struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	AvatarURI   string    `json:"avatar_uri"`
 	CreatorID   string    `json:"creator_id"`
 	CreatorName string    `json:"creator_name"`
 	MemberCount int       `json:"member_count"`
@@ -303,13 +304,53 @@ type ChartDataPoint struct {
 	Count int64  `json:"count"` // Trục Y: Lượng tạo mới trong ngày
 }
 
+type TopActiveUser struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+	PostCount   int    `json:"post_count"`
+}
+
+type TopEngagedPost struct {
+	PostID        string `json:"post_id"`
+	Title         string `json:"title"`
+	Username      string `json:"username"`
+	ViewsCount    int    `json:"views_count"`
+	LikesCount    int    `json:"likes_count"`
+	CommentsCount int    `json:"comments_count"`
+}
+
+type StatusCount struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
 type AdminAnalyticsResponse struct {
 	TotalUsers            int64            `json:"total_users"`
 	TotalPosts            int64            `json:"total_posts"`
 	TotalReports          int64            `json:"total_reports"`
+	TotalComments         int64            `json:"total_comments"`
+	TotalMedia            int64            `json:"total_media"`
+	TotalGroups           int64            `json:"total_groups"`
+	TotalCommunities      int64            `json:"total_communities"`
+	TotalActiveBans       int64            `json:"total_active_bans"`
+	PendingReports        int64            `json:"pending_reports"`
+	FlaggedMediaCount     int64            `json:"flagged_media_count"`
+	ActiveUsersToday      int64            `json:"active_users_today"`
+	TotalLikes            int64            `json:"total_likes"`
+	TotalShares           int64            `json:"total_shares"`
 	UsersChangePercent    float64          `json:"users_change_percent"`
 	PostsChangePercent    float64          `json:"posts_change_percent"`
 	ReportsChangePercent  float64          `json:"reports_change_percent"`
+	CommentsChangePercent float64          `json:"comments_change_percent"`
+	MediaChangePercent    float64          `json:"media_change_percent"`
+	GroupsChangePercent   float64          `json:"groups_change_percent"`
+	CommunitiesChangePercent float64       `json:"communities_change_percent"`
 	ChartData             []ChartDataPoint `json:"chart_data,omitempty"`
+	TopUsers              []TopActiveUser  `json:"top_users,omitempty"`
+	TopPosts              []TopEngagedPost `json:"top_posts,omitempty"`
+	UserStatusDistribution []StatusCount   `json:"user_status_distribution,omitempty"`
+	ReportStatusDistribution []StatusCount `json:"report_status_distribution,omitempty"`
 	GeneratedAt           time.Time        `json:"generated_at"`
 }
