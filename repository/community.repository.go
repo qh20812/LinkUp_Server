@@ -724,7 +724,7 @@ func (r *CommunityRepository) TransferCommunityOwnership(ctx context.Context, co
 func (r *CommunityRepository) ListCommunitiesAdmin(ctx context.Context, keyword, status, privacy string, pageSize, offset int) ([]dto.AdminCommunityListItem, error) {
 	query := r.db.WithContext(ctx).
 		Table("communities").
-		Select(`communities.id, communities.name, communities.creator_id, communities.privacy,
+		Select(`communities.id, communities.name, communities.avatar_uri, communities.creator_id, communities.privacy,
 			communities.status, communities.created_at,
 			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count,
 			COALESCE((SELECT display_name FROM profiles WHERE user_id = communities.creator_id), '') AS creator_name`)
@@ -742,6 +742,7 @@ func (r *CommunityRepository) ListCommunitiesAdmin(ctx context.Context, keyword,
 	type communityRow struct {
 		ID          string    `gorm:"column:id"`
 		Name        string    `gorm:"column:name"`
+		AvatarURI   string    `gorm:"column:avatar_uri"`
 		CreatorID   string    `gorm:"column:creator_id"`
 		CreatorName string    `gorm:"column:creator_name"`
 		MemberCount int       `gorm:"column:member_count"`
@@ -759,6 +760,7 @@ func (r *CommunityRepository) ListCommunitiesAdmin(ctx context.Context, keyword,
 		items = append(items, dto.AdminCommunityListItem{
 			ID:          r.ID,
 			Name:        r.Name,
+			AvatarURI:   r.AvatarURI,
 			CreatorID:   r.CreatorID,
 			CreatorName: r.CreatorName,
 			MemberCount: r.MemberCount,

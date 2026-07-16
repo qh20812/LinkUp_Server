@@ -224,6 +224,7 @@ type AdminCommunityFilterInput struct {
 type AdminCommunityListItem struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	AvatarURI   string    `json:"avatar_uri"`
 	CreatorID   string    `json:"creator_id"`
 	CreatorName string    `json:"creator_name"`
 	MemberCount int       `json:"member_count"`
