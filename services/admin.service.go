@@ -755,7 +755,7 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 		status = models.ParseMediaStatus(input.Status)
 	}
 
-	items, total, err := s.mediaRepo.GetByStatus(ctx, status, page, pageSize)
+	items, total, err := s.mediaRepo.GetByStatus(ctx, status, input.Keyword, page, pageSize)
 	if err != nil {
 		return dto.AdminMediaListResponse{}, fmt.Errorf("lấy danh sách media thất bại: %w", err)
 	}
@@ -1554,7 +1554,7 @@ func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID strin
 		statusParam = ""
 	}
 
-	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, page, pageSize)
+	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, input.Keyword, page, pageSize)
 	if err != nil {
 		return dto.AdminMediaGroupedResponse{}, fmt.Errorf("lấy media theo user thất bại: %w", err)
 	}

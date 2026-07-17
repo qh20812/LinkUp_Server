@@ -80,7 +80,7 @@ func (r *MediaRepository) UpdateStatus(ctx context.Context, id string, status mo
 		Error
 }
 
-func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaStatus, page, pageSize int) ([]models.Media, int64, error) {
+func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaStatus, keyword string, page, pageSize int) ([]models.Media, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -93,9 +93,17 @@ func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaSt
 
 	base := r.db.WithContext(ctx).Model(&models.Media{})
 	if status != "" {
-		base = base.Where("status = ?", status)
+		base = base.Where("media.status = ?", status)
 	}
-	
+
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.
+			Joins("JOIN users ON users.id = media.user_id").
+			Joins("LEFT JOIN profiles ON profiles.user_id = media.user_id").
+			Where("users.username LIKE ? OR COALESCE(profiles.display_name, '') LIKE ?", like, like)
+	}
+
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -104,7 +112,7 @@ func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaSt
 	}
 
 	err := base.Session(&gorm.Session{}).
-		Order("created_at DESC").
+		Order("media.created_at DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&items).Error
@@ -144,7 +152,7 @@ func (r *MediaRepository) DeleteWithStorageAdjustment(ctx context.Context, userI
 	})
 }
 
-func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status string, page, pageSize int) ([]userMediaGroup, int64, error) {
+func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status, keyword string, page, pageSize int) ([]userMediaGroup, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -155,22 +163,38 @@ func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status strin
 	var total int64
 	base := r.db.WithContext(ctx).Model(&models.Media{})
 	if status != "" {
-		base = base.Where("status = ?", status)
+		base = base.Where("media.status = ?", status)
 	}
 
-	if err := base.Distinct("user_id").Count(&total).Error; err != nil {
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		base = base.
+			Joins("JOIN users ON users.id = media.user_id").
+			Joins("LEFT JOIN profiles ON profiles.user_id = media.user_id").
+			Where("users.username LIKE ? OR COALESCE(profiles.display_name, '') LIKE ?", like, like)
+	}
+
+	if err := base.Distinct("media.user_id").Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var userIDs []string
 	userQuery := r.db.WithContext(ctx).Model(&models.Media{}).
-		Select("DISTINCT(user_id)").
-		Order("user_id ASC").
+		Select("DISTINCT(media.user_id) AS user_id").
+		Order("media.user_id ASC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize)
 
 	if status != "" {
-		userQuery = userQuery.Where("status = ?", status)
+		userQuery = userQuery.Where("media.status = ?", status)
+	}
+
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		userQuery = userQuery.
+			Joins("JOIN users ON users.id = media.user_id").
+			Joins("LEFT JOIN profiles ON profiles.user_id = media.user_id").
+			Where("users.username LIKE ? OR COALESCE(profiles.display_name, '') LIKE ?", like, like)
 	}
 
 	if err := userQuery.Pluck("user_id", &userIDs).Error; err != nil {

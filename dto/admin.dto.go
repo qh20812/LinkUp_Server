@@ -188,6 +188,7 @@ type AdminMediaFilterInput struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size" binding:"max=100"`
 	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
+	Keyword  string `form:"keyword"`
 }
 
 type AdminMediaItem struct {
@@ -360,6 +361,7 @@ type AdminMediaGroupFilterInput struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size" binding:"max=100"`
 	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
+	Keyword  string `form:"keyword"`
 }
 
 type AdminMediaGroupItem struct {
