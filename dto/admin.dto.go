@@ -52,6 +52,9 @@ type AdminPostFilterInput struct {
 type AdminPostListItem struct {
 	ID            string     `json:"id"`
 	UserID        string     `json:"user_id"`
+	Username      string     `json:"username"`
+	DisplayName   string     `json:"display_name"`
+	AvatarURI     string     `json:"avatar_uri"`
 	Title         string     `json:"title"`
 	Content       string     `json:"content"`
 	Status        string     `json:"status"`
@@ -59,6 +62,7 @@ type AdminPostListItem struct {
 	LikesCount    int        `json:"likes_count"`
 	CommentsCount int        `json:"comments_count"`
 	SharesCount   int        `json:"shares_count"`
+	MediaURIs     []string   `json:"media_uris"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }

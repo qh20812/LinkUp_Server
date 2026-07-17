@@ -10,7 +10,7 @@ type CreatePostInput struct {
 
 // DTO chia sẻ bài viết có kèm text
 type SharePostInput struct {
-	Content string `json:"content" json:"content"`
+	Content string `json:"content"`
 }
 
 // DTO thả cảm xúc

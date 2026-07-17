@@ -122,6 +122,28 @@ func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaSt
 	return items, total, nil
 }
 
+func (r *MediaRepository) GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error) {
+	if len(postIDs) == 0 {
+		return map[string][]models.Media{}, nil
+	}
+
+	var medias []models.Media
+	if err := r.db.WithContext(ctx).
+		Where("post_id IN ?", postIDs).
+		Order("created_at ASC").
+		Find(&medias).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]models.Media, len(postIDs))
+	for _, m := range medias {
+		if m.PostID != nil {
+			result[*m.PostID] = append(result[*m.PostID], m)
+		}
+	}
+	return result, nil
+}
+
 func (r *MediaRepository) GetRejectedOlderThan(ctx context.Context, cutoff time.Time) ([]models.Media, error) {
 	var items []models.Media
 	err := r.db.WithContext(ctx).

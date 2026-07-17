@@ -381,11 +381,44 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 		return dto.AdminPostListResponse{}, err
 	}
 
+	userIDs := make([]string, 0, len(posts))
+	seen := make(map[string]struct{}, len(posts))
+	for _, p := range posts {
+		if _, dup := seen[p.UserID]; !dup {
+			seen[p.UserID] = struct{}{}
+			userIDs = append(userIDs, p.UserID)
+		}
+	}
+
+	type userInfo struct {
+		Username    string
+		DisplayName string
+		AvatarURI   string
+	}
+	userMap := make(map[string]userInfo, len(userIDs))
+	for _, uid := range userIDs {
+		u, err := s.authRepo.FindByID(ctx, uid)
+		if err != nil || u == nil {
+			continue
+		}
+		info := userInfo{Username: u.Username}
+		profile, err := s.profileRepo.FindByUserID(ctx, uid)
+		if err == nil && profile != nil {
+			info.DisplayName = profile.DisplayName
+			info.AvatarURI = profile.AvatarURI
+		}
+		userMap[uid] = info
+	}
+
 	items := make([]dto.AdminPostListItem, 0, len(posts))
 	for _, p := range posts {
+		info := userMap[p.UserID]
 		items = append(items, dto.AdminPostListItem{
 			ID:            p.ID,
 			UserID:        p.UserID,
+			Username:      info.Username,
+			DisplayName:   info.DisplayName,
+			AvatarURI:     info.AvatarURI,
 			Title:         p.Title,
 			Content:       p.Content,
 			Status:        string(p.Status),
@@ -396,6 +429,26 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 			CreatedAt:     p.CreatedAt,
 			UpdatedAt:     p.UpdatedAt,
 		})
+	}
+
+	// Load media URIs for all posts
+	postIDs := make([]string, 0, len(posts))
+	for _, p := range posts {
+		postIDs = append(postIDs, p.ID)
+	}
+	mediaMap, err := s.mediaRepo.GetByPostIDs(ctx, postIDs)
+	if err != nil {
+		log.Printf("[ListPosts] không thể lấy media: %v", err)
+	} else {
+		for i, item := range items {
+			if mediaList, ok := mediaMap[item.ID]; ok && len(mediaList) > 0 {
+				uris := make([]string, 0, len(mediaList))
+				for _, m := range mediaList {
+					uris = append(uris, m.FileURI)
+				}
+				items[i].MediaURIs = uris
+			}
+		}
 	}
 
 	resp := dto.AdminPostListResponse{
