@@ -1310,6 +1310,10 @@ func (s *AdminService) ArchiveCommunity(ctx context.Context, superAdminID, commu
 	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionSuspend, models.ModerationActionSuspend, models.CommunityStatusArchived, "đình chỉ", input.Reason)
 }
 
+func (s *AdminService) UnarchiveCommunity(ctx context.Context, superAdminID, communityID string) error {
+	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionUpdate, models.ModerationActionUpdate, models.CommunityStatusActive, "bỏ đình chỉ", "Bỏ đình chỉ cộng đồng")
+}
+
 func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminWarnInput) error {
 	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
 		return err
