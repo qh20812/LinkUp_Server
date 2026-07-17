@@ -9,8 +9,8 @@ type PostStatus string
 
 const (
 	// Chuyển "active" thành "public" để đồng bộ hoàn toàn với dữ liệu lưu dưới DB.
-	PostStatusActive  PostStatus = "public"
-	PostStatusPublic  PostStatus = "public"
+	PostStatusActive  PostStatus = "active"
+	PostStatusPublic  PostStatus = "active"
 	PostStatusPrivate PostStatus = "private"
 	PostStatusHidden  PostStatus = "hidden"
 	PostStatusFriend  PostStatus = "friend"
@@ -51,8 +51,8 @@ func (s PostStatus) String() string {
 
 func ParsePostStatus(value string) PostStatus {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(PostStatusPublic):
-		return PostStatusPublic
+	case "active", "public":
+		return PostStatusActive
 	case string(PostStatusPrivate):
 		return PostStatusPrivate
 	case string(PostStatusHidden):
@@ -62,6 +62,6 @@ func ParsePostStatus(value string) PostStatus {
 	case string(PostStatusDeleted):
 		return PostStatusDeleted
 	default:
-		return PostStatusPublic
+		return PostStatusActive 
 	}
 }
