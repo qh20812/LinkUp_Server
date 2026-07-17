@@ -4,6 +4,7 @@ import (
 	"linkup/dto"
 	"linkup/models"
 	"linkup/services"
+	"linkup/validations"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +38,20 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	avatarURI := ""
 	file, err := c.FormFile("avatar")
 	if err == nil && file != nil {
+		src, err := file.Open()
+		if err == nil {
+			if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
+				MinWidth: 200, MinHeight: 200,
+				MaxWidth: 2048, MaxHeight: 2048,
+				AspectRatio: "1:1",
+			}); err != nil {
+				src.Close()
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			src.Close()
+		}
+
 		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Tải ảnh đại diện thất bại"})

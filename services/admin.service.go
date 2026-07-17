@@ -1209,19 +1209,20 @@ func (s *AdminService) GetCommunityDetail(ctx context.Context, userID, community
 	}
 
 	return dto.AdminCommunityDetailResponse{
-		ID:          community.ID,
-		Name:        community.Name,
-		Description: community.Description,
-		AvatarURI:   community.AvatarURI,
-		CreatorID:   community.CreatorID,
-		CreatorName: creatorName,
-		Privacy:     string(community.Privacy),
-		Status:      string(community.Status),
-		AutoApprove: community.AutoApprove,
-		MemberCount: len(members),
-		Members:     members,
-		CreatedAt:   community.CreatedAt,
-		UpdatedAt:   community.UpdatedAt,
+		ID:            community.ID,
+		Name:          community.Name,
+		Description:   community.Description,
+		AvatarURI:     community.AvatarURI,
+		BackgroundURI: community.BackgroundURI,
+		CreatorID:     community.CreatorID,
+		CreatorName:   creatorName,
+		Privacy:       string(community.Privacy),
+		Status:        string(community.Status),
+		AutoApprove:   community.AutoApprove,
+		MemberCount:   len(members),
+		Members:       members,
+		CreatedAt:     community.CreatedAt,
+		UpdatedAt:     community.UpdatedAt,
 	}, nil
 }
 
@@ -1272,7 +1273,7 @@ func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, comm
 		return fmt.Errorf("cộng đồng không tồn tại")
 	}
 
-	if community.Status == models.CommunityStatusArchived && newStatus != models.CommunityStatusArchived {
+	if community.Status == models.CommunityStatusArchived && newStatus != models.CommunityStatusArchived && newStatus != models.CommunityStatusActive {
 		return fmt.Errorf("không thể thao tác trên cộng đồng đã bị đình chỉ")
 	}
 

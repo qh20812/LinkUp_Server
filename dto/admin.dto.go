@@ -241,19 +241,20 @@ type AdminCommunityListResponse struct {
 }
 
 type AdminCommunityDetailResponse struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	AvatarURI   string                 `json:"avatar_uri"`
-	CreatorID   string                 `json:"creator_id"`
-	CreatorName string                 `json:"creator_name"`
-	Privacy     string                 `json:"privacy"`
-	Status      string                 `json:"status"`
-	AutoApprove bool                   `json:"auto_approve"`
-	MemberCount int                    `json:"member_count"`
-	Members     []AdminCommunityMember `json:"members"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   *time.Time             `json:"updated_at,omitempty"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description"`
+	AvatarURI     string                 `json:"avatar_uri"`
+	BackgroundURI string                 `json:"background_uri"`
+	CreatorID     string                 `json:"creator_id"`
+	CreatorName   string                 `json:"creator_name"`
+	Privacy       string                 `json:"privacy"`
+	Status        string                 `json:"status"`
+	AutoApprove   bool                   `json:"auto_approve"`
+	MemberCount   int                    `json:"member_count"`
+	Members       []AdminCommunityMember `json:"members"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     *time.Time             `json:"updated_at,omitempty"`
 }
 
 type AdminCommunityMember struct {
