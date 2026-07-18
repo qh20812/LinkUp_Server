@@ -325,6 +325,7 @@ type TopEngagedPost struct {
 	ViewsCount    int    `json:"views_count"`
 	LikesCount    int    `json:"likes_count"`
 	CommentsCount int    `json:"comments_count"`
+	HasMedia      bool   `json:"has_media"`
 }
 
 type StatusCount struct {

@@ -170,13 +170,19 @@ func (r *adminRepository) GetTopActiveUsers(limit int) ([]dto.TopActiveUser, err
 
 func (r *adminRepository) GetTopEngagedPosts(limit int) ([]dto.TopEngagedPost, error) {
 	var posts []dto.TopEngagedPost
-	err := r.db.Table("posts").
-		Select("posts.id as post_id, posts.title, u.username, posts.views_count, posts.likes_count, posts.comments_count").
-		Joins("JOIN users u ON u.id = posts.user_id").
-		Where("posts.status != ?", string(models.PostStatusDeleted)).
-		Order("(COALESCE(posts.views_count,0) + COALESCE(posts.likes_count,0)*2 + COALESCE(posts.comments_count,0)*3) DESC").
-		Limit(limit).
-		Scan(&posts).Error
+	err := r.db.Raw(`
+		SELECT p.id AS post_id, p.title, u.username, p.views_count,
+		       (SELECT COUNT(*) FROM post_reactions pr WHERE pr.post_id = p.id) AS likes_count,
+		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments_count,
+		       EXISTS(SELECT 1 FROM media m WHERE m.post_id = p.id) AS has_media
+		FROM posts p
+		JOIN users u ON u.id = p.user_id
+		WHERE p.status != ?
+		ORDER BY (p.views_count +
+		          (SELECT COUNT(*) FROM post_reactions pr WHERE pr.post_id = p.id) * 2 +
+		          (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) * 3) DESC
+		LIMIT ?
+	`, string(models.PostStatusDeleted), limit).Scan(&posts).Error
 	return posts, err
 }
 
