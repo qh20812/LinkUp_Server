@@ -57,4 +57,9 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.POST("/communities/:id/warn", adminController.WarnCommunity)
 	adminGroup.DELETE("/groups/:chatID", adminController.DeleteGroup)
 	adminGroup.DELETE("/communities/:id", adminController.DeleteCommunity)
+
+	// ── Admin Ads ──
+	adminGroup.GET("/ads", adminController.ListAds)
+	adminGroup.PATCH("/ads/:id/status", adminController.UpdateAdStatus)
+	adminGroup.DELETE("/ads/:id", adminController.DeleteAd)
 }

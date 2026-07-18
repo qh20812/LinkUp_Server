@@ -42,11 +42,12 @@ type AdminService struct {
 	groupChatRepo       *repository.GroupChatRepository
 	adminRepo           repository.AdminRepository
 	mediaRepo           *repository.MediaRepository
+	adRepo              repository.AdRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
 }
 
-func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, chatRepo *repository.ChatRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, groupChatRepo *repository.GroupChatRepository, adminRepo repository.AdminRepository, mediaRepo *repository.MediaRepository, notificationService *NotificationService) *AdminService {
+func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.BanRepository, postRepo *repository.PostRepository, reportRepo *repository.ReportRepository, moderationRepo *repository.ModerationRepository, chatRepo *repository.ChatRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, groupChatRepo *repository.GroupChatRepository, adminRepo repository.AdminRepository, mediaRepo *repository.MediaRepository, adRepo repository.AdRepository, notificationService *NotificationService) *AdminService {
 	return &AdminService{
 		authRepo:            authRepo,
 		banRepo:             banRepo,
@@ -59,6 +60,7 @@ func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.Ba
 		groupChatRepo:       groupChatRepo,
 		adminRepo:           adminRepo,
 		mediaRepo:           mediaRepo,
+		adRepo:              adRepo,
 		notificationService: notificationService,
 	}
 }
@@ -956,6 +958,88 @@ func (s *AdminService) CleanupRejectedMedia(ctx context.Context, adminID string)
 	}
 
 	return cleaned, nil
+}
+
+// ── Admin Ad Management ─────────────────────────────────────────────────────
+
+func (s *AdminService) ListAds(ctx context.Context, adminID string, input dto.AdminAdFilterInput) (dto.AdminAdListResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminAdListResponse{}, err
+	}
+
+	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
+	keyword := strings.TrimSpace(input.Keyword)
+	status := strings.TrimSpace(strings.ToLower(input.Status))
+
+	total, err := s.adRepo.CountAds(ctx, keyword, status)
+	if err != nil {
+		return dto.AdminAdListResponse{}, fmt.Errorf("đếm quảng cáo thất bại: %w", err)
+	}
+
+	ads, err := s.adRepo.ListAds(ctx, keyword, status, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminAdListResponse{}, fmt.Errorf("lấy danh sách quảng cáo thất bại: %w", err)
+	}
+
+	if ads == nil {
+		ads = []dto.AdminAdListItem{}
+	}
+
+	resp := dto.AdminAdListResponse{
+		Ads:      ads,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if len(ads) == 0 {
+		resp.Message = "Không tìm thấy quảng cáo"
+	}
+
+	return resp, nil
+}
+
+func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string, input dto.AdminAdStatusInput) error {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return err
+	}
+
+	ad, err := s.adRepo.FindByID(adID)
+	if err != nil {
+		return fmt.Errorf("quảng cáo không tồn tại")
+	}
+
+	newStatus := strings.TrimSpace(strings.ToLower(input.Status))
+	if newStatus == string(ad.Status) {
+		return nil
+	}
+
+	isSuperAdmin, err := s.authRepo.HasRole(ctx, adminID, models.RoleSuperAdmin)
+	if err != nil {
+		return fmt.Errorf("kiểm tra quyền thất bại: %w", err)
+	}
+
+	if !isSuperAdmin && newStatus == string(models.AdStatusActive) {
+		return errors.New("admin không có quyền kích hoạt quảng cáo, chỉ superadmin mới được phép")
+	}
+
+	ad.Status = models.ParseAdStatus(newStatus)
+	if err := s.adRepo.Update(ad); err != nil {
+		return fmt.Errorf("cập nhật trạng thái quảng cáo thất bại: %w", err)
+	}
+
+	return nil
+}
+
+func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error {
+	if err := s.ensureSuperAdmin(ctx, adminID); err != nil {
+		return err
+	}
+
+	if err := s.adRepo.Delete(ctx, adID); err != nil {
+		return fmt.Errorf("xoá quảng cáo thất bại: %w", err)
+	}
+
+	return nil
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────

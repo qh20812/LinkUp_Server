@@ -215,7 +215,7 @@ func main() {
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
 		adminRepository := repository.NewAdminRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, notificationService)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env, gormDB)
