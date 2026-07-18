@@ -13,5 +13,6 @@ func RegisterReportRoutes(router *gin.Engine, reportController *controllers.Repo
 	report.Use(middlewares.AuthMiddleware(env))
 	{
 		report.POST("", reportController.CreateReport)
+		report.PUT("/:id", reportController.UpdateReport)
 	}
 }

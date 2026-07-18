@@ -38,17 +38,29 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i := 0; i < 8; i++ {
 		reporterID := state.UserIDs[i%len(state.UserIDs)]
-		targetUserID := internal.Ptr(state.UserIDs[(i+3)%len(state.UserIDs)])
-		targetPostID := (*string)(nil)
-		if i < len(state.PostIDs) {
-			targetPostID = internal.Ptr(state.PostIDs[i%len(state.PostIDs)])
+
+		var targetUserID *string
+		var targetPostID *string
+		var targetCommentID *string
+
+		switch i % 3 {
+		case 0:
+			targetUserID = internal.Ptr(state.UserIDs[(i+3)%len(state.UserIDs)])
+		case 1:
+			if len(state.PostIDs) > 0 {
+				targetPostID = internal.Ptr(state.PostIDs[i%len(state.PostIDs)])
+			}
+		case 2:
+			if len(state.CommentIDs) > 0 {
+				targetCommentID = internal.Ptr(state.CommentIDs[i%len(state.CommentIDs)])
+			}
 		}
 
 		status := pick([]string{"pending", "reviewed", "resolved"})
 
 		if err := internal.Exec(database,
-			`INSERT INTO reports (id, reporter_id, report_type, target_user_id, target_post_id, target_comment_id, violation_rule_id, reason_detail, status, created_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
-			internal.UUID(), reporterID, pick(reportTypes), targetUserID, targetPostID, pick(reportDetails), status, now.Add(-time.Duration(rng.Intn(168))*time.Hour),
+			`INSERT INTO reports (id, reporter_id, report_type, target_user_id, target_post_id, target_comment_id, violation_rule_id, reason_detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+			internal.UUID(), reporterID, pick(reportTypes), targetUserID, targetPostID, targetCommentID, pick(reportDetails), status, now.Add(-time.Duration(rng.Intn(168))*time.Hour),
 		); err != nil {
 			return fmt.Errorf("moderation: insert report %d: %w", i, err)
 		}

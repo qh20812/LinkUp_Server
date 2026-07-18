@@ -18,8 +18,8 @@ func NewAdminController(adminService *services.AdminService) *AdminController {
 
 func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 	// Lấy ID Admin từ Middleware Auth
-	superAdminID := c.GetString("userID")
-	if superAdminID == "" {
+	adminID := c.GetString("userID")
+	if adminID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
 		return
 	}
@@ -31,7 +31,7 @@ func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 		return
 	}
 
-	result, err := ctrl.adminService.GetDashboardAnalytics(c.Request.Context(), superAdminID, input)
+	result, err := ctrl.adminService.GetDashboardAnalytics(c.Request.Context(), adminID, input)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -41,13 +41,19 @@ func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 }
 
 func (ctrl *AdminController) ListUsers(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
 	var input dto.AdminUserFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
 		return
 	}
 
-	result, err := ctrl.adminService.ListUsers(c.Request.Context(), input)
+	result, err := ctrl.adminService.ListUsers(c.Request.Context(), userID, input)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -491,6 +497,22 @@ func (ctrl *AdminController) UnhideCommunity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Bỏ ẩn cộng đồng thành công"})
 }
 
+func (ctrl *AdminController) UnarchiveCommunity(c *gin.Context) {
+	communityID := c.Param("id")
+	if communityID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		return
+	}
+
+	userID := c.GetString("userID")
+	if err := ctrl.adminService.UnarchiveCommunity(c.Request.Context(), userID, communityID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Bỏ đình chỉ cộng đồng thành công"})
+}
+
 func (ctrl *AdminController) ArchiveCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
@@ -599,4 +621,68 @@ func (ctrl *AdminController) ReviewReport(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "xử lý báo cáo thành công"})
+}
+
+// ── Media: Admin handlers ────────────────────────────────────────────────
+
+func (ctrl *AdminController) ListFlaggedMedia(c *gin.Context) {
+	adminID := c.GetString("userID")
+
+	var input dto.AdminMediaFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số không hợp lệ"})
+		return
+	}
+
+	result, err := ctrl.adminService.ListFlaggedMedia(c.Request.Context(), adminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *AdminController) ReviewMedia(c *gin.Context) {
+	adminID := c.GetString("userID")
+	mediaID := c.Param("id")
+
+	var input dto.AdminReviewMediaInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := ctrl.adminService.ReviewMedia(c.Request.Context(), adminID, mediaID, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Xử lý media thành công"})
+}
+
+func (ctrl *AdminController) CleanupRejectedMedia(c *gin.Context) {
+	adminID := c.GetString("userID")
+
+	cleaned, err := ctrl.adminService.CleanupRejectedMedia(c.Request.Context(), adminID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Dọn dẹp media thành công", "cleaned": cleaned})
+}
+
+func (ctrl *AdminController) ListMediaGroupedByUser(c *gin.Context) {
+	adminID := c.GetString("userID")
+
+	var input dto.AdminMediaGroupFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số không hợp lệ"})
+		return
+	}
+
+	result, err := ctrl.adminService.ListMediaGroupedByUser(c.Request.Context(), adminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }

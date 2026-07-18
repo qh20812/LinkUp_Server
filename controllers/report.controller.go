@@ -39,3 +39,31 @@ func (h *ReportController) CreateReport(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, response)
 }
+
+func (h *ReportController) UpdateReport(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		return
+	}
+
+	reportID := c.Param("id")
+	if reportID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "report id không hợp lệ"})
+		return
+	}
+
+	var input dto.UpdateReportInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	response, err := h.reportService.UpdateReport(c.Request.Context(), userID.(string), reportID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}

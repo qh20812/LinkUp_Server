@@ -52,6 +52,9 @@ type AdminPostFilterInput struct {
 type AdminPostListItem struct {
 	ID            string     `json:"id"`
 	UserID        string     `json:"user_id"`
+	Username      string     `json:"username"`
+	DisplayName   string     `json:"display_name"`
+	AvatarURI     string     `json:"avatar_uri"`
 	Title         string     `json:"title"`
 	Content       string     `json:"content"`
 	Status        string     `json:"status"`
@@ -59,6 +62,7 @@ type AdminPostListItem struct {
 	LikesCount    int        `json:"likes_count"`
 	CommentsCount int        `json:"comments_count"`
 	SharesCount   int        `json:"shares_count"`
+	MediaURIs     []string   `json:"media_uris"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 }
@@ -182,6 +186,36 @@ type AdminGroupMember struct {
 	Role        string `json:"role"`
 }
 
+// ── Admin Media Management ──
+
+type AdminMediaFilterInput struct {
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size" binding:"max=100"`
+	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
+	Keyword  string `form:"keyword"`
+}
+
+type AdminMediaItem struct {
+	ID        string  `json:"id"`
+	UserID    string  `json:"user_id"`
+	FileURI   string  `json:"file_uri"`
+	FileType  string  `json:"file_type"`
+	FileSize  float64 `json:"file_size"`
+	Status    string  `json:"status"`
+	CreatedAt string  `json:"created_at"`
+}
+
+type AdminMediaListResponse struct {
+	Items []AdminMediaItem `json:"items"`
+	Total int64            `json:"total"`
+	Page  int              `json:"page"`
+}
+
+type AdminReviewMediaInput struct {
+	Action string `json:"action" binding:"required,oneof=approve reject"`
+	Reason string `json:"reason" binding:"required"`
+}
+
 // ── Admin Community Management ──
 
 type AdminCommunityFilterInput struct {
@@ -195,6 +229,7 @@ type AdminCommunityFilterInput struct {
 type AdminCommunityListItem struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
+	AvatarURI   string    `json:"avatar_uri"`
 	CreatorID   string    `json:"creator_id"`
 	CreatorName string    `json:"creator_name"`
 	MemberCount int       `json:"member_count"`
@@ -211,19 +246,20 @@ type AdminCommunityListResponse struct {
 }
 
 type AdminCommunityDetailResponse struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	AvatarURI   string                 `json:"avatar_uri"`
-	CreatorID   string                 `json:"creator_id"`
-	CreatorName string                 `json:"creator_name"`
-	Privacy     string                 `json:"privacy"`
-	Status      string                 `json:"status"`
-	AutoApprove bool                   `json:"auto_approve"`
-	MemberCount int                    `json:"member_count"`
-	Members     []AdminCommunityMember `json:"members"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   *time.Time             `json:"updated_at,omitempty"`
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description"`
+	AvatarURI     string                 `json:"avatar_uri"`
+	BackgroundURI string                 `json:"background_uri"`
+	CreatorID     string                 `json:"creator_id"`
+	CreatorName   string                 `json:"creator_name"`
+	Privacy       string                 `json:"privacy"`
+	Status        string                 `json:"status"`
+	AutoApprove   bool                   `json:"auto_approve"`
+	MemberCount   int                    `json:"member_count"`
+	Members       []AdminCommunityMember `json:"members"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     *time.Time             `json:"updated_at,omitempty"`
 }
 
 type AdminCommunityMember struct {
@@ -274,10 +310,75 @@ type ChartDataPoint struct {
 	Count int64  `json:"count"` // Trục Y: Lượng tạo mới trong ngày
 }
 
+type TopActiveUser struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+	PostCount   int    `json:"post_count"`
+}
+
+type TopEngagedPost struct {
+	PostID        string `json:"post_id"`
+	Title         string `json:"title"`
+	Username      string `json:"username"`
+	ViewsCount    int    `json:"views_count"`
+	LikesCount    int    `json:"likes_count"`
+	CommentsCount int    `json:"comments_count"`
+}
+
+type StatusCount struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
 type AdminAnalyticsResponse struct {
-	TotalUsers   int64            `json:"total_users"`
-	TotalPosts   int64            `json:"total_posts"`
-	TotalReports int64            `json:"total_reports"`
-	ChartData    []ChartDataPoint `json:"chart_data,omitempty"`
-	GeneratedAt  time.Time        `json:"generated_at"`
+	TotalUsers              int64            `json:"total_users"`
+	TotalPosts              int64            `json:"total_posts"`
+	TotalReports            int64            `json:"total_reports"`
+	TotalComments           int64            `json:"total_comments"`
+	TotalMedia              int64            `json:"total_media"`
+	TotalGroups             int64            `json:"total_groups"`
+	TotalCommunities        int64            `json:"total_communities"`
+	TotalActiveBans         int64            `json:"total_active_bans"`
+	PendingReports          int64            `json:"pending_reports"`
+	FlaggedMediaCount       int64            `json:"flagged_media_count"`
+	ActiveUsersToday        int64            `json:"active_users_today"`
+	TotalLikes              int64            `json:"total_likes"`
+	TotalShares             int64            `json:"total_shares"`
+	UsersChangePercent      float64          `json:"users_change_percent"`
+	PostsChangePercent      float64          `json:"posts_change_percent"`
+	ReportsChangePercent    float64          `json:"reports_change_percent"`
+	CommentsChangePercent   float64          `json:"comments_change_percent"`
+	MediaChangePercent      float64          `json:"media_change_percent"`
+	GroupsChangePercent     float64          `json:"groups_change_percent"`
+	CommunitiesChangePercent float64         `json:"communities_change_percent"`
+	ChartData               []ChartDataPoint `json:"chart_data,omitempty"`
+	TopUsers                []TopActiveUser  `json:"top_users,omitempty"`
+	TopPosts                []TopEngagedPost `json:"top_posts,omitempty"`
+	UserStatusDistribution  []StatusCount    `json:"user_status_distribution,omitempty"`
+	ReportStatusDistribution []StatusCount   `json:"report_status_distribution,omitempty"`
+	GeneratedAt             time.Time        `json:"generated_at"`
+}
+
+type AdminMediaGroupFilterInput struct {
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size" binding:"max=100"`
+	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
+	Keyword  string `form:"keyword"`
+}
+
+type AdminMediaGroupItem struct {
+	UserID      string           `json:"user_id"`
+	Username    string           `json:"username"`
+	DisplayName string           `json:"display_name"`
+	AvatarURI   string           `json:"avatar_uri"`
+	Media       []AdminMediaItem `json:"media"`
+}
+
+type AdminMediaGroupedResponse struct {
+	Groups    []AdminMediaGroupItem `json:"groups"`
+	Total     int64                 `json:"total"`
+	Page      int                   `json:"page"`
+	PageSize  int                   `json:"page_size"`
 }

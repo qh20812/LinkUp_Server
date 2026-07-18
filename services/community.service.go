@@ -142,9 +142,28 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 		return errors.New("tài khoản chưa được kích hoạt")
 	}
 
+	src, err := file.Open()
+	if err != nil {
+		return errors.New("không thể đọc file ảnh")
+	}
+	if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
+		MinWidth:  800,
+		MinHeight: 400,
+		MaxWidth:  4096,
+		MaxHeight: 4096,
+	}); err != nil {
+		src.Close()
+		return err
+	}
+	src.Close()
+
 	media, err := s.mediaService.UploadMedia(ctx, userID, file)
 	if err != nil {
 		return errors.New("tải ảnh background thất bại")
+	}
+
+	if media.Status == models.MediaStatusRejected {
+		return errors.New("ảnh background vi phạm tiêu chuẩn cộng đồng")
 	}
 
 	if err := s.validation.ValidateBackgroundURI(media.FileURI); err != nil {

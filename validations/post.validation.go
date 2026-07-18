@@ -61,27 +61,30 @@ func (v *PostValidation) NormalizePagination(page, pageSize int) (int, int) {
 }
 
 // ValidateCreatePost kiểm tra dữ liệu đầu vào khi tạo bài viết
-func ValidateCreatePost(title, content, status string) error {
+func ValidateCreatePost(title, content, status string, hasFiles bool) error {
 	title = strings.TrimSpace(title)
 	content = strings.TrimSpace(content)
 	status = strings.ToLower(strings.TrimSpace(status))
 
-	// Kiểm tra tiêu đề (Từ 5 đến 150 ký tự)
-	if len(title) < 5 || len(title) > 150 {
+	if hasFiles && title == "" && content == "" {
+		return nil
+	}
+
+	// Kiểm tra tiêu đề (Từ 5 đến 150 ký tự, không bắt buộc nếu có file)
+	if title != "" && (len(title) < 5 || len(title) > 150) {
 		return errors.New("tiêu đề bài viết phải từ 5 đến 150 ký tự")
 	}
 
-	// Kiểm tra nội dung (Tối đa 5000 ký tự)
-	if content == "" {
+	// Kiểm tra nội dung (Tối đa 5000 ký tự, không bắt buộc nếu có file)
+	if !hasFiles && content == "" {
 		return errors.New("nội dung bài viết không được bỏ trống")
 	}
-	if len(content) > 5000 {
+	if content != "" && len(content) > 5000 {
 		return errors.New("nội dung bài viết không được vượt quá 5000 ký tự")
 	}
 
 	// Kiểm tra trạng thái bài viết hợp lệ
 	validStatuses := map[models.PostStatus]bool{
-		models.PostStatusActive:  true,
 		models.PostStatusPublic:  true,
 		models.PostStatusPrivate: true,
 		models.PostStatusHidden:  true,

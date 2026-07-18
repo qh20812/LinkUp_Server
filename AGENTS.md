@@ -27,11 +27,12 @@ cmd/main.go → controller → service → repository (GORM)
 middlewares/  → auth.middleware.go + rbac.middleware.go
 cmd/seed/     → raw database/sql (10 ordered steps)
 ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
+groupws/      → separate Hub type for group chat real-time events
 ```
 
 - **Module `linkup`** (Go 1.26.3, Gin). Run from repo root.
 - **DB**: `db/mysql.go` returns `*sql.DB`; `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`. All code inside `if database != nil { ... }` guard — WS + health endpoint run without DB.
-- **46 model files** (`models/*.model.go`), 39 tables in DB seed schema.
+- **49 model files** (`models/*.model.go`), 46 tables in DB seed schema (+ story tables via GORM AutoMigrate in `cmd/main.go`).
 - **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
 - **Validation split**: DTOs use `binding` tags (community, group_chat, post:`ReactPostInput`, chat). Others use `validations` package (13 validators, sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
 - **RBAC**: `RequireRoles` checks platform roles (`user_roles` JOIN, scope_id IS NULL). `CheckAdOwnership` guards ads for PARTNERs. `RequireContributionLevel` checks community contribution score threshold.
@@ -64,6 +65,7 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 | `/ws` | `?token=` | `ws/handler.go` |
 | `/api/auth/*` | varies | `auth.routes.go`, `password_reset.routes.go` |
 | `/posts`, `/posts/:id/*` | POST+Auth, GET=No | `post.routes.go` |
+| `/stories`, `/stories/:id/*`, `/stories/feed` | POST=Auth, GET feed=No | `story.routes.go` |
 | `/api/tags/:name/posts` | No | `tag.routes.go` |
 | `/api/profile*` | PATCH=Auth, GET/:userID=No | `profile.routes.go` |
 | `/api/follow/*` | Auth | `follow.routes.go` |
@@ -75,36 +77,39 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 | `/api/friend-requests*` | Auth | `friend.routes.go` |
 | `/api/chats/*` (incl. `/ws`) | Auth | `chat.routes.go`, `chat.controller.go` |
 | `/api/group-chats/*` | Auth | `group_chat.routes.go` |
+| `/api/group-chats/ws` | `?token=` | `groupws/handler.go` (separate Hub type) |
 | `/api/communities*` | Auth | `community.routes.go`, `community_rule.routes.go` |
 | `/api/communities/:id/policy\|challenges\|contributions` | Auth\* | `contribution.routes.go` |
 | `/ads-management*` | Auth+RBAC | `ad.routes.go` |
 | `/customer/*` | Auth | `ad.routes.go` |
 | `/api/admin/*` | Auth | `admin.routes.go` |
-| `/api/calls/*` | Auth | `call.routes.go` |
+| `/api/calls/*` (incl. `/ws`) | Auth | `call.routes.go` |
 
 \* Contribution GET /leaderboard and /:userID are public (no Auth).
 
 ## WebSocket
 
-**Two Hub instances, three WS endpoints, unified `ws.Hub` type:**
+**Two Hub types (`ws.Hub`, `groupws.Hub`), three Hub instances, four WS endpoints:**
 
-| Endpoint | Hub | Service | Auth | Purpose |
-|---|---|---|---|---|
-| `GET /ws` | `hub` (notification) | `service=nil, callService=nil` → call events skipped, chat events discarded | `?token=` access JWT | Real-time notifications |
-| `GET /api/chats/ws` | `chatHub` | `ChatService` set → processes chat events | `AuthMiddleware` (Bearer) | Encrypted direct/group chat |
-| `GET /api/calls/ws` | `hub` (notification, shared) | `callService` set, `service=nil` → processes call events | `AuthMiddleware` (Bearer) | WebRTC signaling |
+| Endpoint | Hub type | Instance | Service | Auth | Purpose |
+|---|---|---|---|---|---|
+| `GET /ws` | `ws.Hub` | `hub` | `service=nil, callService=nil` → call events skipped, chat events discarded | `?token=` access JWT | Real-time notifications |
+| `GET /api/chats/ws` | `ws.Hub` | `chatHub` | `ChatService` set → processes chat events | `AuthMiddleware` (Bearer) | Encrypted direct/group chat |
+| `GET /api/calls/ws` | `ws.Hub` | `hub` (shared) | `callService` set, `service=nil` → processes call events | `AuthMiddleware` (Bearer) | WebRTC signaling |
+| `GET /api/group-chats/ws` | `groupws.Hub` | `groupHub` | `GroupMessageService` + `GroupChatService` | `?token=` access JWT | Group chat real-time (messages, members, admin) |
 
 - **Import cycle avoided**: `services` imports `ws`; `ws/chat.service.go` and `ws/call.service.go` define interfaces implemented in `services/`.
-- **Chat WS events**: `chat:join`, `message:send`, `typing:start/stop`, `message:delete`, `message:search`.
+- **Chat WS events** (`ws.Hub` → `chatHub`): `chat:join`, `message:send`, `typing:start/stop`, `message:delete`, `message:search`.
 - **Call WS events** (client→server): `call:initiate`, `call:accept`, `call:reject`, `call:end`, `call:signal`, `call:busy`, `call:video_toggle`, `call:toggle_mute`.
 - **Call WS events** (server→client): `call:incoming`, `call:status`, `call:busy`, `call:mute`, `call:video`, `call:signal`, `call:missed`, `call:cancelled`.
+- **Group WS events** (`groupws.Hub`): `group:join` (returns history), `group:message:send`, `group:typing:start/stop`, `group:message:search`, `group:leave`, `group:member:add`, `group:member:ban`, `group:member:mute/unmute`, `group:admin:transfer`, `group:settings:update`.
 - **Chat messages** use AES-256-GCM encryption (`utils/encryption.go`). Key stored per-chat (`chat.model.go:EncryptionKey`).
 
 ## Seed system
 
 10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`. Relationships step also seeds `community_rules` for each community.
 
-**Schema sub-package** (`cmd/seed/schema/`): 39 `CREATE TABLE IF NOT EXISTS` statements, then idempotent ALTER TABLE via `addColumnIfMissing`/`addIndexIfMissing`/`addForeignKeyIfMissing` (queries `information_schema` first). DDL identifiers validated via regex whitelist.
+**Schema sub-package** (`cmd/seed/schema/`): 46 `CREATE TABLE IF NOT EXISTS` statements, then idempotent ALTER TABLE via `addColumnIfMissing`/`addIndexIfMissing`/`addForeignKeyIfMissing` (queries `information_schema` first). DDL identifiers validated via regex whitelist.
 
 ## Password reset flow
 
@@ -113,6 +118,10 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 ## JWT
 
 `utils.GenerateTokenPair` — HS256, access TTL from `JWTExpiresIn` (minutes, fallback 15), refresh TTL 7 days. `utils.ParseToken` → `*utils.TokenClaims` (`UserID`, `Email`, `TokenType`). Separate `utils.GenerateToken` for single tokens (reset). Auth has `/api/auth/refresh` endpoint.
+
+## Stories
+
+Fully wired feature — NOT a stub. Routes at `/stories/*`. Uses GORM `AutoMigrate` in `cmd/main.go` for `StoryView` and `StoryInteract` models. Static file serving at `/static/stories` (dir `./uploads/stories`).
 
 ## Stubs / not wired
 
@@ -125,7 +134,6 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 
 - **UUID divergence**: `utils.GenerateUUID()` (crypto/rand, RFC 9562) used by most services. `ad.service.go` has `uuidGenerate()` using crypto/rand with `ad_` prefix. `github.com/google/uuid` is indirect dep only.
 - **Air config** (`.air.toml`) builds `cmd/main.go` specifically; the Dockerfile builds `./cmd` (package, not file).
-- **Build artifacts committed**: `cmd.exe`, `seed.exe`, `cloudinary-check.exe` in repo root.
-- **gorm tags**: 46 model files use them for indexes, computed columns (`->`), PKs. Models primarily use `json` tags; `db` tags unused.
-- **DB_SSL not wired**: `validateRequired` treats `"false"` as missing, but even when set, `db/mysql.go` ignores it in the DSN.
-- **WsConfig note**: `ws/handler.go` reads `WS_ALLOWED_ORIGINS` at import time (`os.Getenv`). `controllers/call.controller.go` has its own `callUpgrader` (decoupled from chat controller's). `controllers/chat.controller.go`'s upgrader still hardcodes `CheckOrigin: return true`.
+- **Build artifacts committed**: `cmd.exe`, `seed.exe`, `cloudinary-check.exe` in repo root (gitignored pattern `*.exe` but committed before rule).
+- **gorm tags**: 49 model files use them for indexes, computed columns (`->`), PKs. Models primarily use `json` tags; `db` tags unused.
+- **CheckOrigin divergence**: `ws/handler.go` respects `WS_ALLOWED_ORIGINS` env var (configurable). `controllers/chat.controller.go`, `controllers/call.controller.go`, and `groupws/handler.go` all hardcode `CheckOrigin: return true`.

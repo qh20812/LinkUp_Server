@@ -235,3 +235,18 @@ func (s *GroupMessageService) SearchMessages(
 
 	return filtered, nil
 }
+
+func (s *GroupMessageService) ListGroupMemberIDs(ctx context.Context, userID, chatID string) ([]string, error) {
+	_, err := s.ensureGroupMember(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	return s.chatRepo.GetParticipantIDs(ctx, chatID)
+}
+
+func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, content string) (*models.Message, error) {
+	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+	msg.ID = utils.GenerateUUID()
+	msg.CreatedAt = time.Now().UTC()
+	return s.chatRepo.CreateMessage(ctx, &msg)
+}

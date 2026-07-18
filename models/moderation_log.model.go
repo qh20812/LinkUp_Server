@@ -28,6 +28,7 @@ const (
 	ModerationTargetReport    ModerationTargetType = "report"
 	ModerationTargetCommunity ModerationTargetType = "community"
 	ModerationTargetGroupChat ModerationTargetType = "group_chat"
+	ModerationTargetMedia     ModerationTargetType = "media"
 )
 
 type ModerationLog struct {
@@ -91,6 +92,8 @@ func ParseModerationTargetType(value string) ModerationTargetType {
 		return ModerationTargetCommunity
 	case string(ModerationTargetGroupChat):
 		return ModerationTargetGroupChat
+	case string(ModerationTargetMedia):
+		return ModerationTargetMedia
 	default:
 		return ModerationTargetUser
 	}
