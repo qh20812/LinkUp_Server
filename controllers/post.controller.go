@@ -28,24 +28,24 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 		return
 	}
 
-	if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	val, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập (Unauthorized)"})
-		return
-	}
-	userID := fmt.Sprintf("%v", val)
-
 	// Lấy danh sách tệp đính kèm gửi lên qua form-data với key đặt tên là "media"
-	var files []*multipart.FileHeader
-	form, err := c.MultipartForm()
-	if err == nil && form != nil {
-		files = form.File["media"]
-	}
+		var files []*multipart.FileHeader
+		form, err := c.MultipartForm()
+		if err == nil && form != nil {
+			files = form.File["media"]
+		}
+
+		if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status, len(files) > 0); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		val, exists := c.Get("userID")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập (Unauthorized)"})
+			return
+		}
+		userID := fmt.Sprintf("%v", val)
 
 	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files)
 	if err != nil {

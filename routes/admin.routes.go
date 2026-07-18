@@ -52,6 +52,7 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.GET("/communities/:id/logs", adminController.GetCommunityModerationLogs)
 	adminGroup.POST("/communities/:id/hide", adminController.HideCommunity)
 	adminGroup.POST("/communities/:id/unhide", adminController.UnhideCommunity)
+	adminGroup.POST("/communities/:id/unarchive", adminController.UnarchiveCommunity)
 	adminGroup.POST("/communities/:id/archive", adminController.ArchiveCommunity)
 	adminGroup.POST("/communities/:id/warn", adminController.WarnCommunity)
 	adminGroup.DELETE("/groups/:chatID", adminController.DeleteGroup)

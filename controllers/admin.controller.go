@@ -18,8 +18,8 @@ func NewAdminController(adminService *services.AdminService) *AdminController {
 
 func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 	// Lấy ID Admin từ Middleware Auth
-	superAdminID := c.GetString("userID")
-	if superAdminID == "" {
+	adminID := c.GetString("userID")
+	if adminID == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
 		return
 	}
@@ -31,7 +31,7 @@ func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 		return
 	}
 
-	result, err := ctrl.adminService.GetDashboardAnalytics(c.Request.Context(), superAdminID, input)
+	result, err := ctrl.adminService.GetDashboardAnalytics(c.Request.Context(), adminID, input)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -495,6 +495,22 @@ func (ctrl *AdminController) UnhideCommunity(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Bỏ ẩn cộng đồng thành công"})
+}
+
+func (ctrl *AdminController) UnarchiveCommunity(c *gin.Context) {
+	communityID := c.Param("id")
+	if communityID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		return
+	}
+
+	userID := c.GetString("userID")
+	if err := ctrl.adminService.UnarchiveCommunity(c.Request.Context(), userID, communityID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Bỏ đình chỉ cộng đồng thành công"})
 }
 
 func (ctrl *AdminController) ArchiveCommunity(c *gin.Context) {

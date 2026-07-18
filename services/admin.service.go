@@ -68,13 +68,11 @@ func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
 	s.cloudinary = cld
 }
 
-func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
-	// Kiểm tra quyền hạn SuperAdmin trước khi tính toán dữ liệu
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return dto.AdminAnalyticsResponse{}, err
 	}
 
-	// Xử lý bộ lọc thời gian mặc định (7 ngày gần nhất nếu bỏ trống)
 	now := time.Now().UTC()
 	if input.EndDate == "" {
 		input.EndDate = now.Format("2006-01-02")
@@ -101,6 +99,21 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số báo cáo thất bại: %w", err)
 	}
 
+	totalComments, _ := s.adminRepo.GetTotalComments()
+	totalMedia, _ := s.adminRepo.GetTotalMedia()
+	totalGroups, _ := s.adminRepo.GetTotalGroups()
+	totalCommunities, _ := s.adminRepo.GetTotalCommunities()
+	activeBanCount, _ := s.adminRepo.GetActiveBanCount()
+	pendingReports, _ := s.adminRepo.GetPendingReportCount()
+	flaggedMedia, _ := s.adminRepo.GetFlaggedMediaCount()
+	activeUsersToday, _ := s.adminRepo.GetActiveUsersToday()
+	totalLikes, _ := s.adminRepo.GetTotalLikes()
+	totalShares, _ := s.adminRepo.GetTotalShares()
+	topUsers, _ := s.adminRepo.GetTopActiveUsers(5)
+	topPosts, _ := s.adminRepo.GetTopEngagedPosts(5)
+	userDist, _ := s.adminRepo.GetUserStatusDistribution()
+	reportDist, _ := s.adminRepo.GetReportStatusDistribution()
+
 	var chartData []dto.ChartDataPoint
 	tableName := ""
 
@@ -112,9 +125,9 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 	case "reports":
 		tableName = "reports"
 	case "all":
-		tableName = "posts"
+		tableName = "comments"
 	default:
-		tableName = "posts"
+		tableName = "comments"
 	}
 
 	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
@@ -127,10 +140,18 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 	prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
 	prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
 	prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
+<<<<<<< HEAD
+=======
+	prevComments, _ := s.adminRepo.GetCountBeforeDate("comments", oneMonthAgo)
+	prevMedia, _ := s.adminRepo.GetCountBeforeDate("media", oneMonthAgo)
+	prevGroups, _ := s.adminRepo.GetCountBeforeDate("chats", oneMonthAgo)
+	prevCommunities, _ := s.adminRepo.GetCountBeforeDate("communities", oneMonthAgo)
+>>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 
 	usersChangePct := calcPercentChange(totalUsers, prevUsers)
 	postsChangePct := calcPercentChange(totalPosts, prevPosts)
 	reportsChangePct := calcPercentChange(totalReports, prevReports)
+<<<<<<< HEAD
 
 	return dto.AdminAnalyticsResponse{
 		TotalUsers:           totalUsers,
@@ -141,6 +162,40 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, superAdminID s
 		ReportsChangePercent: reportsChangePct,
 		ChartData:            chartData,
 		GeneratedAt:          time.Now().UTC(),
+=======
+	commentsChangePct := calcPercentChange(totalComments, prevComments)
+	mediaChangePct := calcPercentChange(totalMedia, prevMedia)
+	groupsChangePct := calcPercentChange(totalGroups, prevGroups)
+	communitiesChangePct := calcPercentChange(totalCommunities, prevCommunities)
+
+	return dto.AdminAnalyticsResponse{
+		TotalUsers:              totalUsers,
+		TotalPosts:              totalPosts,
+		TotalReports:            totalReports,
+		TotalComments:           totalComments,
+		TotalMedia:              totalMedia,
+		TotalGroups:             totalGroups,
+		TotalCommunities:        totalCommunities,
+		TotalActiveBans:         activeBanCount,
+		PendingReports:          pendingReports,
+		FlaggedMediaCount:       flaggedMedia,
+		ActiveUsersToday:        activeUsersToday,
+		TotalLikes:              totalLikes,
+		TotalShares:             totalShares,
+		UsersChangePercent:      usersChangePct,
+		PostsChangePercent:      postsChangePct,
+		ReportsChangePercent:    reportsChangePct,
+		CommentsChangePercent:   commentsChangePct,
+		MediaChangePercent:      mediaChangePct,
+		GroupsChangePercent:     groupsChangePct,
+		CommunitiesChangePercent: communitiesChangePct,
+		ChartData:               chartData,
+		TopUsers:                topUsers,
+		TopPosts:                topPosts,
+		UserStatusDistribution:  userDist,
+		ReportStatusDistribution: reportDist,
+		GeneratedAt:             time.Now().UTC(),
+>>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	}, nil
 }
 
@@ -342,11 +397,44 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 		return dto.AdminPostListResponse{}, err
 	}
 
+	userIDs := make([]string, 0, len(posts))
+	seen := make(map[string]struct{}, len(posts))
+	for _, p := range posts {
+		if _, dup := seen[p.UserID]; !dup {
+			seen[p.UserID] = struct{}{}
+			userIDs = append(userIDs, p.UserID)
+		}
+	}
+
+	type userInfo struct {
+		Username    string
+		DisplayName string
+		AvatarURI   string
+	}
+	userMap := make(map[string]userInfo, len(userIDs))
+	for _, uid := range userIDs {
+		u, err := s.authRepo.FindByID(ctx, uid)
+		if err != nil || u == nil {
+			continue
+		}
+		info := userInfo{Username: u.Username}
+		profile, err := s.profileRepo.FindByUserID(ctx, uid)
+		if err == nil && profile != nil {
+			info.DisplayName = profile.DisplayName
+			info.AvatarURI = profile.AvatarURI
+		}
+		userMap[uid] = info
+	}
+
 	items := make([]dto.AdminPostListItem, 0, len(posts))
 	for _, p := range posts {
+		info := userMap[p.UserID]
 		items = append(items, dto.AdminPostListItem{
 			ID:            p.ID,
 			UserID:        p.UserID,
+			Username:      info.Username,
+			DisplayName:   info.DisplayName,
+			AvatarURI:     info.AvatarURI,
 			Title:         p.Title,
 			Content:       p.Content,
 			Status:        string(p.Status),
@@ -357,6 +445,26 @@ func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input
 			CreatedAt:     p.CreatedAt,
 			UpdatedAt:     p.UpdatedAt,
 		})
+	}
+
+	// Load media URIs for all posts
+	postIDs := make([]string, 0, len(posts))
+	for _, p := range posts {
+		postIDs = append(postIDs, p.ID)
+	}
+	mediaMap, err := s.mediaRepo.GetByPostIDs(ctx, postIDs)
+	if err != nil {
+		log.Printf("[ListPosts] không thể lấy media: %v", err)
+	} else {
+		for i, item := range items {
+			if mediaList, ok := mediaMap[item.ID]; ok && len(mediaList) > 0 {
+				uris := make([]string, 0, len(mediaList))
+				for _, m := range mediaList {
+					uris = append(uris, m.FileURI)
+				}
+				items[i].MediaURIs = uris
+			}
+		}
 	}
 
 	resp := dto.AdminPostListResponse{
@@ -716,7 +824,7 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 		status = models.ParseMediaStatus(input.Status)
 	}
 
-	items, total, err := s.mediaRepo.GetByStatus(ctx, status, page, pageSize)
+	items, total, err := s.mediaRepo.GetByStatus(ctx, status, input.Keyword, page, pageSize)
 	if err != nil {
 		return dto.AdminMediaListResponse{}, fmt.Errorf("lấy danh sách media thất bại: %w", err)
 	}
@@ -1170,19 +1278,20 @@ func (s *AdminService) GetCommunityDetail(ctx context.Context, userID, community
 	}
 
 	return dto.AdminCommunityDetailResponse{
-		ID:          community.ID,
-		Name:        community.Name,
-		Description: community.Description,
-		AvatarURI:   community.AvatarURI,
-		CreatorID:   community.CreatorID,
-		CreatorName: creatorName,
-		Privacy:     string(community.Privacy),
-		Status:      string(community.Status),
-		AutoApprove: community.AutoApprove,
-		MemberCount: len(members),
-		Members:     members,
-		CreatedAt:   community.CreatedAt,
-		UpdatedAt:   community.UpdatedAt,
+		ID:            community.ID,
+		Name:          community.Name,
+		Description:   community.Description,
+		AvatarURI:     community.AvatarURI,
+		BackgroundURI: community.BackgroundURI,
+		CreatorID:     community.CreatorID,
+		CreatorName:   creatorName,
+		Privacy:       string(community.Privacy),
+		Status:        string(community.Status),
+		AutoApprove:   community.AutoApprove,
+		MemberCount:   len(members),
+		Members:       members,
+		CreatedAt:     community.CreatedAt,
+		UpdatedAt:     community.UpdatedAt,
 	}, nil
 }
 
@@ -1233,7 +1342,7 @@ func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, comm
 		return fmt.Errorf("cộng đồng không tồn tại")
 	}
 
-	if community.Status == models.CommunityStatusArchived && newStatus != models.CommunityStatusArchived {
+	if community.Status == models.CommunityStatusArchived && newStatus != models.CommunityStatusArchived && newStatus != models.CommunityStatusActive {
 		return fmt.Errorf("không thể thao tác trên cộng đồng đã bị đình chỉ")
 	}
 
@@ -1269,6 +1378,10 @@ func (s *AdminService) UnhideCommunity(ctx context.Context, superAdminID, commun
 
 func (s *AdminService) ArchiveCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminModerateInput) error {
 	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionSuspend, models.ModerationActionSuspend, models.CommunityStatusArchived, "đình chỉ", input.Reason)
+}
+
+func (s *AdminService) UnarchiveCommunity(ctx context.Context, superAdminID, communityID string) error {
+	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionUpdate, models.ModerationActionUpdate, models.CommunityStatusActive, "bỏ đình chỉ", "Bỏ đình chỉ cộng đồng")
 }
 
 func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminWarnInput) error {
@@ -1510,7 +1623,11 @@ func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID strin
 		statusParam = ""
 	}
 
+<<<<<<< HEAD
 	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, page, pageSize)
+=======
+	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, input.Keyword, page, pageSize)
+>>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	if err != nil {
 		return dto.AdminMediaGroupedResponse{}, fmt.Errorf("lấy media theo user thất bại: %w", err)
 	}
