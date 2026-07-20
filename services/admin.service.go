@@ -339,12 +339,12 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	}, nil
 }
 
-func (s *AdminService) ListPosts(ctx context.Context, superAdminID string, input dto.AdminPostFilterInput) (dto.AdminPostListResponse, error) {
-	if superAdminID == "" {
+func (s *AdminService) ListPosts(ctx context.Context, adminID string, input dto.AdminPostFilterInput) (dto.AdminPostListResponse, error) {
+	if adminID == "" {
 		return dto.AdminPostListResponse{}, errors.New("không có quyền truy cập")
 	}
 
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return dto.AdminPostListResponse{}, err
 	}
 
@@ -574,8 +574,8 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 	return nil
 }
 
-func (s *AdminService) ListReports(ctx context.Context, superAdminID string, input dto.AdminReportFilterInput) (dto.AdminReportListResponse, error) {
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+func (s *AdminService) ListReports(ctx context.Context, adminID string, input dto.AdminReportFilterInput) (dto.AdminReportListResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return dto.AdminReportListResponse{}, err
 	}
 
@@ -625,8 +625,8 @@ func (s *AdminService) ListReports(ctx context.Context, superAdminID string, inp
 	}, nil
 }
 
-func (s *AdminService) GetReportDetail(ctx context.Context, superAdminID, reportID string) (dto.AdminReportDetailResponse, error) {
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID string) (dto.AdminReportDetailResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return dto.AdminReportDetailResponse{}, err
 	}
 
