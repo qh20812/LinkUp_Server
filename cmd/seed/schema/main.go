@@ -220,6 +220,7 @@ func Run(env config.Env) error {
 			file_type VARCHAR(50) NOT NULL DEFAULT '',
 			file_size DOUBLE NOT NULL DEFAULT 0,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			review_reason TEXT NULL,
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
@@ -807,6 +808,11 @@ if err := addIndexIfMissing(database, "chats", "idx_chats_creator_id",
 if err := addIndexIfMissing(database, "communities", "idx_communities_status",
 	"INDEX idx_communities_status (status)"); err != nil {
 	return fmt.Errorf("schema: add idx_communities_status: %w", err)
+}
+
+// media.review_reason: stores admin review reason on media records
+if err := addColumnIfMissing(database, "media", "review_reason", "TEXT NULL"); err != nil {
+	return fmt.Errorf("schema: add media.review_reason: %w", err)
 }
 
 return nil

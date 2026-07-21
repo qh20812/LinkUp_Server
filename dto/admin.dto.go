@@ -196,13 +196,14 @@ type AdminMediaFilterInput struct {
 }
 
 type AdminMediaItem struct {
-	ID        string  `json:"id"`
-	UserID    string  `json:"user_id"`
-	FileURI   string  `json:"file_uri"`
-	FileType  string  `json:"file_type"`
-	FileSize  float64 `json:"file_size"`
-	Status    string  `json:"status"`
-	CreatedAt string  `json:"created_at"`
+	ID           string  `json:"id"`
+	UserID       string  `json:"user_id"`
+	FileURI      string  `json:"file_uri"`
+	FileType     string  `json:"file_type"`
+	FileSize     float64 `json:"file_size"`
+	Status       string  `json:"status"`
+	ReviewReason *string `json:"review_reason,omitempty"`
+	CreatedAt    string  `json:"created_at"`
 }
 
 type AdminMediaListResponse struct {
