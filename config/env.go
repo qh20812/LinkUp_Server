@@ -31,6 +31,9 @@ type Env struct {
 	TurnServerUrl  string
 	TurnUsername   string
 	TurnCredential string
+
+	MongoURI string
+	MongoDBName string
 }
 
 var (
@@ -93,6 +96,9 @@ func LoadEnv() error {
 		TurnServerUrl:  getString("TURN_SERVER_URL", ""),
 		TurnUsername:   getString("TURN_USERNAME", ""),
 		TurnCredential: getString("TURN_CREDENTIAL", ""),
+
+		MongoURI: getRequiredString("MONGO_URI"),
+		MongoDBName: getString("MONGO_DB_NAME", "linkup"),
 	}
 
 	missing := validateRequired(env)

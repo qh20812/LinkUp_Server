@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"linkup/dto"
-	"linkup/models"
+	"linkup/repository"
 	"linkup/services"
 	"linkup/utils"
 	"log"
@@ -22,8 +22,9 @@ type BroadcastMessage struct {
 }
 
 type callStore interface {
-	Create(ctx context.Context, call *models.Call) error
-	UpdateStatus(ctx context.Context, id string, status models.CallStatus, startedAt, endedAt *time.Time, duration int) error
+	Create(ctx context.Context, doc *repository.GroupCallDocument) error
+	UpdateParticipants(ctx context.Context, callID string, participants []string) error
+	UpdateStatus(ctx context.Context, callID string, status string, endedAt *time.Time) error
 }
 
 type Hub struct {
@@ -323,36 +324,17 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 	h.mu.Unlock()
 
 	if h.callStore != nil {
-		calleeID := callerID
-		for _, id := range participantIDs {
-			if strings.TrimSpace(id) == "" || id == callerID {
-				continue
-			}
-			calleeID = id
-			break
+		doc := &repository.GroupCallDocument{
+			CallID: session.CallID,
+			ChatID: session.ChatID,
+			CallerID: session.CallerID,
+			CallType: session.CallType,
+			Participants: session.ParticipantIDs(),
+			Status: "calling",
+			CreatedAt: session.CreatedAt,
+			UpdatedAt: time.Now().UTC(),
 		}
-		if calleeID == callerID {
-			for _, id := range memberIDs {
-				if strings.TrimSpace(id) == "" || id == callerID {
-					continue
-				}
-				calleeID = id
-				break
-			}
-		}
-
-		call := &models.Call{
-			ID:                 session.CallID,
-			CallerID:           callerID,
-			CalleeID:           calleeID,
-			CallType:           models.CallTypeVideo,
-			IsGroup:            true,
-			Status:             models.CallStatusCalling,
-			VideoEnabledCaller: false,
-			VideoEnabledCallee: false,
-			CreatedAt:          time.Now().UTC(),
-		}
-		if err := h.callStore.Create(context.Background(), call); err != nil {
+		if err := h.callStore.Create(context.Background(), doc); err != nil {
 			h.mu.Lock()
 			delete(h.groupCalls, session.CallID)
 			h.mu.Unlock()
@@ -436,6 +418,10 @@ func (h *Hub) ApproveJoinCall(creatorID, userID, callID string) (ApproveJoinResu
 		session.ExpiresAt = nil
 	}
 	session.UpdateActivity()
+
+	if h.callStore != nil {
+		_ = h.callStore.UpdateParticipants(context.Background(), session.CallID, session.ParticipantIDs())
+	}
 
 	return ApproveJoinResult{
 		CallID:         session.CallID,
@@ -526,11 +512,11 @@ func (h *Hub) persistCallEnd(session *GroupCallSession) {
 		return
 	}
 	now := time.Now().UTC()
-	newStatus := models.CallStatusEnded
+	newStatus := "ended"
 	if session.ActiveParticipants == nil || len(session.ActiveParticipants) == 0 {
-		newStatus = models.CallStatusCancelled
+		newStatus = "cancelled"
 	}
-	if err := h.callStore.UpdateStatus(context.Background(), session.CallID, newStatus, nil, &now, 0); err != nil {
+	if err := h.callStore.UpdateStatus(context.Background(), session.CallID, newStatus, &now); err != nil {
 		log.Printf("group call: update status failed for %s: %v", session.CallID, err)
 	}
 }

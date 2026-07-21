@@ -146,6 +146,25 @@ func (r *AuthRepository) AssignUserRole(ctx context.Context, userID string, role
 	return nil
 }
 
+func (r *AuthRepository) GetUserRole(ctx context.Context, userID string) (string, error) {
+	var roleName string
+	err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Select("roles.name").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND user_roles.scope_id IS NULL", userID).
+		Order("CASE roles.name WHEN 'SUPER_ADMIN' THEN 0 WHEN 'ADMIN' THEN 1 WHEN 'PARTNER' THEN 2 ELSE 3 END").
+		Limit(1).
+		Scan(&roleName).Error
+	if err != nil {
+		return "", fmt.Errorf("get user role: %w", err)
+	}
+	if roleName == "" {
+		return "USER", nil
+	}
+	return roleName, nil
+}
+
 func (r *AuthRepository) CountUsers(ctx context.Context, keyword string, status string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&models.User{}).
