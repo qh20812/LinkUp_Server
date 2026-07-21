@@ -357,6 +357,10 @@ type AdminAnalyticsResponse struct {
 	GroupsChangePercent     float64          `json:"groups_change_percent"`
 	CommunitiesChangePercent float64         `json:"communities_change_percent"`
 	ChartData               []ChartDataPoint `json:"chart_data,omitempty"`
+	ChartDataUsers          []ChartDataPoint `json:"chart_data_users,omitempty"`
+	ChartDataPosts          []ChartDataPoint `json:"chart_data_posts,omitempty"`
+	ChartDataReports        []ChartDataPoint `json:"chart_data_reports,omitempty"`
+	ChartDataComments       []ChartDataPoint `json:"chart_data_comments,omitempty"`
 	TopUsers                []TopActiveUser  `json:"top_users,omitempty"`
 	TopPosts                []TopEngagedPost `json:"top_posts,omitempty"`
 	UserStatusDistribution  []StatusCount    `json:"user_status_distribution,omitempty"`

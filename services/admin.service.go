@@ -10,7 +10,10 @@ import (
 	"linkup/utils"
 	"log"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
@@ -82,78 +85,86 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 	if input.StartDate == "" {
 		input.StartDate = now.AddDate(0, 0, -7).Format("2006-01-02")
 	}
-	if input.Type == "" {
-		input.Type = "all"
+
+	// ── Error-checked queries (concurrent, stop on first error) ──
+	var (
+		totalUsers   int64
+		totalPosts   int64
+		totalReports int64
+	)
+	g, _ := errgroup.WithContext(context.Background())
+	g.Go(func() error { var err error; totalUsers, err = s.adminRepo.GetTotalUsers(); return err })
+	g.Go(func() error { var err error; totalPosts, err = s.adminRepo.GetTotalPosts(); return err })
+	g.Go(func() error { var err error; totalReports, err = s.adminRepo.GetTotalReports(); return err })
+	if err := g.Wait(); err != nil {
+		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy thống kê thất bại: %w", err)
 	}
 
-	totalUsers, err := s.adminRepo.GetTotalUsers()
-	if err != nil {
-		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số người dùng thất bại: %w", err)
-	}
+	// ── Unchecked queries (concurrent, errors silently ignored) ──
+	var (
+		totalComments     int64
+		totalMedia        int64
+		totalGroups       int64
+		totalCommunities  int64
+		activeBanCount    int64
+		pendingReports    int64
+		flaggedMediaCount int64
+		activeUsersToday  int64
+		totalLikes        int64
+		totalShares       int64
+		topUsers          []dto.TopActiveUser
+		topPosts          []dto.TopEngagedPost
+		userDist          []dto.StatusCount
+		reportDist        []dto.StatusCount
+		chartDataUsers    []dto.ChartDataPoint
+		chartDataPosts    []dto.ChartDataPoint
+		chartDataReports  []dto.ChartDataPoint
+		chartDataComments []dto.ChartDataPoint
+	)
 
-	totalPosts, err := s.adminRepo.GetTotalPosts()
-	if err != nil {
-		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số bài viết thất bại: %w", err)
-	}
-
-	totalReports, err := s.adminRepo.GetTotalReports()
-	if err != nil {
-		return dto.AdminAnalyticsResponse{}, fmt.Errorf("lấy tổng số báo cáo thất bại: %w", err)
-	}
-
-	totalComments, _ := s.adminRepo.GetTotalComments()
-	totalMedia, _ := s.adminRepo.GetTotalMedia()
-	totalGroups, _ := s.adminRepo.GetTotalGroups()
-	totalCommunities, _ := s.adminRepo.GetTotalCommunities()
-	activeBanCount, _ := s.adminRepo.GetActiveBanCount()
-	pendingReports, _ := s.adminRepo.GetPendingReportCount()
-	flaggedMedia, _ := s.adminRepo.GetFlaggedMediaCount()
-	activeUsersToday, _ := s.adminRepo.GetActiveUsersToday()
-	totalLikes, _ := s.adminRepo.GetTotalLikes()
-	totalShares, _ := s.adminRepo.GetTotalShares()
-	topUsers, _ := s.adminRepo.GetTopActiveUsers(5)
-	topPosts, _ := s.adminRepo.GetTopEngagedPosts(5)
-	userDist, _ := s.adminRepo.GetUserStatusDistribution()
-	reportDist, _ := s.adminRepo.GetReportStatusDistribution()
-
-	var chartData []dto.ChartDataPoint
-	tableName := ""
-
-	switch strings.ToLower(input.Type) {
-	case "users":
-		tableName = "users"
-	case "posts":
-		tableName = "posts"
-	case "reports":
-		tableName = "reports"
-	case "all":
-		tableName = "comments"
-	default:
-		tableName = "comments"
-	}
-
-	chartData, err = s.adminRepo.GetChartData(tableName, input.StartDate, input.EndDate)
-	if err != nil {
-		chartData = []dto.ChartDataPoint{} // Fallback mảng rỗng để không crash giao diện frontend
-	}
-
-	// Tính phần trăm thay đổi so với 1 tháng trước
 	oneMonthAgo := now.AddDate(0, -1, 0)
-	prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
-	prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
-	prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
-	prevComments, _ := s.adminRepo.GetCountBeforeDate("comments", oneMonthAgo)
-	prevMedia, _ := s.adminRepo.GetCountBeforeDate("media", oneMonthAgo)
-	prevGroups, _ := s.adminRepo.GetCountBeforeDate("chats", oneMonthAgo)
-	prevCommunities, _ := s.adminRepo.GetCountBeforeDate("communities", oneMonthAgo)
 
-	usersChangePct := calcPercentChange(totalUsers, prevUsers)
-	postsChangePct := calcPercentChange(totalPosts, prevPosts)
-	reportsChangePct := calcPercentChange(totalReports, prevReports)
-	commentsChangePct := calcPercentChange(totalComments, prevComments)
-	mediaChangePct := calcPercentChange(totalMedia, prevMedia)
-	groupsChangePct := calcPercentChange(totalGroups, prevGroups)
-	communitiesChangePct := calcPercentChange(totalCommunities, prevCommunities)
+	var wg sync.WaitGroup
+	run := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
+	}
+
+	run(func() { totalComments, _ = s.adminRepo.GetTotalComments() })
+	run(func() { totalMedia, _ = s.adminRepo.GetTotalMedia() })
+	run(func() { totalGroups, _ = s.adminRepo.GetTotalGroups() })
+	run(func() { totalCommunities, _ = s.adminRepo.GetTotalCommunities() })
+	run(func() { activeBanCount, _ = s.adminRepo.GetActiveBanCount() })
+	run(func() { pendingReports, _ = s.adminRepo.GetPendingReportCount() })
+	run(func() { flaggedMediaCount, _ = s.adminRepo.GetFlaggedMediaCount() })
+	run(func() { activeUsersToday, _ = s.adminRepo.GetActiveUsersToday() })
+	run(func() { totalLikes, _ = s.adminRepo.GetTotalLikes() })
+	run(func() { totalShares, _ = s.adminRepo.GetTotalShares() })
+	run(func() { topUsers, _ = s.adminRepo.GetTopActiveUsers(5) })
+	run(func() { topPosts, _ = s.adminRepo.GetTopEngagedPosts(5) })
+	run(func() { userDist, _ = s.adminRepo.GetUserStatusDistribution() })
+	run(func() { reportDist, _ = s.adminRepo.GetReportStatusDistribution() })
+	run(func() { chartDataUsers, _ = s.adminRepo.GetChartData("users", input.StartDate, input.EndDate) })
+	run(func() { chartDataPosts, _ = s.adminRepo.GetChartData("posts", input.StartDate, input.EndDate) })
+	run(func() { chartDataReports, _ = s.adminRepo.GetChartData("reports", input.StartDate, input.EndDate) })
+	run(func() { chartDataComments, _ = s.adminRepo.GetChartData("comments", input.StartDate, input.EndDate) })
+
+	// Historical counts: single UNION ALL query instead of 7 individual
+	var prevCounts map[string]int64
+	run(func() { prevCounts, _ = s.adminRepo.GetCountsBeforeDate(oneMonthAgo) })
+
+	wg.Wait()
+
+	usersChangePct := calcPercentChange(totalUsers, prevCounts["users"])
+	postsChangePct := calcPercentChange(totalPosts, prevCounts["posts"])
+	reportsChangePct := calcPercentChange(totalReports, prevCounts["reports"])
+	commentsChangePct := calcPercentChange(totalComments, prevCounts["comments"])
+	mediaChangePct := calcPercentChange(totalMedia, prevCounts["media"])
+	groupsChangePct := calcPercentChange(totalGroups, prevCounts["chats"])
+	communitiesChangePct := calcPercentChange(totalCommunities, prevCounts["communities"])
 
 	return dto.AdminAnalyticsResponse{
 		TotalUsers:              totalUsers,
@@ -165,7 +176,7 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 		TotalCommunities:        totalCommunities,
 		TotalActiveBans:         activeBanCount,
 		PendingReports:          pendingReports,
-		FlaggedMediaCount:       flaggedMedia,
+		FlaggedMediaCount:       flaggedMediaCount,
 		ActiveUsersToday:        activeUsersToday,
 		TotalLikes:              totalLikes,
 		TotalShares:             totalShares,
@@ -176,7 +187,11 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 		MediaChangePercent:      mediaChangePct,
 		GroupsChangePercent:     groupsChangePct,
 		CommunitiesChangePercent: communitiesChangePct,
-		ChartData:               chartData,
+		ChartData:               chartDataUsers,
+		ChartDataUsers:          chartDataUsers,
+		ChartDataPosts:          chartDataPosts,
+		ChartDataReports:        chartDataReports,
+		ChartDataComments:       chartDataComments,
 		TopUsers:                topUsers,
 		TopPosts:                topPosts,
 		UserStatusDistribution:  userDist,
@@ -274,7 +289,15 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 		return nil
 	}
 
-	return s.authRepo.UpdateUserStatus(ctx, targetUserID, status)
+	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, status); err != nil {
+		return err
+	}
+
+	statusMsg := fmt.Sprintf("Trạng thái tài khoản của bạn đã được cập nhật thành: %s", status)
+	senderID := superAdminID
+	_, _ = s.notificationService.Create(ctx, targetUserID, &senderID, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
+
+	return nil
 }
 
 func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID string, input dto.AdminUserBanInput) (dto.AdminBanUserResponse, error) {
@@ -332,6 +355,13 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned); err != nil {
 		return dto.AdminBanUserResponse{}, err
 	}
+
+	banMsg := fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", input.Reason)
+	if expiresAt != nil {
+		banMsg += fmt.Sprintf(". Thời hạn: %s", expiresAt.Format("02/01/2006 15:04"))
+	}
+	senderID := superAdminID
+	_, _ = s.notificationService.Create(ctx, targetUserID, &senderID, models.NotificationTypeMessage, banMsg, nil, &targetUserID, nil)
 
 	return dto.AdminBanUserResponse{
 		Message: "ban user thành công",
@@ -392,24 +422,26 @@ func (s *AdminService) ListPosts(ctx context.Context, adminID string, input dto.
 		}
 	}
 
-	type userInfo struct {
+	userMap := make(map[string]struct {
 		Username    string
 		DisplayName string
 		AvatarURI   string
+	}, len(userIDs))
+
+	if users, err := s.authRepo.FindByIDs(ctx, userIDs); err == nil {
+		for _, u := range users {
+			entry := userMap[u.ID]
+			entry.Username = u.Username
+			userMap[u.ID] = entry
+		}
 	}
-	userMap := make(map[string]userInfo, len(userIDs))
-	for _, uid := range userIDs {
-		u, err := s.authRepo.FindByID(ctx, uid)
-		if err != nil || u == nil {
-			continue
+	if profiles, err := s.profileRepo.FindByIDs(ctx, userIDs); err == nil {
+		for _, p := range profiles {
+			entry := userMap[p.UserID]
+			entry.DisplayName = p.DisplayName
+			entry.AvatarURI = p.AvatarURI
+			userMap[p.UserID] = entry
 		}
-		info := userInfo{Username: u.Username}
-		profile, err := s.profileRepo.FindByUserID(ctx, uid)
-		if err == nil && profile != nil {
-			info.DisplayName = profile.DisplayName
-			info.AvatarURI = profile.AvatarURI
-		}
-		userMap[uid] = info
 	}
 
 	items := make([]dto.AdminPostListItem, 0, len(posts))

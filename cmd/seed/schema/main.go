@@ -213,19 +213,19 @@ func Run(env config.Env) error {
 
 		// 6. Depends on users, posts
 		`CREATE TABLE IF NOT EXISTS media (
-			id VARCHAR(36) PRIMARY KEY,
-			user_id VARCHAR(36) NOT NULL,
-			post_id VARCHAR(36) NULL,
-			file_uri VARCHAR(512) NOT NULL,
-			file_type VARCHAR(50) NOT NULL DEFAULT '',
-			file_size DOUBLE NOT NULL DEFAULT 0,
-			status VARCHAR(20) NOT NULL DEFAULT 'pending',
-			created_at DATETIME NOT NULL,
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-			INDEX idx_media_user_id (user_id),
-			INDEX idx_media_post_id (post_id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+				id VARCHAR(36) PRIMARY KEY,
+				user_id VARCHAR(36) NOT NULL,
+				post_id VARCHAR(36) NULL,
+				file_uri VARCHAR(512) NOT NULL,
+				file_type VARCHAR(50) NOT NULL DEFAULT '',
+				file_size DOUBLE NOT NULL DEFAULT 0,
+				status VARCHAR(20) NOT NULL DEFAULT 'pending',
+				created_at DATETIME NOT NULL,
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+				FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+				INDEX idx_media_user_id (user_id),
+				INDEX idx_media_post_id (post_id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 7. Depends on media
 		`CREATE TABLE IF NOT EXISTS ads (
@@ -243,6 +243,7 @@ func Run(env config.Env) error {
             FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
             FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE CASCADE,
             INDEX idx_ads_partner_id (partner_id),
+            INDEX idx_ads_media_id (media_id),
             INDEX idx_ads_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -807,6 +808,49 @@ if err := addIndexIfMissing(database, "chats", "idx_chats_creator_id",
 if err := addIndexIfMissing(database, "communities", "idx_communities_status",
 	"INDEX idx_communities_status (status)"); err != nil {
 	return fmt.Errorf("schema: add idx_communities_status: %w", err)
+}
+
+// Step D: created_at indexes for analytics queries (admin dashboard chart + UNION ALL counts)
+tables := []struct {
+	Name      string
+	IndexName string
+	Def       string
+}{
+	{"users", "idx_users_created_at", "INDEX idx_users_created_at (created_at)"},
+	{"reports", "idx_reports_created_at", "INDEX idx_reports_created_at (created_at)"},
+	{"comments", "idx_comments_created_at", "INDEX idx_comments_created_at (created_at)"},
+	{"media", "idx_media_created_at", "INDEX idx_media_created_at (created_at)"},
+	{"chats", "idx_chats_created_at", "INDEX idx_chats_created_at (created_at)"},
+	{"communities", "idx_communities_created_at", "INDEX idx_communities_created_at (created_at)"},
+}
+for _, t := range tables {
+	if err := addIndexIfMissing(database, t.Name, t.IndexName, t.Def); err != nil {
+		return fmt.Errorf("schema: add %s: %w", t.IndexName, err)
+	}
+}
+
+// Phase 1: composite index for notifications query (WHERE receiver_id = ? ORDER BY created_at DESC)
+if err := addIndexIfMissing(database, "notifications", "idx_notifications_receiver_created",
+	"INDEX idx_notifications_receiver_created (receiver_id, created_at)"); err != nil {
+	return fmt.Errorf("schema: add idx_notifications_receiver_created: %w", err)
+}
+
+// Phase 2: new preference columns for community and voice call notifications
+if err := addColumnIfMissing(database, "notification_preferences", "community_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+	return fmt.Errorf("schema: add notification_preferences.community_enabled: %w", err)
+}
+if err := addColumnIfMissing(database, "notification_preferences", "voice_call_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+	return fmt.Errorf("schema: add notification_preferences.voice_call_enabled: %w", err)
+}
+
+// Phase 3: indexes for admin ListPosts performance (correlated subqueries in ListPosts)
+if err := addIndexIfMissing(database, "post_reactions", "idx_post_reactions_post_id",
+	"INDEX idx_post_reactions_post_id (post_id)"); err != nil {
+	return fmt.Errorf("schema: add idx_post_reactions_post_id: %w", err)
+}
+if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_post_id",
+	"INDEX idx_post_shares_post_id (post_id)"); err != nil {
+	return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
 }
 
 return nil

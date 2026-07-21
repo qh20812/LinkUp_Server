@@ -15,15 +15,19 @@ func Run(env config.Env) error {
 	defer database.Close()
 
 	tables := []string{
-		"ad_analytics", "moderation_logs", "bans", "reports",
+		"ad_media", "ad_analytics", "moderation_logs", "bans", "reports",
 		"notifications", "notification_preferences", "calls", "messages", "chat_participants", "chat_invitations",
-		"chats", "community_join_requests", "community_invitations", "community_invite_codes", "group_members", "community_rules", "communities", "tags",
+		"chats", "group_chat_bans", "group_chat_member_requests", "group_chat_member_settings",
+		"group_chat_mutes", "group_chat_settings",
+		"community_join_requests", "community_invitations", "community_invite_codes", "group_members", "community_rules", "communities", "tags",
 		"community_policies", "member_contributions", "community_challenges", "challenge_participants",
 		"post_reactions", "bookmarks", "blocks", "friends",
 		"follows", "comments", "posts", "media", "stories",
 		"ads", "user_roles", "profiles", "violation_rules",
 		"emojis", "roles", "users",
-		"password_histories", "password_reset_tokens", "post_shares",
+		"call_hidden", "password_histories", "password_reset_tokens", "post_shares",
+		"partner_subscriptions", "ad_packages",
+		"story_interacts", "story_views",
 	}
 
 	if err := internal.Exec(database, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {

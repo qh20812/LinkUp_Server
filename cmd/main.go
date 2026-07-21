@@ -92,7 +92,7 @@ func main() {
 		// ===== KHỞI TẠO TẦNG NOTIFICATION (HỖ TRỢ THÔNG BÁO TIN NHẮN/LIKE/COMMENT) =====
 		notificationRepository := repository.NewNotificationRepository(gormDB)
 		notificationPreferenceRepository := repository.NewNotificationPreferenceRepository(gormDB)
-		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, hub)
+		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, profileRepository, hub)
 		notificationController := controllers.NewNotificationController(notificationService)
 		routes.RegisterNotificationRoutes(router, notificationController, env)
 
@@ -110,7 +110,7 @@ func main() {
 		routes.RegisterPostRoutes(router, postController, env)
 
 		// ===== KHỞI TẠO TẦNG PROFILE USER =====
-		profileService := services.NewProfileService(profileRepository)
+		profileService := services.NewProfileService(profileRepository) // profileRepository đã được khởi tạo ở notification layer
 		profileController := controllers.NewProfileController(profileService)
 		routes.RegisterProfileRoutes(router, profileController, env)
 
@@ -245,7 +245,7 @@ func main() {
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng
-	router.GET("/ws", ws.ServeWS(hub, env))
+	router.GET("/api/ws", ws.ServeWS(hub, env))
 
 	// 7. Khởi chạy toàn bộ hệ thống HTTP Server
 	addr := ":" + port

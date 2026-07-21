@@ -7,4 +7,6 @@ type NotificationPreference struct {
 	FollowEnabled        bool   `json:"follow_enabled"`
 	MessageEnabled       bool   `json:"message_enabled"`
 	FriendRequestEnabled bool   `json:"friend_request_enabled"`
+	CommunityEnabled     bool   `json:"community_enabled"`
+	VoiceCallEnabled     bool   `json:"voice_call_enabled"`
 }

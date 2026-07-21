@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -12,16 +13,18 @@ import (
 )
 
 type NotificationService struct {
-	notifRepo *repository.NotificationRepository
-	prefRepo  *repository.NotificationPreferenceRepository
-	hub       *ws.Hub
+	notifRepo   *repository.NotificationRepository
+	prefRepo    *repository.NotificationPreferenceRepository
+	profileRepo *repository.ProfileRepository
+	hub         *ws.Hub
 }
 
-func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, hub *ws.Hub) *NotificationService {
+func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub) *NotificationService {
 	return &NotificationService{
-		notifRepo: notifRepo,
-		prefRepo:  prefRepo,
-		hub:       hub,
+		notifRepo:   notifRepo,
+		prefRepo:    prefRepo,
+		profileRepo: profileRepo,
+		hub:         hub,
 	}
 }
 
@@ -110,7 +113,7 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 	return notifications, nil
 }
 
-func (s *NotificationService) GetList(ctx context.Context, userID string, page, pageSize int, unreadOnly bool) ([]models.Notification, int64, error) {
+func (s *NotificationService) GetList(ctx context.Context, userID string, page, pageSize int, unreadOnly bool) ([]dto.NotificationResponse, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -129,7 +132,31 @@ func (s *NotificationService) GetList(ctx context.Context, userID string, page, 
 		return nil, 0, err
 	}
 
-	return notifications, total, nil
+	senderIDs := make([]string, 0, len(notifications))
+	for _, n := range notifications {
+		if n.SenderID != nil {
+			senderIDs = append(senderIDs, *n.SenderID)
+		}
+	}
+
+	senderMap := make(map[string]dto.SenderProfile)
+	if len(senderIDs) > 0 {
+		profiles, err := s.profileRepo.FindByIDs(ctx, senderIDs)
+		if err == nil {
+			for _, p := range profiles {
+				name := p.DisplayName
+				if name == "" {
+					name = "User"
+				}
+				senderMap[p.UserID] = dto.SenderProfile{
+					DisplayName: name,
+					AvatarURI:   p.AvatarURI,
+				}
+			}
+		}
+	}
+
+	return dto.ToNotificationResponseList(notifications, senderMap), total, nil
 }
 
 func (s *NotificationService) MarkAsRead(ctx context.Context, userID, notificationID string) error {
@@ -162,12 +189,18 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 		return pref.FollowEnabled
 	case models.NotificationTypeMessage:
 		return pref.MessageEnabled
-	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted,
-		models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved,
+	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted:
+		return pref.FriendRequestEnabled
+	case models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved,
 		models.NotificationTypeCommunityJoinRejected, models.NotificationTypeCommunityRoleChanged,
 		models.NotificationTypeCommunityMemberLeft, models.NotificationTypeCommunityMemberKicked,
-		models.NotificationTypeCommunityGroupChatAdded:
-		return pref.FriendRequestEnabled
+		models.NotificationTypeCommunityGroupChatAdded,
+		models.NotificationTypeCommunityInviteCodeUsed,
+		models.NotificationTypeCommunityInvitationReceived,
+		models.NotificationTypeCommunityInvitationAccepted:
+		return pref.CommunityEnabled
+	case models.NotificationTypeVoiceCall:
+		return pref.VoiceCallEnabled
 	default:
 		return true
 	}

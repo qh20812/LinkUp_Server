@@ -72,6 +72,17 @@ func (r *AuthRepository) FindByID(ctx context.Context, userID string) (*models.U
 	return &user, nil
 }
 
+func (r *AuthRepository) FindByIDs(ctx context.Context, userIDs []string) ([]models.User, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var users []models.User
+	if err := r.db.WithContext(ctx).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("find users by ids: %w", err)
+	}
+	return users, nil
+}
+
 // SavePasswordHistory lưu lịch sử mật khẩu của người dùng vào cơ sở dữ liệu.
 func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string, hashedPassword string) error {
 	history := &models.PasswordHistory{
