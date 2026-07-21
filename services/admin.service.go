@@ -140,29 +140,14 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 	prevUsers, _ := s.adminRepo.GetCountBeforeDate("users", oneMonthAgo)
 	prevPosts, _ := s.adminRepo.GetCountBeforeDate("posts", oneMonthAgo)
 	prevReports, _ := s.adminRepo.GetCountBeforeDate("reports", oneMonthAgo)
-<<<<<<< HEAD
-=======
 	prevComments, _ := s.adminRepo.GetCountBeforeDate("comments", oneMonthAgo)
 	prevMedia, _ := s.adminRepo.GetCountBeforeDate("media", oneMonthAgo)
 	prevGroups, _ := s.adminRepo.GetCountBeforeDate("chats", oneMonthAgo)
 	prevCommunities, _ := s.adminRepo.GetCountBeforeDate("communities", oneMonthAgo)
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 
 	usersChangePct := calcPercentChange(totalUsers, prevUsers)
 	postsChangePct := calcPercentChange(totalPosts, prevPosts)
 	reportsChangePct := calcPercentChange(totalReports, prevReports)
-<<<<<<< HEAD
-
-	return dto.AdminAnalyticsResponse{
-		TotalUsers:           totalUsers,
-		TotalPosts:           totalPosts,
-		TotalReports:         totalReports,
-		UsersChangePercent:   usersChangePct,
-		PostsChangePercent:   postsChangePct,
-		ReportsChangePercent: reportsChangePct,
-		ChartData:            chartData,
-		GeneratedAt:          time.Now().UTC(),
-=======
 	commentsChangePct := calcPercentChange(totalComments, prevComments)
 	mediaChangePct := calcPercentChange(totalMedia, prevMedia)
 	groupsChangePct := calcPercentChange(totalGroups, prevGroups)
@@ -195,7 +180,6 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 		UserStatusDistribution:  userDist,
 		ReportStatusDistribution: reportDist,
 		GeneratedAt:             time.Now().UTC(),
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	}, nil
 }
 
@@ -1623,11 +1607,7 @@ func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID strin
 		statusParam = ""
 	}
 
-<<<<<<< HEAD
-	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, page, pageSize)
-=======
 	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, input.Keyword, page, pageSize)
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	if err != nil {
 		return dto.AdminMediaGroupedResponse{}, fmt.Errorf("lấy media theo user thất bại: %w", err)
 	}

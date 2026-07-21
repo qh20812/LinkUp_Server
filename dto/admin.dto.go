@@ -192,10 +192,7 @@ type AdminMediaFilterInput struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size" binding:"max=100"`
 	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
-<<<<<<< HEAD
-=======
 	Keyword  string `form:"keyword"`
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 }
 
 type AdminMediaItem struct {
@@ -313,17 +310,6 @@ type ChartDataPoint struct {
 	Count int64  `json:"count"` // Trục Y: Lượng tạo mới trong ngày
 }
 
-<<<<<<< HEAD
-type AdminAnalyticsResponse struct {
-	TotalUsers           int64            `json:"total_users"`
-	TotalPosts           int64            `json:"total_posts"`
-	TotalReports         int64            `json:"total_reports"`
-	UsersChangePercent   float64          `json:"users_change_percent"`
-	PostsChangePercent   float64          `json:"posts_change_percent"`
-	ReportsChangePercent float64          `json:"reports_change_percent"`
-	ChartData            []ChartDataPoint `json:"chart_data,omitempty"`
-	GeneratedAt          time.Time        `json:"generated_at"`
-=======
 type TopActiveUser struct {
 	UserID      string `json:"user_id"`
 	Username    string `json:"username"`
@@ -373,17 +359,13 @@ type AdminAnalyticsResponse struct {
 	UserStatusDistribution  []StatusCount    `json:"user_status_distribution,omitempty"`
 	ReportStatusDistribution []StatusCount   `json:"report_status_distribution,omitempty"`
 	GeneratedAt             time.Time        `json:"generated_at"`
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 }
 
 type AdminMediaGroupFilterInput struct {
 	Page     int    `form:"page"`
 	PageSize int    `form:"page_size" binding:"max=100"`
 	Status   string `form:"status" binding:"omitempty,oneof=flagged rejected approved all"`
-<<<<<<< HEAD
-=======
 	Keyword  string `form:"keyword"`
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 }
 
 type AdminMediaGroupItem struct {
@@ -395,15 +377,8 @@ type AdminMediaGroupItem struct {
 }
 
 type AdminMediaGroupedResponse struct {
-<<<<<<< HEAD
-	Groups   []AdminMediaGroupItem `json:"groups"`
-	Total    int64                 `json:"total"`
-	Page     int                   `json:"page"`
-	PageSize int                   `json:"page_size"`
-=======
 	Groups    []AdminMediaGroupItem `json:"groups"`
 	Total     int64                 `json:"total"`
 	Page      int                   `json:"page"`
 	PageSize  int                   `json:"page_size"`
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 }

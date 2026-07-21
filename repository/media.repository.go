@@ -93,11 +93,6 @@ func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaSt
 
 	base := r.db.WithContext(ctx).Model(&models.Media{})
 	if status != "" {
-<<<<<<< HEAD
-		base = base.Where("status = ?", status)
-	}
-	
-=======
 		base = base.Where("media.status = ?", status)
 	}
 
@@ -109,7 +104,6 @@ func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaSt
 			Where("users.username LIKE ? OR COALESCE(profiles.display_name, '') LIKE ?", like, like)
 	}
 
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -180,11 +174,7 @@ func (r *MediaRepository) DeleteWithStorageAdjustment(ctx context.Context, userI
 	})
 }
 
-<<<<<<< HEAD
-func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status string, page, pageSize int) ([]userMediaGroup, int64, error) {
-=======
 func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status, keyword string, page, pageSize int) ([]userMediaGroup, int64, error) {
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	if page < 1 {
 		page = 1
 	}
@@ -195,12 +185,6 @@ func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status, keyw
 	var total int64
 	base := r.db.WithContext(ctx).Model(&models.Media{})
 	if status != "" {
-<<<<<<< HEAD
-		base = base.Where("status = ?", status)
-	}
-
-	if err := base.Distinct("user_id").Count(&total).Error; err != nil {
-=======
 		base = base.Where("media.status = ?", status)
 	}
 
@@ -213,26 +197,17 @@ func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status, keyw
 	}
 
 	if err := base.Distinct("media.user_id").Count(&total).Error; err != nil {
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 		return nil, 0, err
 	}
 
 	var userIDs []string
 	userQuery := r.db.WithContext(ctx).Model(&models.Media{}).
-<<<<<<< HEAD
-		Select("DISTINCT(user_id)").
-		Order("user_id ASC").
-=======
 		Select("DISTINCT(media.user_id) AS user_id").
 		Order("media.user_id ASC").
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 		Offset((page - 1) * pageSize).
 		Limit(pageSize)
 
 	if status != "" {
-<<<<<<< HEAD
-		userQuery = userQuery.Where("status = ?", status)
-=======
 		userQuery = userQuery.Where("media.status = ?", status)
 	}
 
@@ -242,7 +217,6 @@ func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status, keyw
 			Joins("JOIN users ON users.id = media.user_id").
 			Joins("LEFT JOIN profiles ON profiles.user_id = media.user_id").
 			Where("users.username LIKE ? OR COALESCE(profiles.display_name, '') LIKE ?", like, like)
->>>>>>> 9810488804fc998e0d57f45a0bd572dac8246d30
 	}
 
 	if err := userQuery.Pluck("user_id", &userIDs).Error; err != nil {

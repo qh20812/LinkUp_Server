@@ -749,7 +749,7 @@ func (c *Client) ReadPump() {
 		case "group:call:toggle-video":
 			var payload dto.GroupCallToggleVideoPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				c.sendError("dữ liệu kết thúc cuộc gọi không hợp lệ")
+				c.sendError("dữ liệu video không hợp lệ")
 				continue
 			}
 
