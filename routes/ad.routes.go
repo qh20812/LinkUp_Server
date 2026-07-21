@@ -5,12 +5,19 @@ import (
 	"linkup/controllers"
 	"linkup/middlewares"
 	"linkup/models"
+	"linkup/services"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
-func RegisterAdRoutes(router *gin.Engine, ctrl *controllers.AdController, env config.Env, db *gorm.DB) {
+func RegisterAdRoutes(
+	router *gin.Engine,
+	ctrl *controllers.AdController,
+	adService services.AdService,
+	env config.Env,
+	db *gorm.DB,
+) {
 	adsManagement := router.Group("/ads-management")
 	{
 		adsManagement.POST("",
@@ -28,12 +35,14 @@ func RegisterAdRoutes(router *gin.Engine, ctrl *controllers.AdController, env co
 		adsManagement.GET("/:id/analytics",
 			middlewares.AuthMiddleware(env),
 			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			middlewares.CheckAdOwnership(db, adService),
 			ctrl.GetAnalytics,
 		)
 
 		adsManagement.PATCH("/:id/status",
 			middlewares.AuthMiddleware(env),
 			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			middlewares.CheckAdOwnership(db, adService),
 			ctrl.UpdateStatus,
 		)
 	}

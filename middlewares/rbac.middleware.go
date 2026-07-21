@@ -45,7 +45,7 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 		}
 
 		if !isAllowed {
-			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to access this resource"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "Bạn phải mua gói dịch vụ quảng cáo để thực hiện hành động này"})
 			c.Abort()
 			return
 		}
