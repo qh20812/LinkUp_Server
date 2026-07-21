@@ -813,16 +813,47 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 		return dto.AdminMediaListResponse{}, fmt.Errorf("lấy danh sách media thất bại: %w", err)
 	}
 
+	// Collect unique user IDs for batch lookup
+	userIDs := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, m := range items {
+		if _, dup := seen[m.UserID]; !dup {
+			seen[m.UserID] = struct{}{}
+			userIDs = append(userIDs, m.UserID)
+		}
+	}
+
+	type userInfo struct {
+		Username    string
+		DisplayName string
+	}
+	userMap := make(map[string]userInfo, len(userIDs))
+	for _, uid := range userIDs {
+		u, err := s.authRepo.FindByID(ctx, uid)
+		if err != nil || u == nil {
+			continue
+		}
+		info := userInfo{Username: u.Username}
+		profile, err := s.profileRepo.FindByUserID(ctx, uid)
+		if err == nil && profile != nil {
+			info.DisplayName = profile.DisplayName
+		}
+		userMap[uid] = info
+	}
+
 	mediaItems := make([]dto.AdminMediaItem, 0, len(items))
 	for _, m := range items {
+		info := userMap[m.UserID]
 		mediaItems = append(mediaItems, dto.AdminMediaItem{
-			ID:        m.ID,
-			UserID:    m.UserID,
-			FileURI:   m.FileURI,
-			FileType:  m.FileType,
-			FileSize:  m.FileSize,
-			Status:    string(m.Status),
-			CreatedAt: m.CreatedAt.Format(time.RFC3339),
+			ID:          m.ID,
+			UserID:      m.UserID,
+			Username:    info.Username,
+			DisplayName: info.DisplayName,
+			FileURI:     m.FileURI,
+			FileType:    m.FileType,
+			FileSize:    m.FileSize,
+			Status:      string(m.Status),
+			CreatedAt:   m.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
