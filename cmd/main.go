@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -230,7 +231,14 @@ func main() {
 		groupCallHub := groupws.NewHub()
 		go groupCallHub.Run()
 		groupCallHub.SetGroupChatHub(groupHub)
-		groupCallHub.SetCallStore(callRepository)
+		if mongoClient, err := db.ConnectMongoDB(env.MongoURI); err != nil {
+			log.Printf("MongoDB connection: failed (%v) — group calls will not be persisted", err)
+		} else {
+			log.Println("MongoDB connection: success")
+			defer mongoClient.Disconnect(context.Background())
+			groupCallRepo := repository.NewGroupCallRepository(mongoClient.Database(env.MongoDBName))
+			groupCallHub.SetCallStore(groupCallRepo)
+		}
 		// allow hub to persist chat system messages when calls expire
 		groupCallHub.SetMessageService(groupMessageService)
 		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env)
