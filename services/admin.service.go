@@ -1686,12 +1686,7 @@ func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID strin
 
 	page, pageSize := s.resolvePageSize(input.Page, input.PageSize)
 
-	statusParam := strings.TrimSpace(input.Status)
-	if strings.EqualFold(statusParam, "all") || statusParam == "" {
-		statusParam = ""
-	}
-
-	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, input.Status, input.Keyword, page, pageSize)
+	groups, total, err := s.mediaRepo.GetMediaGroupsByUser(ctx, "approved", input.Keyword, page, pageSize)
 	if err != nil {
 		return dto.AdminMediaGroupedResponse{}, fmt.Errorf("lấy media theo user thất bại: %w", err)
 	}
