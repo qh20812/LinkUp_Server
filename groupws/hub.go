@@ -513,7 +513,7 @@ func (h *Hub) persistCallEnd(session *GroupCallSession) {
 	}
 	now := time.Now().UTC()
 	newStatus := "ended"
-	if session.ActiveParticipants == nil || len(session.ActiveParticipants) == 0 {
+	if len(session.Joined) <= 1 {
 		newStatus = "cancelled"
 	}
 	if err := h.callStore.UpdateStatus(context.Background(), session.CallID, newStatus, &now); err != nil {

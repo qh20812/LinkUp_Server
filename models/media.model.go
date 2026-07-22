@@ -21,8 +21,9 @@ type Media struct {
 	FileURI   string      `json:"file_uri"`
 	FileType  string      `json:"file_type"`
 	FileSize  float64     `json:"file_size"`
-	Status    MediaStatus `json:"status"`
-	CreatedAt time.Time   `json:"created_at"`
+	Status       MediaStatus `json:"status"`
+	ReviewReason *string     `json:"review_reason,omitempty"`
+	CreatedAt    time.Time   `json:"created_at"`
 }
 
 func NewMedia(userID string, postID *string, fileURI, fileType string, fileSize float64) Media {

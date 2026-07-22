@@ -213,19 +213,20 @@ func Run(env config.Env) error {
 
 		// 6. Depends on users, posts
 		`CREATE TABLE IF NOT EXISTS media (
-				id VARCHAR(36) PRIMARY KEY,
-				user_id VARCHAR(36) NOT NULL,
-				post_id VARCHAR(36) NULL,
-				file_uri VARCHAR(512) NOT NULL,
-				file_type VARCHAR(50) NOT NULL DEFAULT '',
-				file_size DOUBLE NOT NULL DEFAULT 0,
-				status VARCHAR(20) NOT NULL DEFAULT 'pending',
-				created_at DATETIME NOT NULL,
-				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-				FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-				INDEX idx_media_user_id (user_id),
-				INDEX idx_media_post_id (post_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			post_id VARCHAR(36) NULL,
+			file_uri VARCHAR(512) NOT NULL,
+			file_type VARCHAR(50) NOT NULL DEFAULT '',
+			file_size DOUBLE NOT NULL DEFAULT 0,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			review_reason TEXT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+			INDEX idx_media_user_id (user_id),
+			INDEX idx_media_post_id (post_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 7. Depends on media
 		`CREATE TABLE IF NOT EXISTS ads (

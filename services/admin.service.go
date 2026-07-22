@@ -876,18 +876,16 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 	}
 
 	mediaItems := make([]dto.AdminMediaItem, 0, len(items))
-	for _, m := range items {
-		info := userMap[m.UserID]
+	for _, m := range items {	
 		mediaItems = append(mediaItems, dto.AdminMediaItem{
-			ID:          m.ID,
-			UserID:      m.UserID,
-			Username:    info.Username,
-			DisplayName: info.DisplayName,
-			FileURI:     m.FileURI,
-			FileType:    m.FileType,
-			FileSize:    m.FileSize,
-			Status:      string(m.Status),
-			CreatedAt:   m.CreatedAt.Format(time.RFC3339),
+			ID:           m.ID,
+			UserID:       m.UserID,
+			FileURI:      m.FileURI,
+			FileType:     m.FileType,
+			FileSize:     m.FileSize,
+			Status:       string(m.Status),
+			ReviewReason: m.ReviewReason,
+			CreatedAt:    m.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -937,7 +935,7 @@ func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string,
 		return fmt.Errorf("không thể chuyển media từ %s sang %s", media.Status, newStatus)
 	}
 
-	if err := s.mediaRepo.UpdateStatus(ctx, mediaID, newStatus); err != nil {
+	if err := s.mediaRepo.UpdateStatusAndReview(ctx, mediaID, newStatus, input.Reason); err != nil {
 		return fmt.Errorf("cập nhật trạng thái media thất bại: %w", err)
 	}
 
@@ -1759,13 +1757,14 @@ func (s *AdminService) ListMediaGroupedByUser(ctx context.Context, adminID strin
 		items := make([]dto.AdminMediaItem, 0, len(g.Media))
 		for _, m := range g.Media {
 			items = append(items, dto.AdminMediaItem{
-				ID:        m.ID,
-				UserID:    m.UserID,
-				FileURI:   m.FileURI,
-				FileType:  m.FileType,
-				FileSize:  m.FileSize,
-				Status:    string(m.Status),
-				CreatedAt: m.CreatedAt.Format(time.RFC3339),
+				ID:           m.ID,
+				UserID:       m.UserID,
+				FileURI:      m.FileURI,
+				FileType:     m.FileType,
+				FileSize:     m.FileSize,
+				Status:       string(m.Status),
+				ReviewReason: m.ReviewReason,
+				CreatedAt:    m.CreatedAt.Format(time.RFC3339),
 			})
 		}
 
