@@ -81,7 +81,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(createdUser)
+	accessToken, refreshToken, err := s.generateTokens(createdUser, "USER")
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -111,7 +111,12 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(user)
+	role, err := s.authRepo.GetUserRole(ctx, user.ID)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(user, role)
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -119,8 +124,8 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(), s.refreshTTL()), nil
 }
 
-func (s *AuthService) generateTokens(user *models.User) (string, string, error) {
-	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, s.accessTTL(), s.refreshTTL())
+func (s *AuthService) generateTokens(user *models.User, role string) (string, string, error) {
+	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, s.accessTTL(), s.refreshTTL())
 }
 
 func (s *AuthService) accessTTL() time.Duration {
@@ -233,7 +238,12 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		return dto.TokenResponse{}, errors.New("tài khoản chưa được kích hoạt")
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(user)
+	role, err := s.authRepo.GetUserRole(ctx, user.ID)
+	if err != nil {
+		return dto.TokenResponse{}, err
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(user, role)
 	if err != nil {
 		return dto.TokenResponse{}, err
 	}

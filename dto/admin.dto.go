@@ -196,14 +196,15 @@ type AdminMediaFilterInput struct {
 }
 
 type AdminMediaItem struct {
-	ID           string  `json:"id"`
-	UserID       string  `json:"user_id"`
-	FileURI      string  `json:"file_uri"`
-	FileType     string  `json:"file_type"`
-	FileSize     float64 `json:"file_size"`
-	Status       string  `json:"status"`
-	ReviewReason *string `json:"review_reason,omitempty"`
-	CreatedAt    string  `json:"created_at"`
+	ID          string  `json:"id"`
+	UserID      string  `json:"user_id"`
+	Username    string  `json:"username,omitempty"`
+	DisplayName string  `json:"display_name,omitempty"`
+	FileURI     string  `json:"file_uri"`
+	FileType    string  `json:"file_type"`
+	FileSize    float64 `json:"file_size"`
+	Status      string  `json:"status"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 type AdminMediaListResponse struct {
@@ -326,6 +327,7 @@ type TopEngagedPost struct {
 	ViewsCount    int    `json:"views_count"`
 	LikesCount    int    `json:"likes_count"`
 	CommentsCount int    `json:"comments_count"`
+	HasMedia      bool   `json:"has_media"`
 }
 
 type StatusCount struct {
@@ -355,6 +357,10 @@ type AdminAnalyticsResponse struct {
 	GroupsChangePercent     float64          `json:"groups_change_percent"`
 	CommunitiesChangePercent float64         `json:"communities_change_percent"`
 	ChartData               []ChartDataPoint `json:"chart_data,omitempty"`
+	ChartDataUsers          []ChartDataPoint `json:"chart_data_users,omitempty"`
+	ChartDataPosts          []ChartDataPoint `json:"chart_data_posts,omitempty"`
+	ChartDataReports        []ChartDataPoint `json:"chart_data_reports,omitempty"`
+	ChartDataComments       []ChartDataPoint `json:"chart_data_comments,omitempty"`
 	TopUsers                []TopActiveUser  `json:"top_users,omitempty"`
 	TopPosts                []TopEngagedPost `json:"top_posts,omitempty"`
 	UserStatusDistribution  []StatusCount    `json:"user_status_distribution,omitempty"`
@@ -381,4 +387,45 @@ type AdminMediaGroupedResponse struct {
 	Total     int64                 `json:"total"`
 	Page      int                   `json:"page"`
 	PageSize  int                   `json:"page_size"`
+}
+
+// ── Admin Ad Management ──
+
+type AdminAdFilterInput struct {
+	Keyword  string `form:"keyword"`
+	Status   string `form:"status"`
+	Page     int    `form:"page"`
+	PageSize int    `form:"page_size"`
+}
+
+type AdminAdStatusInput struct {
+	Status string `json:"status" binding:"required,oneof=active paused completed"`
+}
+
+type AdminAdListItem struct {
+	ID                 string     `json:"id"`
+	Title              string     `json:"title"`
+	Content            string     `json:"content"`
+	PartnerID          string     `json:"partner_id"`
+	PartnerName        string     `json:"partner_name"`
+	PartnerDisplayName string     `json:"partner_display_name"`
+	MediaID            *string    `json:"media_id,omitempty"`
+	MediaURI           string     `json:"media_uri"`
+	TargetURL          string     `json:"target_url"`
+	Status             string     `json:"status"`
+	Budget             float64    `json:"budget"`
+	Impressions        int64      `json:"impressions"`
+	Clicks             int64      `json:"clicks"`
+	CTR                float64    `json:"ctr"`
+	StartedAt          *time.Time `json:"started_at,omitempty"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+}
+
+type AdminAdListResponse struct {
+	Ads      []AdminAdListItem `json:"ads"`
+	Total    int64             `json:"total"`
+	Page     int               `json:"page"`
+	PageSize int               `json:"page_size"`
+	Message  string            `json:"message,omitempty"`
 }

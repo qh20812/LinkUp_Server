@@ -35,21 +35,21 @@ func Run(env config.Env, state *internal.SeedState) error {
 		fileType string
 		fileSize float64
 	}{
-		{0, 0, "https://cdn.example.com/uploads/photo1.jpg", "image/jpeg", 2048576},
-		{1, 1, "https://cdn.example.com/uploads/photo2.jpg", "image/jpeg", 1543200},
-		{2, 2, "https://cdn.example.com/uploads/video1.mp4", "video/mp4", 52428800},
-		{3, 3, "https://cdn.example.com/uploads/doc1.pdf", "application/pdf", 1024000},
-		{4, 4, "https://cdn.example.com/uploads/photo3.png", "image/png", 3850240},
-		{5, 5, "https://cdn.example.com/uploads/audio1.mp3", "audio/mpeg", 7680000},
-		{6, 6, "https://cdn.example.com/uploads/photo4.jpg", "image/jpeg", 1254400},
-		{7, 7, "https://cdn.example.com/uploads/photo5.gif", "image/gif", 512000},
-		{8, 8, "https://cdn.example.com/uploads/video2.mp4", "video/mp4", 104857600},
-		{0, 9, "https://cdn.example.com/uploads/photo6.jpg", "image/jpeg", 2891000},
-		{2, 10, "https://cdn.example.com/uploads/photo7.png", "image/png", 4560000},
-		{5, 11, "https://cdn.example.com/uploads/photo8.jpg", "image/jpeg", 1843200},
-		{9, 12, "https://cdn.example.com/uploads/photo9.jpg", "image/jpeg", 900000},
-		{12, 13, "https://cdn.example.com/uploads/doc2.pdf", "application/pdf", 2048000},
-		{15, 14, "https://cdn.example.com/uploads/video3.mp4", "video/mp4", 33554432},
+		{0, 0, "https://picsum.photos/seed/media0/800/600", "image/jpeg", 2048576},
+		{1, 1, "https://picsum.photos/seed/media1/800/600", "image/jpeg", 1543200},
+		{2, 2, "https://www.w3schools.com/html/mov_bbb.mp4", "video/mp4", 52428800},
+		{3, 3, "https://picsum.photos/seed/media3/800/600", "image/jpeg", 1024000},
+		{4, 4, "https://picsum.photos/seed/media4/800/600", "image/png", 3850240},
+		{5, 5, "https://media.w3.org/2010/05/sintel/trailer.mp4", "video/mp4", 7680000},
+		{6, 6, "https://picsum.photos/seed/media6/800/600", "image/jpeg", 1254400},
+		{7, 7, "https://picsum.photos/seed/media7/400/400", "image/jpeg", 512000},
+		{8, 8, "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4", "video/mp4", 104857600},
+		{0, 9, "https://picsum.photos/seed/media9/800/600", "image/jpeg", 2891000},
+		{2, 10, "https://picsum.photos/seed/media10/800/600", "image/png", 4560000},
+		{5, 11, "https://picsum.photos/seed/media11/800/600", "image/jpeg", 1843200},
+		{9, 12, "https://picsum.photos/seed/media12/800/600", "image/jpeg", 900000},
+		{12, 13, "https://picsum.photos/seed/media13/800/600", "image/jpeg", 2048000},
+		{15, 14, "https://www.w3schools.com/html/mov_bbb.mp4", "video/mp4", 33554432},
 	}
 
 	for _, m := range mediaData {
@@ -115,10 +115,6 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i := 0; i < 10; i++ {
 		userID := state.UserIDs[i%len(state.UserIDs)]
-		mediaType := "image"
-		if i%4 == 0 {
-			mediaType = "video"
-		}
 		caption := pick([]string{
 			"Beautiful morning!",
 			"Check out this view 🌄",
@@ -136,8 +132,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		if err := internal.Exec(database,
 			`INSERT INTO stories (id, user_id, media_uri, media_type, caption, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			internal.UUID(), userID,
-			fmt.Sprintf("https://cdn.example.com/stories/story%d.jpg", i),
-			mediaType, caption, now.Add(-time.Duration(randRange(1, 12))*time.Hour), expiresAt,
+			fmt.Sprintf("https://picsum.photos/seed/story%d/600/900", i),
+			"image", caption, now.Add(-time.Duration(randRange(1, 12))*time.Hour), expiresAt,
 		); err != nil {
 			return fmt.Errorf("extended: insert story %d: %w", i, err)
 		}
@@ -145,15 +141,16 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	notifTypes := []string{"like", "comment", "follow", "message", "friend_request"}
 	notifContents := []string{
-		"liked your post",
-		"commented on your post",
-		"started following you",
-		"sent you a message",
-		"sent you a friend request",
+		"đã thích bài viết của bạn",
+		"đã bình luận bài viết của bạn",
+		"đã theo dõi bạn",
+		"đã gửi tin nhắn",
+		"đã gửi lời mời kết bạn",
 	}
 
 	for i := 0; i < 20; i++ {
-		receiverID := state.UserIDs[i%len(state.UserIDs)]
+		// Loại trừ superadmin (index 0) và admin (index 1) khỏi receiver
+		receiverID := state.UserIDs[i%18+2]
 		senderID := internal.Ptr(state.UserIDs[(i+2)%len(state.UserIDs)])
 		notifType := pick(notifTypes)
 		isRead := rng.Intn(3) > 0
