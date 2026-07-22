@@ -6,11 +6,12 @@ import (
 	"linkup/middlewares"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func RegisterFriendRoutes(router *gin.Engine, friendController *controllers.FriendController, env config.Env) {
+func RegisterFriendRoutes(router *gin.Engine, friendController *controllers.FriendController, env config.Env, db *gorm.DB) {
 	friend := router.Group("/api/friend-requests")
-	friend.Use(middlewares.AuthMiddleware(env))
+	friend.Use(middlewares.AuthMiddleware(env, db))
 	{
 		friend.GET("", friendController.GetFriendRequests)
 		friend.POST("/:userID", friendController.ToggleFriendRequest)

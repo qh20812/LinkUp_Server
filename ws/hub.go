@@ -120,9 +120,6 @@ func (h *Hub) SendToUser(userID string, msg OutgoingMessage) {
 		return
 	}
 
-	// Phase 1 fix: Copy the client set under RLock so we can release the
-	// lock before doing I/O (channel send). This prevents holding RLock
-	// while iterating a map that may be mutated by unregister/broadcast.
 	h.mu.RLock()
 	clients, ok := h.clients[userID]
 	if !ok {

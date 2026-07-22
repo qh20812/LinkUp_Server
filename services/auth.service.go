@@ -234,6 +234,10 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		return dto.TokenResponse{}, err
 	}
 
+	if err := s.ensureBanStatus(ctx, user); err != nil {
+		return dto.TokenResponse{}, err
+	}
+
 	if !user.IsActive() {
 		return dto.TokenResponse{}, errors.New("tài khoản chưa được kích hoạt")
 	}

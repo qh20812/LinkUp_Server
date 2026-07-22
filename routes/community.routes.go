@@ -6,11 +6,12 @@ import (
 	"linkup/middlewares"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityController, env config.Env) {
+func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityController, env config.Env, db *gorm.DB) {
 	communityGroup := router.Group("/api/communities")
-	communityGroup.Use(middlewares.AuthMiddleware(env))
+	communityGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
 		communityGroup.POST("", ctrl.CreateCommunity)
 		communityGroup.PUT("/:communityID/background", ctrl.SetCommunityBackground)
