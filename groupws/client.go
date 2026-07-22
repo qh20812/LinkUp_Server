@@ -155,9 +155,33 @@ func (c *Client) ReadPump() {
 				})
 			}
 
+			callDocs, err := c.messageService.GetGroupCallsByChatID(c.ctx, c.userID, payload.ChatID)
+			if err != nil {
+				c.sendError(fmt.Sprintf("lấy lịch sử cuộc gọi thất bại: %v", err))
+				continue
+			}
+			callItems := make([]dto.GroupCallHistoryItem, 0, len(callDocs))
+			for _, call := range callDocs {
+				var endedAt *string
+				if call.EndedAt != nil {
+					s := call.EndedAt.UTC().Format(time.RFC3339)
+					endedAt = &s
+				}
+				callItems = append(callItems, dto.GroupCallHistoryItem{
+					CallID:       call.CallID,
+					ChatID:       call.ChatID,
+					CallerID:     call.CallerID,
+					Participants: call.Participants,
+					Status:       call.Status,
+					CreatedAt:    call.CreatedAt.UTC().Format(time.RFC3339),
+					EndedAt:      endedAt,
+				})
+			}
+
 			c.sendEvent("group:history", dto.GroupHistoryPayload{
 				ChatID:   payload.ChatID,
 				Messages: msgs,
+				Calls:    callItems,
 			})
 
 		case "group:message:send":

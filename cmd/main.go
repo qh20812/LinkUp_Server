@@ -238,6 +238,7 @@ func main() {
 			defer mongoClient.Disconnect(context.Background())
 			groupCallRepo := repository.NewGroupCallRepository(mongoClient.Database(env.MongoDBName))
 			groupCallHub.SetCallStore(groupCallRepo)
+			groupMessageService.SetGroupCallRepository(groupCallRepo)
 		}
 		// allow hub to persist chat system messages when calls expire
 		groupCallHub.SetMessageService(groupMessageService)

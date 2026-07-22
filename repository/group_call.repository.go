@@ -54,3 +54,16 @@ func (r *GroupCallRepository) UpdateStatus(ctx context.Context, callID string, s
 	_, err := r.collection.UpdateOne(ctx, bson.M{"_id": callID}, bson.M{"$set": setFields})
 	return err
 }
+
+func (r *GroupCallRepository) FindByChatID(ctx context.Context, chatID string) ([]GroupCallDocument, error) {
+	cursor, err := r.collection.Find(ctx, bson.M{"chat_id": chatID})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	var docs []GroupCallDocument
+	if err := cursor.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	return docs, nil
+}

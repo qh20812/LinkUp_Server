@@ -13,11 +13,12 @@ import (
 )
 
 type GroupMessageService struct {
-	chatRepo     *repository.ChatRepository
-	groupRepo    *repository.GroupChatRepository
-	mediaRepo    *repository.MediaRepository
-	notifService *NotificationService
-	validation   *validations.ChatValidation
+	chatRepo       *repository.ChatRepository
+	groupRepo      *repository.GroupChatRepository
+	mediaRepo      *repository.MediaRepository
+	notifService   *NotificationService
+	validation     *validations.ChatValidation
+	groupCallRepo  *repository.GroupCallRepository
 }
 
 func NewGroupMessageService(
@@ -249,4 +250,18 @@ func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, c
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	return s.chatRepo.CreateMessage(ctx, &msg)
+}
+
+func (s *GroupMessageService) SetGroupCallRepository(repo *repository.GroupCallRepository) {
+	s.groupCallRepo = repo
+}
+
+func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {
+	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	if s.groupCallRepo == nil {
+		return nil, nil
+	}
+	return s.groupCallRepo.FindByChatID(ctx, chatID)
 }

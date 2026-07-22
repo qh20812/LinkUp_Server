@@ -876,18 +876,16 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 	}
 
 	mediaItems := make([]dto.AdminMediaItem, 0, len(items))
-	for _, m := range items {
-		info := userMap[m.UserID]
+	for _, m := range items {	
 		mediaItems = append(mediaItems, dto.AdminMediaItem{
-			ID:          m.ID,
-			UserID:      m.UserID,
-			Username:    info.Username,
-			DisplayName: info.DisplayName,
-			FileURI:     m.FileURI,
-			FileType:    m.FileType,
-			FileSize:    m.FileSize,
-			Status:      string(m.Status),
-			CreatedAt:   m.CreatedAt.Format(time.RFC3339),
+			ID:           m.ID,
+			UserID:       m.UserID,
+			FileURI:      m.FileURI,
+			FileType:     m.FileType,
+			FileSize:     m.FileSize,
+			Status:       string(m.Status),
+			ReviewReason: m.ReviewReason,
+			CreatedAt:    m.CreatedAt.Format(time.RFC3339),
 		})
 	}
 

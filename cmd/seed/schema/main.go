@@ -213,7 +213,6 @@ func Run(env config.Env) error {
 
 		// 6. Depends on users, posts
 		`CREATE TABLE IF NOT EXISTS media (
-<<<<<<< HEAD
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
 			post_id VARCHAR(36) NULL,
@@ -228,21 +227,6 @@ func Run(env config.Env) error {
 			INDEX idx_media_user_id (user_id),
 			INDEX idx_media_post_id (post_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-=======
-				id VARCHAR(36) PRIMARY KEY,
-				user_id VARCHAR(36) NOT NULL,
-				post_id VARCHAR(36) NULL,
-				file_uri VARCHAR(512) NOT NULL,
-				file_type VARCHAR(50) NOT NULL DEFAULT '',
-				file_size DOUBLE NOT NULL DEFAULT 0,
-				status VARCHAR(20) NOT NULL DEFAULT 'pending',
-				created_at DATETIME NOT NULL,
-				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-				FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-				INDEX idx_media_user_id (user_id),
-				INDEX idx_media_post_id (post_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
->>>>>>> ce680aa88ad73095f7bf9ea5a4056c11063e2947
 
 		// 7. Depends on media
 		`CREATE TABLE IF NOT EXISTS ads (
@@ -827,11 +811,6 @@ if err := addIndexIfMissing(database, "communities", "idx_communities_status",
 	return fmt.Errorf("schema: add idx_communities_status: %w", err)
 }
 
-<<<<<<< HEAD
-// media.review_reason: stores admin review reason on media records
-if err := addColumnIfMissing(database, "media", "review_reason", "TEXT NULL"); err != nil {
-	return fmt.Errorf("schema: add media.review_reason: %w", err)
-=======
 // Step D: created_at indexes for analytics queries (admin dashboard chart + UNION ALL counts)
 tables := []struct {
 	Name      string
@@ -873,7 +852,6 @@ if err := addIndexIfMissing(database, "post_reactions", "idx_post_reactions_post
 if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_post_id",
 	"INDEX idx_post_shares_post_id (post_id)"); err != nil {
 	return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
->>>>>>> ce680aa88ad73095f7bf9ea5a4056c11063e2947
 }
 
 return nil
