@@ -45,7 +45,7 @@ func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 		}
 		if err.Error() == validations.ErrFileTooLarge.Error() {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("File quá lớn. Tối đa: Ảnh 50MB, Video 500MB"),
+				"error": "File quá lớn. Tối đa: Ảnh 50MB, Video 500MB",
 			})
 			return
 		}

@@ -6,11 +6,12 @@ import (
 	"linkup/middlewares"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func RegisterGroupChatRoutes(router *gin.Engine, ctrl *controllers.GroupChatController, env config.Env) {
+func RegisterGroupChatRoutes(router *gin.Engine, ctrl *controllers.GroupChatController, env config.Env, db *gorm.DB) {
 	groupChatGroup := router.Group("/api/group-chats")
-	groupChatGroup.Use(middlewares.AuthMiddleware(env))
+	groupChatGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
 		groupChatGroup.POST("", ctrl.CreateGroup)
 		groupChatGroup.POST("/:chatID/add-member", ctrl.AddMember)

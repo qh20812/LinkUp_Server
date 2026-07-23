@@ -44,7 +44,7 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 			}
 		}
 
-		if !isAllowed {
+		if isAllowed == false {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to access this resource"})
 			c.Abort()
 			return
@@ -58,7 +58,7 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 
 // RequireContributionLevel checks that the authenticated user's contribution
 // score in the community (identified by :communityID URL param) meets or
-// exceeds the given threshold. Requires AuthMiddleware to run first.
+// exceeds the given threshold. Requires AuthMiddleware(env, db) to run first.
 func RequireContributionLevel(db *gorm.DB, threshold int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("userID")

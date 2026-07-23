@@ -12,7 +12,7 @@ import (
 
 func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminController, env config.Env, db *gorm.DB) {
 	adminGroup := router.Group("/api/admin")
-	adminGroup.Use(middlewares.AuthMiddleware(env))
+	adminGroup.Use(middlewares.AuthMiddleware(env, db))
 	adminGroup.Use(middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin))
 
 	adminGroup.GET("/analytics", adminController.GetDashboardAnalytics)

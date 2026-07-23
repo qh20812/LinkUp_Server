@@ -6,14 +6,15 @@ import (
 	"linkup/middlewares"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func RegisterCallRoutes(router *gin.Engine, ctrl *controllers.VoiceCallController, env config.Env) {
+func RegisterCallRoutes(router *gin.Engine, ctrl *controllers.VoiceCallController, env config.Env, db *gorm.DB) {
 	// WS endpoint — auth handled via ?token= (not AuthMiddleware)
 	router.GET("/api/calls/ws", ctrl.HandleWebsocket)
 
 	callGroup := router.Group("/api/calls")
-	callGroup.Use(middlewares.AuthMiddleware(env))
+	callGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
 		callGroup.GET("/ice-servers", ctrl.GetIceServers)
 		callGroup.GET("/history", ctrl.GetCallHistory)
