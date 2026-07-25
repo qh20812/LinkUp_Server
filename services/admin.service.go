@@ -706,7 +706,14 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 	} else if report.TargetUserID != nil {
 		detail.TargetType = "user"
 	} else if report.TargetCommentID != nil {
-		detail.TargetType = "comment"
+		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
+		if err == nil {
+			detail.TargetType = "comment"
+			detail.CommentOwnerID = &comment.UserID
+			detail.CommentContent = &comment.Content
+		} else {
+			detail.TargetType = "comment"
+		}
 	}
 
 	return detail, nil
@@ -751,6 +758,25 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 			}
 		} else if report.TargetUserID != nil {
 			return errors.New("hide chỉ hỗ trợ với báo cáo bài viết; báo cáo người dùng cần logic xử lý khác")
+		} else if report.TargetCommentID != nil {
+			if _, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID); err != nil {
+				return fmt.Errorf("comment không tồn tại: %w", err)
+			}
+			if err := s.postRepo.UpdateCommentStatus(ctx, *report.TargetCommentID, models.CommentStatusHidden, input.Reason); err != nil {
+				return fmt.Errorf("hide comment: %w", err)
+			}
+			descendantIDs, err := s.postRepo.FindDescendantCommentIDs(ctx, *report.TargetCommentID)
+			if err == nil && len(descendantIDs) > 0 {
+				_ = s.postRepo.HideCommentsByIDs(ctx, descendantIDs, "Bình luận mà bạn trả lời đã bị ẩn")
+			}
+			status = models.ReportStatusResolved
+
+			moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetComment, *report.TargetCommentID, input.Reason)
+			moderation.ID = utils.GenerateUUID()
+			moderation.CreatedAt = time.Now().UTC()
+			if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+				return fmt.Errorf("create moderation log: %w", err)
+			}
 		} else {
 			return errors.New("loại báo cáo không được hỗ trợ")
 		}
@@ -805,6 +831,12 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	} else if report.TargetUserID != nil {
 		targetMessage := fmt.Sprintf("Tài khoản của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
 		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, &superAdminID, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+	} else if report.TargetCommentID != nil {
+		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
+		if err == nil {
+			targetMessage := fmt.Sprintf("Bình luận của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+			_, _ = s.notificationService.Create(ctx, comment.UserID, &superAdminID, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
+		}
 	}
 
 	if report.TargetUserID != nil && action == "ban" {

@@ -749,110 +749,138 @@ func Run(env config.Env) error {
 
 		// 41. Reply Messges
 		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
+
+		// 35. Depends on chats, users — group chat bans
+		`CREATE TABLE IF NOT EXISTS group_chat_bans (
+			id VARCHAR(36) PRIMARY KEY,
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			banned_by VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (banned_by) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_group_chat_bans_chat_user (chat_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
-	if err := internal.Exec(database, stmt); err != nil {
-		return fmt.Errorf("schema: create table: %w", err)
+		if err := internal.Exec(database, stmt); err != nil {
+			return fmt.Errorf("schema: create table: %w", err)
+		}
 	}
-}
 
-// Add last_read_missed_at to profiles (idempotent — skips if already exists)
-if err := addColumnIfMissing(database, "profiles", "last_read_missed_at", "DATETIME NULL"); err != nil {
-	return fmt.Errorf("schema: add last_read_missed_at: %w", err)
-}
-
-// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE
-// that failed on re-run). Now using helpers that check existence first.
-
-// 4b. Index + FK from posts to communities
-if err := addIndexIfMissing(database, "posts", "idx_posts_community_id",
-	"INDEX idx_posts_community_id (community_id)"); err != nil {
-	return fmt.Errorf("schema: add idx_posts_community_id: %w", err)
-}
-if err := addForeignKeyIfMissing(database, "posts", "fk_posts_community",
-	"CONSTRAINT fk_posts_community FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE SET NULL"); err != nil {
-	return fmt.Errorf("schema: add fk_posts_community: %w", err)
-}
-
-// 31. Message encryption column
-if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFAULT true"); err != nil {
-	return fmt.Errorf("schema: add is_encrypted: %w", err)
-}
-
-// Phase 1: Admin Manage Groups/Communities — idempotent column additions
-
-// chats.creator_id: who created the group (NULL for direct chats)
-if err := addColumnIfMissing(database, "chats", "creator_id", "VARCHAR(36) NULL"); err != nil {
-	return fmt.Errorf("schema: add chats.creator_id: %w", err)
-}
-// chats.status: moderation state for group chats
-if err := addColumnIfMissing(database, "chats", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
-	return fmt.Errorf("schema: add chats.status: %w", err)
-}
-// communities.status: moderation state for communities
-if err := addColumnIfMissing(database, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
-	return fmt.Errorf("schema: add communities.status: %w", err)
-}
-
-// FK from chats.creator_id to users.id
-if err := addForeignKeyIfMissing(database, "chats", "fk_chats_creator",
-	"CONSTRAINT fk_chats_creator FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE SET NULL"); err != nil {
-	return fmt.Errorf("schema: add fk_chats_creator: %w", err)
-}
-// index for chats.creator_id
-if err := addIndexIfMissing(database, "chats", "idx_chats_creator_id",
-	"INDEX idx_chats_creator_id (creator_id)"); err != nil {
-	return fmt.Errorf("schema: add idx_chats_creator_id: %w", err)
-}
-// index for communities.status (faster admin filtering)
-if err := addIndexIfMissing(database, "communities", "idx_communities_status",
-	"INDEX idx_communities_status (status)"); err != nil {
-	return fmt.Errorf("schema: add idx_communities_status: %w", err)
-}
-
-// Step D: created_at indexes for analytics queries (admin dashboard chart + UNION ALL counts)
-tables := []struct {
-	Name      string
-	IndexName string
-	Def       string
-}{
-	{"users", "idx_users_created_at", "INDEX idx_users_created_at (created_at)"},
-	{"reports", "idx_reports_created_at", "INDEX idx_reports_created_at (created_at)"},
-	{"comments", "idx_comments_created_at", "INDEX idx_comments_created_at (created_at)"},
-	{"media", "idx_media_created_at", "INDEX idx_media_created_at (created_at)"},
-	{"chats", "idx_chats_created_at", "INDEX idx_chats_created_at (created_at)"},
-	{"communities", "idx_communities_created_at", "INDEX idx_communities_created_at (created_at)"},
-}
-for _, t := range tables {
-	if err := addIndexIfMissing(database, t.Name, t.IndexName, t.Def); err != nil {
-		return fmt.Errorf("schema: add %s: %w", t.IndexName, err)
+	// Add last_read_missed_at to profiles (idempotent — skips if already exists)
+	if err := addColumnIfMissing(database, "profiles", "last_read_missed_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add last_read_missed_at: %w", err)
 	}
-}
 
-// Phase 1: composite index for notifications query (WHERE receiver_id = ? ORDER BY created_at DESC)
-if err := addIndexIfMissing(database, "notifications", "idx_notifications_receiver_created",
-	"INDEX idx_notifications_receiver_created (receiver_id, created_at)"); err != nil {
-	return fmt.Errorf("schema: add idx_notifications_receiver_created: %w", err)
-}
+	// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE
+	// that failed on re-run). Now using helpers that check existence first.
 
-// Phase 2: new preference columns for community and voice call notifications
-if err := addColumnIfMissing(database, "notification_preferences", "community_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
-	return fmt.Errorf("schema: add notification_preferences.community_enabled: %w", err)
-}
-if err := addColumnIfMissing(database, "notification_preferences", "voice_call_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
-	return fmt.Errorf("schema: add notification_preferences.voice_call_enabled: %w", err)
-}
+	// 4b. Index + FK from posts to communities
+	if err := addIndexIfMissing(database, "posts", "idx_posts_community_id",
+		"INDEX idx_posts_community_id (community_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_posts_community_id: %w", err)
+	}
+	if err := addForeignKeyIfMissing(database, "posts", "fk_posts_community",
+		"CONSTRAINT fk_posts_community FOREIGN KEY (community_id) REFERENCES communities(id) ON DELETE SET NULL"); err != nil {
+		return fmt.Errorf("schema: add fk_posts_community: %w", err)
+	}
 
-// Phase 3: indexes for admin ListPosts performance (correlated subqueries in ListPosts)
-if err := addIndexIfMissing(database, "post_reactions", "idx_post_reactions_post_id",
-	"INDEX idx_post_reactions_post_id (post_id)"); err != nil {
-	return fmt.Errorf("schema: add idx_post_reactions_post_id: %w", err)
-}
-if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_post_id",
-	"INDEX idx_post_shares_post_id (post_id)"); err != nil {
-	return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
-}
+	// 31. Message encryption column
+	if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFAULT true"); err != nil {
+		return fmt.Errorf("schema: add is_encrypted: %w", err)
+	}
 
-return nil
+	// Phase 1: Admin Manage Groups/Communities — idempotent column additions
+
+	// chats.creator_id: who created the group (NULL for direct chats)
+	if err := addColumnIfMissing(database, "chats", "creator_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add chats.creator_id: %w", err)
+	}
+	// chats.status: moderation state for group chats
+	if err := addColumnIfMissing(database, "chats", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+		return fmt.Errorf("schema: add chats.status: %w", err)
+	}
+	// communities.status: moderation state for communities
+	if err := addColumnIfMissing(database, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+		return fmt.Errorf("schema: add communities.status: %w", err)
+	}
+
+	// FK from chats.creator_id to users.id
+	if err := addForeignKeyIfMissing(database, "chats", "fk_chats_creator",
+		"CONSTRAINT fk_chats_creator FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE SET NULL"); err != nil {
+		return fmt.Errorf("schema: add fk_chats_creator: %w", err)
+	}
+	// index for chats.creator_id
+	if err := addIndexIfMissing(database, "chats", "idx_chats_creator_id",
+		"INDEX idx_chats_creator_id (creator_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_chats_creator_id: %w", err)
+	}
+	// index for communities.status (faster admin filtering)
+	if err := addIndexIfMissing(database, "communities", "idx_communities_status",
+		"INDEX idx_communities_status (status)"); err != nil {
+		return fmt.Errorf("schema: add idx_communities_status: %w", err)
+	}
+
+	// Step D: created_at indexes for analytics queries (admin dashboard chart + UNION ALL counts)
+	tables := []struct {
+		Name      string
+		IndexName string
+		Def       string
+	}{
+		{"users", "idx_users_created_at", "INDEX idx_users_created_at (created_at)"},
+		{"reports", "idx_reports_created_at", "INDEX idx_reports_created_at (created_at)"},
+		{"comments", "idx_comments_created_at", "INDEX idx_comments_created_at (created_at)"},
+		{"media", "idx_media_created_at", "INDEX idx_media_created_at (created_at)"},
+		{"chats", "idx_chats_created_at", "INDEX idx_chats_created_at (created_at)"},
+		{"communities", "idx_communities_created_at", "INDEX idx_communities_created_at (created_at)"},
+	}
+	for _, t := range tables {
+		if err := addIndexIfMissing(database, t.Name, t.IndexName, t.Def); err != nil {
+			return fmt.Errorf("schema: add %s: %w", t.IndexName, err)
+		}
+	}
+
+	// Phase 1: composite index for notifications query (WHERE receiver_id = ? ORDER BY created_at DESC)
+	if err := addIndexIfMissing(database, "notifications", "idx_notifications_receiver_created",
+		"INDEX idx_notifications_receiver_created (receiver_id, created_at)"); err != nil {
+		return fmt.Errorf("schema: add idx_notifications_receiver_created: %w", err)
+	}
+
+	// Phase 2: new preference columns for community and voice call notifications
+	if err := addColumnIfMissing(database, "notification_preferences", "community_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.community_enabled: %w", err)
+	}
+	if err := addColumnIfMissing(database, "notification_preferences", "voice_call_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.voice_call_enabled: %w", err)
+	}
+
+	// Phase 3: indexes for admin ListPosts performance (correlated subqueries in ListPosts)
+	if err := addIndexIfMissing(database, "post_reactions", "idx_post_reactions_post_id",
+		"INDEX idx_post_reactions_post_id (post_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_post_reactions_post_id: %w", err)
+	}
+	if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_post_id",
+		"INDEX idx_post_shares_post_id (post_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
+	}
+
+	// Phase 4: comment moderation columns (status + review_reason for report handling)
+	if err := addColumnIfMissing(database, "comments", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+		return fmt.Errorf("schema: add comments.status: %w", err)
+	}
+	if err := addColumnIfMissing(database, "comments", "review_reason", "TEXT NULL"); err != nil {
+		return fmt.Errorf("schema: add comments.review_reason: %w", err)
+	}
+	if err := addColumnIfMissing(database, "comments", "updated_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add comments.updated_at: %w", err)
+	}
+	if err := addIndexIfMissing(database, "comments", "idx_comments_status",
+		"INDEX idx_comments_status (status)"); err != nil {
+		return fmt.Errorf("schema: add idx_comments_status: %w", err)
+	}
+
+	return nil
 }

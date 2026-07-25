@@ -131,6 +131,8 @@ type AdminReportDetailResponse struct {
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
 	PostOwnerID      *string   `json:"post_owner_id,omitempty"`
+	CommentOwnerID   *string   `json:"comment_owner_id,omitempty"`
+	CommentContent   *string   `json:"comment_content,omitempty"`
 }
 
 type AdminReportReviewInput struct {
