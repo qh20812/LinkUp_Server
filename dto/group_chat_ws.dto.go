@@ -62,7 +62,18 @@ type GroupSettingsUpdatePayload struct {
 	AvatarURI            *string `json:"avatar_uri,omitempty"`
 }
 
+type GroupCallHistoryItem struct {
+	CallID       string   `json:"call_id"`
+	ChatID       string   `json:"chat_id"`
+	CallerID     string   `json:"caller_id"`
+	Participants []string `json:"participants"`
+	Status       string   `json:"status"`
+	CreatedAt    string   `json:"created_at"`
+	EndedAt      *string  `json:"ended_at,omitempty"`
+}
+
 type GroupHistoryPayload struct {
-	ChatID   string           `json:"chat_id"`
-	Messages []MessagePayload `json:"messages"`
+	ChatID   string                  `json:"chat_id"`
+	Messages []MessagePayload        `json:"messages"`
+	Calls    []GroupCallHistoryItem  `json:"calls"`
 }

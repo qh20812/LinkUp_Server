@@ -13,6 +13,7 @@ type AdminRepository interface {
 	GetTotalPosts() (int64, error)
 	GetTotalReports() (int64, error)
 	GetCountBeforeDate(tableName string, date time.Time) (int64, error)
+	GetCountsBeforeDate(date time.Time) (map[string]int64, error)
 	GetChartData(tableName string, startDate, endDate string) ([]dto.ChartDataPoint, error)
 
 	GetTotalComments() (int64, error)
@@ -66,6 +67,31 @@ func (r *adminRepository) GetCountBeforeDate(tableName string, date time.Time) (
 		Where("created_at < ?", date).
 		Count(&count).Error
 	return count, err
+}
+
+func (r *adminRepository) GetCountsBeforeDate(date time.Time) (map[string]int64, error) {
+	type row struct {
+		Table string
+		Count int64
+	}
+	var rows []row
+	err := r.db.Raw(`
+		SELECT 'users' AS table_name, COUNT(*) AS count FROM users WHERE created_at < ?
+		UNION ALL SELECT 'posts', COUNT(*) FROM posts WHERE created_at < ?
+		UNION ALL SELECT 'reports', COUNT(*) FROM reports WHERE created_at < ?
+		UNION ALL SELECT 'comments', COUNT(*) FROM comments WHERE created_at < ?
+		UNION ALL SELECT 'media', COUNT(*) FROM media WHERE created_at < ?
+		UNION ALL SELECT 'chats', COUNT(*) FROM chats WHERE created_at < ?
+		UNION ALL SELECT 'communities', COUNT(*) FROM communities WHERE created_at < ?
+	`, date, date, date, date, date, date, date).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		result[r.Table] = r.Count
+	}
+	return result, nil
 }
 
 func (r *adminRepository) GetChartData(tableName string, startDate, endDate string) ([]dto.ChartDataPoint, error) {
@@ -170,13 +196,19 @@ func (r *adminRepository) GetTopActiveUsers(limit int) ([]dto.TopActiveUser, err
 
 func (r *adminRepository) GetTopEngagedPosts(limit int) ([]dto.TopEngagedPost, error) {
 	var posts []dto.TopEngagedPost
-	err := r.db.Table("posts").
-		Select("posts.id as post_id, posts.title, u.username, posts.views_count, posts.likes_count, posts.comments_count").
-		Joins("JOIN users u ON u.id = posts.user_id").
-		Where("posts.status != ?", string(models.PostStatusDeleted)).
-		Order("(COALESCE(posts.views_count,0) + COALESCE(posts.likes_count,0)*2 + COALESCE(posts.comments_count,0)*3) DESC").
-		Limit(limit).
-		Scan(&posts).Error
+	err := r.db.Raw(`
+		SELECT p.id AS post_id, p.title, u.username, p.views_count,
+		       (SELECT COUNT(*) FROM post_reactions pr WHERE pr.post_id = p.id) AS likes_count,
+		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments_count,
+		       EXISTS(SELECT 1 FROM media m WHERE m.post_id = p.id) AS has_media
+		FROM posts p
+		JOIN users u ON u.id = p.user_id
+		WHERE p.status != ?
+		ORDER BY (p.views_count +
+		          (SELECT COUNT(*) FROM post_reactions pr WHERE pr.post_id = p.id) * 2 +
+		          (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) * 3) DESC
+		LIMIT ?
+	`, string(models.PostStatusDeleted), limit).Scan(&posts).Error
 	return posts, err
 }
 

@@ -198,7 +198,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 	followSeen := map[string]bool{}
 	for i := 0; i < 40; i++ {
 		followerIdx := randRange(0, len(state.UserIDs)-1)
-		followingIdx := randRange(0, len(state.UserIDs)-1)
+		// Loại trừ superadmin (index 0) và admin (index 1) — không ai được follow họ
+		followingIdx := randRange(2, len(state.UserIDs)-1)
 		if followerIdx == followingIdx {
 			continue
 		}

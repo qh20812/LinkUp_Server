@@ -686,3 +686,65 @@ func (ctrl *AdminController) ListMediaGroupedByUser(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+// ── Ad Management: Admin handlers ─────────────────────────────────────────
+
+func (ctrl *AdminController) ListAds(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	var input dto.AdminAdFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		return
+	}
+
+	result, err := ctrl.adminService.ListAds(c.Request.Context(), userID, input)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *AdminController) UpdateAdStatus(c *gin.Context) {
+	adID := c.Param("id")
+	if adID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "adID không hợp lệ"})
+		return
+	}
+
+	var input dto.AdminAdStatusInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	userID := c.GetString("userID")
+	if err := ctrl.adminService.UpdateAdStatus(c.Request.Context(), userID, adID, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật trạng thái quảng cáo thành công"})
+}
+
+func (ctrl *AdminController) DeleteAd(c *gin.Context) {
+	adID := c.Param("id")
+	if adID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "adID không hợp lệ"})
+		return
+	}
+
+	userID := c.GetString("userID")
+	if err := ctrl.adminService.DeleteAd(c.Request.Context(), userID, adID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Xoá quảng cáo thành công"})
+}

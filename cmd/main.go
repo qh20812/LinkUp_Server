@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -39,12 +40,18 @@ func main() {
 	go hub.Run()
 
 	// 3. Kết nối Cơ sở dữ liệu MySQL thông thường
+	var gormDB *gorm.DB
 	database, err := db.ConnectDb(env)
 	if err != nil {
 		log.Printf("DB connection: failed (%v)", err)
 	} else {
 		log.Println("DB connection: success")
 		defer database.Close()
+
+		gormDB, err = gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{})
+		if err != nil {
+			log.Fatalf("failed to init gorm: %v", err)
+		}
 	}
 
 	// 4. Khởi tạo Gin Router engine
@@ -57,12 +64,7 @@ func main() {
 	})
 
 	// 5. Nếu kết nối cơ sở dữ liệu thành công, bắt đầu khởi tạo cấu trúc dự án qua GORM
-	if database != nil {
-		gormDB, err := gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{})
-		if err != nil {
-			log.Fatalf("failed to init gorm: %v", err)
-		}
-
+	if gormDB != nil {
 		// ====================================================================
 		// TỰ ĐỘNG TẠO BẢNG STORY VIEWS & CẬP NHẬT LẠI CẤU TRÚC BẢNG INTERACT
 		// ====================================================================
@@ -80,7 +82,7 @@ func main() {
 		authService := services.NewAuthService(authRepository, profileRepository, banRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController, env)
+		routes.RegisterAuthRoutes(router, authController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG PASSWORD RESET =====
 		resetRepository := repository.NewPasswordResetRepository(gormDB)
@@ -91,9 +93,9 @@ func main() {
 		// ===== KHỞI TẠO TẦNG NOTIFICATION (HỖ TRỢ THÔNG BÁO TIN NHẮN/LIKE/COMMENT) =====
 		notificationRepository := repository.NewNotificationRepository(gormDB)
 		notificationPreferenceRepository := repository.NewNotificationPreferenceRepository(gormDB)
-		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, hub)
+		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, profileRepository, hub)
 		notificationController := controllers.NewNotificationController(notificationService)
-		routes.RegisterNotificationRoutes(router, notificationController, env)
+		routes.RegisterNotificationRoutes(router, notificationController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG TAG (HASHTAG & MENTION) =====
 		tagRepository := repository.NewTagRepository(gormDB)
@@ -106,18 +108,18 @@ func main() {
 		postValidation := validations.NewPostValidation()
 		postService := services.NewPostService(postRepository, notificationService, tagService, postValidation)
 		postController := controllers.NewPostController(postService)
-		routes.RegisterPostRoutes(router, postController, env)
+		routes.RegisterPostRoutes(router, postController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG PROFILE USER =====
-		profileService := services.NewProfileService(profileRepository)
+		profileService := services.NewProfileService(profileRepository) // profileRepository đã được khởi tạo ở notification layer
 		profileController := controllers.NewProfileController(profileService)
-		routes.RegisterProfileRoutes(router, profileController, env)
+		routes.RegisterProfileRoutes(router, profileController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG FOLLOW (THEO DÕI) =====
 		followRepository := repository.NewFollowRepository(gormDB)
 		followService := services.NewFollowService(followRepository, authRepository, notificationService)
 		followController := controllers.NewFollowController(followService)
-		routes.RegisterFollowRoutes(router, followController, env)
+		routes.RegisterFollowRoutes(router, followController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG MEDIA (HÌNH ÁNH/FILE TRÊN CLOUDINARY) =====
 		mediaRepository := repository.NewMediaRepository(gormDB)
@@ -127,34 +129,34 @@ func main() {
 		postService.SetMediaService(mediaService)
 		mediaService.SetModerationRepo(repository.NewModerationRepository(gormDB))
 		mediaController := controllers.NewMediaController(mediaService)
-		routes.RegisterMediaRoutes(router, mediaController, env)
+		routes.RegisterMediaRoutes(router, mediaController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
 		storyRepository := repository.NewStoryRepository(gormDB)
 		storyService := services.NewStoryService(storyRepository)
 		storyController := controllers.NewStoryController(storyService)
-		routes.RegisterStoryRoutes(router, storyController, env)
+		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
 		reportRepository := repository.NewReportRepository(gormDB)
 		reportValidation := validations.NewReportValidation()
 		reportService := services.NewReportService(reportRepository, authRepository, postRepository, reportValidation)
 		reportController := controllers.NewReportController(reportService)
-		routes.RegisterReportRoutes(router, reportController, env)
+		routes.RegisterReportRoutes(router, reportController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG BLOCK (CHẶN USER) =====
 		blockRepository := repository.NewBlockRepository(gormDB)
 		blockValidation := validations.NewBlockValidation()
 		blockService := services.NewBlockService(blockRepository, authRepository, blockValidation)
 		blockController := controllers.NewBlockController(blockService)
-		routes.RegisterBlockRoutes(router, blockController, env)
+		routes.RegisterBlockRoutes(router, blockController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG FRIEND (BẠN BÈ) =====
 		friendRepository := repository.NewFriendRepository(gormDB)
 		friendValidation := validations.NewFriendValidation()
 		friendService := services.NewFriendService(friendRepository, authRepository, profileRepository, friendValidation, notificationService)
 		friendController := controllers.NewFriendController(friendService)
-		routes.RegisterFriendRoutes(router, friendController, env)
+		routes.RegisterFriendRoutes(router, friendController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG SEARCH (TÌM KIẾM CHUNG) =====
 		searchRepository := repository.NewSearchRepository(gormDB)
@@ -172,7 +174,7 @@ func main() {
 		chatHub := ws.NewHub()
 		go chatHub.Run()
 		chatController := controllers.NewChatController(chatHub, chatService, env)
-		routes.RegisterChatRoutes(router, chatController, env)
+		routes.RegisterChatRoutes(router, chatController, env, gormDB)
 
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
 		groupHub := groupws.NewHub()
@@ -180,23 +182,23 @@ func main() {
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
 		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, notificationService, validations.NewGroupChatValidation())
 		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
-		routes.RegisterGroupChatRoutes(router, groupChatController, env)
+		routes.RegisterGroupChatRoutes(router, groupChatController, env, gormDB)
 		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, notificationService, chatValidation)
-		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env)
+		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env, gormDB)
 
 		// ===== KHỞI TẠO COMMUNITY (NHÓM CỘNG ĐỒNG BÀI VIẾT) =====
 		communityRepository := repository.NewCommunityRepository(gormDB)
 		communityValidation := validations.NewCommunityValidation()
 		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService)
 		communityController := controllers.NewCommunityController(communityService, mediaService)
-		routes.RegisterCommunityRoutes(router, communityController, env)
+		routes.RegisterCommunityRoutes(router, communityController, env, gormDB)
 
 		// ===== KHỞI TẠO COMMUNITY RULE (QUY TẮC CỘNG ĐỒNG) =====
 		communityRuleRepository := repository.NewCommunityRuleRepository(gormDB)
 		communityRuleValidation := validations.NewCommunityRuleValidation()
 		communityRuleService := services.NewCommunityRuleService(communityRuleRepository, communityRepository, communityRuleValidation)
 		communityRuleController := controllers.NewCommunityRuleController(communityRuleService)
-		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env)
+		routes.RegisterCommunityRuleRoutes(router, communityRuleController, env, gormDB)
 
 		// ===== KHỞI TẠO CONTRIBUTION POLICY (ĐIỂM ĐÓNG GÓP & CHALLENGE) =====
 		contributionRepository := repository.NewContributionRepository(gormDB)
@@ -204,7 +206,7 @@ func main() {
 		contributionService := services.NewContributionService(contributionRepository, communityRepository, profileRepository, notificationService, contributionValidation)
 		postService.SetContributionService(contributionService)
 		contributionController := controllers.NewContributionController(contributionService)
-		routes.RegisterContributionRoutes(router, contributionController, env)
+		routes.RegisterContributionRoutes(router, contributionController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG ADVERTISEMENT (QUẢNG CÁO & PHÂN QUYỀN PARTNER) =====
 		adRepository := repository.NewAdRepository(gormDB)
@@ -215,7 +217,7 @@ func main() {
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
 		adminRepository := repository.NewAdminRepository(gormDB)
-		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, notificationService)
+		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, env, gormDB)
@@ -224,20 +226,28 @@ func main() {
 		callRepository := repository.NewCallRepository(gormDB)
 		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, hub)
 		callController := controllers.NewVoiceCallController(hub, callService, env)
-		routes.RegisterCallRoutes(router, callController, env)
+		routes.RegisterCallRoutes(router, callController, env, gormDB)
 
 		// ===== GROUP CALL =====
 		groupCallHub := groupws.NewHub()
 		go groupCallHub.Run()
 		groupCallHub.SetGroupChatHub(groupHub)
-		groupCallHub.SetCallStore(callRepository)
+		if mongoClient, err := db.ConnectMongoDB(env.MongoURI); err != nil {
+			log.Printf("MongoDB connection: failed (%v) — group calls will not be persisted", err)
+		} else {
+			log.Println("MongoDB connection: success")
+			defer mongoClient.Disconnect(context.Background())
+			groupCallRepo := repository.NewGroupCallRepository(mongoClient.Database(env.MongoDBName))
+			groupCallHub.SetCallStore(groupCallRepo)
+			groupMessageService.SetGroupCallRepository(groupCallRepo)
+		}
 		// allow hub to persist chat system messages when calls expire
 		groupCallHub.SetMessageService(groupMessageService)
-		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env)
+		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env, gormDB)
 	}
 
 	// 6. Lắng nghe cổng kết nối WebSocket thời gian thực tổng
-	router.GET("/ws", ws.ServeWS(hub, env))
+	router.GET("/api/ws", ws.ServeWS(hub, env, gormDB))
 
 	// 7. Khởi chạy toàn bộ hệ thống HTTP Server
 	addr := ":" + port

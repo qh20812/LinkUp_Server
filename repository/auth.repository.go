@@ -72,6 +72,17 @@ func (r *AuthRepository) FindByID(ctx context.Context, userID string) (*models.U
 	return &user, nil
 }
 
+func (r *AuthRepository) FindByIDs(ctx context.Context, userIDs []string) ([]models.User, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var users []models.User
+	if err := r.db.WithContext(ctx).Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("find users by ids: %w", err)
+	}
+	return users, nil
+}
+
 // SavePasswordHistory lưu lịch sử mật khẩu của người dùng vào cơ sở dữ liệu.
 func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string, hashedPassword string) error {
 	history := &models.PasswordHistory{
@@ -144,6 +155,25 @@ func (r *AuthRepository) AssignUserRole(ctx context.Context, userID string, role
 		return fmt.Errorf("assign role %s: %w", roleName, err)
 	}
 	return nil
+}
+
+func (r *AuthRepository) GetUserRole(ctx context.Context, userID string) (string, error) {
+	var roleName string
+	err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Select("roles.name").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND user_roles.scope_id IS NULL", userID).
+		Order("CASE roles.name WHEN 'SUPER_ADMIN' THEN 0 WHEN 'ADMIN' THEN 1 WHEN 'PARTNER' THEN 2 ELSE 3 END").
+		Limit(1).
+		Scan(&roleName).Error
+	if err != nil {
+		return "", fmt.Errorf("get user role: %w", err)
+	}
+	if roleName == "" {
+		return "USER", nil
+	}
+	return roleName, nil
 }
 
 func (r *AuthRepository) CountUsers(ctx context.Context, keyword string, status string) (int64, error) {

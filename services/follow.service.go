@@ -44,6 +44,14 @@ func (s *FollowService) FollowToggle(ctx context.Context, followerID, followingI
 		return "", fmt.Errorf("không thể follow superadmin")
 	}
 
+	isAdmin, err := s.authRepository.HasRole(ctx, followingID, models.RoleAdmin)
+	if err != nil {
+		return "", fmt.Errorf("kiểm tra vai trò admin: %w", err)
+	}
+	if isAdmin {
+		return "", fmt.Errorf("không thể follow admin")
+	}
+
 	isFollowing, err := s.followRepository.IsFollowing(ctx, followerID, followingID)
 	if err != nil {
 		return "", fmt.Errorf("kiểm tra trạng thái follow: %w", err)

@@ -9,15 +9,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-
+	"gorm.io/gorm"
 	"linkup/config"
+	"linkup/models"
 	"linkup/utils"
 )
 
-// Phase 4 fix: Configurable CheckOrigin via WS_ALLOWED_ORIGINS env var.
-// - Empty or "*": allows all origins (default, suitable for dev)
-// - Comma-separated list: only allows origins matching the list
-// This mitigates Cross-Site WebSocket Hijacking (CSWSH) in production.
 var allowedOrigins = parseAllowedOrigins(os.Getenv("WS_ALLOWED_ORIGINS"))
 
 func parseAllowedOrigins(raw string) []string {
@@ -55,7 +52,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func ServeWS(hub *Hub, env config.Env) gin.HandlerFunc {
+func ServeWS(hub *Hub, env config.Env, db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := c.Query("token")
 		if tokenString == "" {
@@ -73,6 +70,19 @@ func ServeWS(hub *Hub, env config.Env) gin.HandlerFunc {
 		if claims.TokenType != "access" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token type"})
 			return
+		}
+
+		if db != nil {
+			var user models.User
+			if err := db.WithContext(c.Request.Context()).Select("status").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+				return
+			}
+
+			if !user.IsActive() {
+				c.JSON(http.StatusForbidden, gin.H{"error": "account is banned or suspended"})
+				return
+			}
 		}
 
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)

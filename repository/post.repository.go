@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"linkup/models"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -102,15 +103,68 @@ func (r *PostRepository) FindCommentByID(ctx context.Context, id string) (*model
 	return &comment, nil
 }
 
+func (r *PostRepository) UpdateCommentStatus(ctx context.Context, id string, status models.CommentStatus, reviewReason string) error {
+	now := time.Now().UTC()
+	updates := map[string]interface{}{
+		"status":     status,
+		"updated_at": now,
+	}
+	if reviewReason != "" {
+		updates["review_reason"] = reviewReason
+	}
+	return r.db.WithContext(ctx).Model(&models.Comment{}).Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *PostRepository) FindDescendantCommentIDs(ctx context.Context, parentID string) ([]string, error) {
+	var allIDs []string
+	currentBatch := []string{parentID}
+	for len(currentBatch) > 0 {
+		var ids []string
+		err := r.db.WithContext(ctx).
+			Model(&models.Comment{}).
+			Where("parent_id IN ? AND status != ?", currentBatch, models.CommentStatusHidden).
+			Pluck("id", &ids).Error
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		allIDs = append(allIDs, ids...)
+		currentBatch = ids
+	}
+	return allIDs, nil
+}
+
+func (r *PostRepository) HideCommentsByIDs(ctx context.Context, ids []string, reason string) error {
+	now := time.Now().UTC()
+	return r.db.WithContext(ctx).Model(&models.Comment{}).
+		Where("id IN ?", ids).
+		Updates(map[string]interface{}{
+			"status":        models.CommentStatusHidden,
+			"review_reason": reason,
+			"updated_at":    now,
+		}).Error
+}
+
 func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int) ([]models.Comment, error) {
 	var comments []models.Comment
 	err := r.db.WithContext(ctx).
-		Where("post_id = ?", postID).
+		Where("post_id = ? AND status != ?", postID, models.CommentStatusHidden).
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&comments).Error
 	return comments, err
+}
+
+func (r *PostRepository) FindActiveCommentByID(ctx context.Context, id string) (*models.Comment, error) {
+	var comment models.Comment
+	err := r.db.WithContext(ctx).Where("id = ? AND status != ?", id, models.CommentStatusHidden).First(&comment).Error
+	if err != nil {
+		return nil, err
+	}
+	return &comment, nil
 }
 
 func (r *PostRepository) CreateSave(ctx context.Context, bookmark models.Bookmark) error {
@@ -124,7 +178,7 @@ func (r *PostRepository) CreateNotification(ctx context.Context, notification mo
 func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string) ([]models.Comment, error) {
 	var comments []models.Comment
 	err := r.db.WithContext(ctx).
-		Where("post_id = ?", postID).
+		Where("post_id = ? AND status != ?", postID, models.CommentStatusHidden).
 		Order("created_at DESC").
 		Find(&comments).Error
 	return comments, err

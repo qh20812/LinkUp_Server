@@ -6,11 +6,12 @@ import (
 	"linkup/middlewares"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, env config.Env) {
+func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, env config.Env, db *gorm.DB) {
 	chatGroup := router.Group("/api/chats")
-	chatGroup.Use(middlewares.AuthMiddleware(env))
+	chatGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
 		chatGroup.POST("/direct", ctrl.CreateDirectChat)
 		chatGroup.POST("/invite", ctrl.CreateChatInvite)

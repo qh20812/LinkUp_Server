@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"linkup/dto"
 	"linkup/models"
 	"linkup/services"
 )
@@ -25,6 +24,8 @@ type UpdatePreferencesInput struct {
 	FollowEnabled        *bool `json:"follow_enabled"`
 	MessageEnabled       *bool `json:"message_enabled"`
 	FriendRequestEnabled *bool `json:"friend_request_enabled"`
+	CommunityEnabled     *bool `json:"community_enabled"`
+	VoiceCallEnabled     *bool `json:"voice_call_enabled"`
 }
 
 func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
@@ -41,7 +42,7 @@ func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":  dto.ToNotificationResponseList(notifications),
+		"data":  notifications,
 		"total": total,
 		"page":  page,
 	})
@@ -103,7 +104,7 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
-	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil {
+	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil && input.CommunityEnabled == nil && input.VoiceCallEnabled == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "không có trường nào để cập nhật"})
 		return
 	}
@@ -125,6 +126,12 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 	}
 	if input.FriendRequestEnabled != nil {
 		pref.FriendRequestEnabled = *input.FriendRequestEnabled
+	}
+	if input.CommunityEnabled != nil {
+		pref.CommunityEnabled = *input.CommunityEnabled
+	}
+	if input.VoiceCallEnabled != nil {
+		pref.VoiceCallEnabled = *input.VoiceCallEnabled
 	}
 
 	if err := ctrl.service.UpdatePreferences(c.Request.Context(), pref); err != nil {

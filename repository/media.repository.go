@@ -80,6 +80,17 @@ func (r *MediaRepository) UpdateStatus(ctx context.Context, id string, status mo
 		Error
 }
 
+func (r *MediaRepository) UpdateStatusAndReview(ctx context.Context, id string, status models.MediaStatus, reviewReason string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":        status,
+			"review_reason": reviewReason,
+		}).
+		Error
+}
+
 func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaStatus, keyword string, page, pageSize int) ([]models.Media, int64, error) {
 	if page < 1 {
 		page = 1

@@ -6,15 +6,33 @@ import (
 	"net/http"
 
 	"linkup/config"
+	"linkup/models"
 	"linkup/services"
 	"linkup/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+func checkUserActive(c *gin.Context, db *gorm.DB, userID string) bool {
+	if db == nil {
+		return true
+	}
+	var user models.User
+	if err := db.WithContext(c.Request.Context()).Select("status").Where("id = ?", userID).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		return false
+	}
+	if !user.IsActive() {
+		c.JSON(http.StatusForbidden, gin.H{"error": "account is banned or suspended"})
+		return false
+	}
+	return true
 }
 
 func ServeGroupWS(
@@ -22,6 +40,7 @@ func ServeGroupWS(
 	messageService *services.GroupMessageService,
 	groupService *services.GroupChatService,
 	env config.Env,
+	db *gorm.DB,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := c.Query("token")
@@ -39,6 +58,10 @@ func ServeGroupWS(
 		claims := token.Claims.(*utils.TokenClaims)
 		if claims.TokenType != "access" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token type"})
+			return
+		}
+
+		if !checkUserActive(c, db, claims.UserID) {
 			return
 		}
 
@@ -69,6 +92,7 @@ func ServeGroupCallWS(
 	groupService *services.GroupChatService,
 	groupChatHub *Hub,
 	env config.Env,
+	db *gorm.DB,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := c.Query("token")
@@ -86,6 +110,10 @@ func ServeGroupCallWS(
 		claims := token.Claims.(*utils.TokenClaims)
 		if claims.TokenType != "access" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token type"})
+			return
+		}
+
+		if !checkUserActive(c, db, claims.UserID) {
 			return
 		}
 

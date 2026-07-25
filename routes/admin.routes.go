@@ -12,7 +12,7 @@ import (
 
 func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminController, env config.Env, db *gorm.DB) {
 	adminGroup := router.Group("/api/admin")
-	adminGroup.Use(middlewares.AuthMiddleware(env))
+	adminGroup.Use(middlewares.AuthMiddleware(env, db))
 	adminGroup.Use(middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin))
 
 	adminGroup.GET("/analytics", adminController.GetDashboardAnalytics)
@@ -57,4 +57,9 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.POST("/communities/:id/warn", adminController.WarnCommunity)
 	adminGroup.DELETE("/groups/:chatID", adminController.DeleteGroup)
 	adminGroup.DELETE("/communities/:id", adminController.DeleteCommunity)
+
+	// ── Admin Ads ──
+	adminGroup.GET("/ads", adminController.ListAds)
+	adminGroup.PATCH("/ads/:id/status", adminController.UpdateAdStatus)
+	adminGroup.DELETE("/ads/:id", adminController.DeleteAd)
 }
