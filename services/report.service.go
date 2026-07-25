@@ -82,12 +82,15 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 			return dto.CreateReportResponse{}, errors.New("không thể báo cáo bài viết của chính mình")
 		}
 	case "comment":
-		_, err := s.postRepo.FindCommentByID(ctx, input.TargetID)
+		comment, err := s.postRepo.FindCommentByID(ctx, input.TargetID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return dto.CreateReportResponse{}, errors.New("không tìm thấy bình luận hoặc bình luận không hoạt động")
 			}
 			return dto.CreateReportResponse{}, fmt.Errorf("check comment: %w", err)
+		}
+		if comment.Status == models.CommentStatusHidden {
+			return dto.CreateReportResponse{}, errors.New("không thể báo cáo bình luận đã bị ẩn")
 		}
 	}
 

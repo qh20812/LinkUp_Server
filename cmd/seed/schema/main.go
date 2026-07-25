@@ -867,5 +867,20 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
 	}
 
+	// Phase 4: comment moderation columns (status + review_reason for report handling)
+	if err := addColumnIfMissing(database, "comments", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
+		return fmt.Errorf("schema: add comments.status: %w", err)
+	}
+	if err := addColumnIfMissing(database, "comments", "review_reason", "TEXT NULL"); err != nil {
+		return fmt.Errorf("schema: add comments.review_reason: %w", err)
+	}
+	if err := addColumnIfMissing(database, "comments", "updated_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add comments.updated_at: %w", err)
+	}
+	if err := addIndexIfMissing(database, "comments", "idx_comments_status",
+		"INDEX idx_comments_status (status)"); err != nil {
+		return fmt.Errorf("schema: add idx_comments_status: %w", err)
+	}
+
 	return nil
 }
