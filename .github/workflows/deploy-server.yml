@@ -37,11 +37,21 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
+            cd /opt/linkup
+
+            # Save current image as rollback candidate
+            docker tag linkup-server:latest linkup-server:prev 2>/dev/null || true
+
+            # Pull & build
             cd /opt/linkup/server
             git pull origin main
             cd /opt/linkup
             docker compose build server
+
+            # Deploy new version
             docker compose up -d server
+
+            # Health check (up to 60s)
             echo "Waiting for server (up to 60s)..."
             for i in $(seq 1 20); do
               if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
@@ -50,7 +60,21 @@ jobs:
               fi
               sleep 3
             done
-            curl -sf http://localhost:8080/health || exit 1
+
+            # Rollback on failure
+            if ! curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              echo "DEPLOY FAILED — rolling back to previous image..."
+              docker compose down server
+              docker tag linkup-server:prev linkup-server:latest 2>/dev/null || true
+              docker compose up -d server
+              sleep 10
+              if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+                echo "ROLLBACK OK — server restored from prev image"
+              else
+                echo "ROLLBACK ALSO FAILED!"
+              fi
+              exit 1
+            fi
 
       - name: Notify Telegram
         if: always()
