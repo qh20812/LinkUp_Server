@@ -21,8 +21,9 @@ type User struct {
 	Email             string     `json:"email"`
 	PasswordHash      string     `json:"password_hash"`
 	Status            UserStatus `json:"status"`
-	StorageQuotaBytes float64    `json:"storage_quota_bytes"` // e.g., 1GB = 1073741824
+	StorageQuotaBytes float64    `json:"storage_quota_bytes"`
 	StorageUsedBytes  float64    `json:"storage_used_bytes"`
+	TokenVersion      int        `json:"token_version" gorm:"default:0"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }

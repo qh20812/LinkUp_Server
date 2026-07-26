@@ -97,3 +97,18 @@ func (h *AuthController) RefreshToken(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+func (h *AuthController) Logout(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	if err := h.authService.Logout(c.Request.Context(), userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "đăng xuất thất bại"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "đăng xuất thành công"})
+}

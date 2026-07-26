@@ -107,6 +107,7 @@ func Run(env config.Env) error {
 			status VARCHAR(20) NOT NULL DEFAULT 'active',
 			storage_quota_bytes DOUBLE NOT NULL DEFAULT 2147483648,
 			storage_used_bytes DOUBLE NOT NULL DEFAULT 0,
+			token_version INT NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			UNIQUE INDEX idx_users_username (username),

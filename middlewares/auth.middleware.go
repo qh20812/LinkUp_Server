@@ -41,24 +41,30 @@ func AuthMiddleware(env config.Env, db *gorm.DB) gin.HandlerFunc {
             return
         }
 
-        if db != nil {
-            var user models.User
-            if err := db.WithContext(c.Request.Context()).Select("status").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
-                c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng không tồn tại"})
-                c.Abort()
-                return
-            }
+	if db != nil {
+		var user models.User
+		if err := db.WithContext(c.Request.Context()).Select("status, token_version").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng không tồn tại"})
+			c.Abort()
+			return
+		}
 
-            if !user.IsActive() {
-                if user.IsBanned() {
-                    c.JSON(http.StatusForbidden, gin.H{"error": "tài khoản đang bị ban"})
-                } else {
-                    c.JSON(http.StatusForbidden, gin.H{"error": "tài khoản chưa được kích hoạt"})
-                }
-                c.Abort()
-                return
-            }
-        }
+		if !user.IsActive() {
+			if user.IsBanned() {
+				c.JSON(http.StatusForbidden, gin.H{"error": "tài khoản đang bị ban"})
+			} else {
+				c.JSON(http.StatusForbidden, gin.H{"error": "tài khoản chưa được kích hoạt"})
+			}
+			c.Abort()
+			return
+		}
+
+		if claims.TokenVersion != user.TokenVersion {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "phiên đăng nhập đã hết hạn"})
+			c.Abort()
+			return
+		}
+	}
 
         c.Set("userID", claims.UserID)
         c.Set("email", claims.Email)

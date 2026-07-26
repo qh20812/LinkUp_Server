@@ -70,6 +70,7 @@ func main() {
 		// ====================================================================
 		log.Println("Running database auto-migration...")
 		err = gormDB.AutoMigrate(
+			&models.User{},
 			&models.StoryView{},
 			&models.StoryInteract{},
 			&models.AdPackage{},
