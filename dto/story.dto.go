@@ -29,11 +29,22 @@ type InteractStoryRequest struct {
 	Content string `json:"content"`
 }
 
+// ViewerDetailResponse hiển thị chi tiết người xem, cảm xúc và tin nhắn cho chủ Story
+type ViewerDetailResponse struct {
+	UserID     string    `json:"user_id"`
+	ViewedAt   time.Time `json:"viewed_at"`
+	ReactType  *string   `json:"react_type,omitempty"`
+	EmojiID    *string   `json:"emoji_id,omitempty"`
+	ClickCount int       `json:"click_count,omitempty"`
+	Messages   []string  `json:"messages"`
+}
+
 // StoryAnalyticsResponse thống kê chi tiết cho chủ sở hữu
 type StoryAnalyticsResponse struct {
-	StoryID      string `json:"story_id"`
-	TotalViews   int64  `json:"total_views"`
-	TotalReacts  int64  `json:"total_reacts"`
-	TotalReplies int64  `json:"total_replies"`
-	TotalShares  int64  `json:"total_shares"`
+	StoryID      string                 `json:"story_id"`
+	TotalViews   int64                  `json:"total_views"`
+	TotalReacts  int64                  `json:"total_reacts"`
+	TotalReplies int64                  `json:"total_replies"`
+	TotalShares  int64                  `json:"total_shares"`
+	Viewers      []ViewerDetailResponse `json:"viewers"`
 }
