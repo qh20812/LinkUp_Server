@@ -14,6 +14,7 @@ import (
 	"linkup/controllers"
 	"linkup/db"
 	"linkup/groupws"
+	"linkup/middlewares"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/routes"
@@ -56,12 +57,15 @@ func main() {
 
 	// 4. Khởi tạo Gin Router engine
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+	router.Use(gin.Logger(), gin.Recovery(), middlewares.PrometheusMiddleware())
 
 	// Endpoint kiểm tra sức khỏe hệ thống
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// Metrics endpoint cho Prometheus
+	router.GET("/metrics", middlewares.MetricsHandler())
 
 	// 5. Nếu kết nối cơ sở dữ liệu thành công, bắt đầu khởi tạo cấu trúc dự án qua GORM
 	if gormDB != nil {
