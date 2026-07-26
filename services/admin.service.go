@@ -606,6 +606,200 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 	return nil
 }
 
+func (s *AdminService) ListComments(ctx context.Context, adminID string, input dto.AdminCommentFilterInput) (dto.AdminCommentListResponse, error) {
+	if adminID == "" {
+		return dto.AdminCommentListResponse{}, errors.New("không có quyền truy cập")
+	}
+
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminCommentListResponse{}, err
+	}
+
+	page := input.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	status := strings.TrimSpace(strings.ToLower(input.Status))
+	if status != "" {
+		switch status {
+		case string(models.CommentStatusActive),
+			string(models.CommentStatusHidden),
+			string(models.CommentStatusDeleted):
+		default:
+			return dto.AdminCommentListResponse{}, fmt.Errorf("trạng thái bình luận không hợp lệ")
+		}
+	}
+
+	comments, err := s.postRepo.ListComments(ctx, input.Keyword, status, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return dto.AdminCommentListResponse{}, err
+	}
+
+	total, err := s.postRepo.CountComments(ctx, input.Keyword, status)
+	if err != nil {
+		return dto.AdminCommentListResponse{}, err
+	}
+
+	userIDs := make([]string, 0, len(comments))
+	seen := make(map[string]struct{}, len(comments))
+	for _, c := range comments {
+		if _, dup := seen[c.UserID]; !dup {
+			seen[c.UserID] = struct{}{}
+			userIDs = append(userIDs, c.UserID)
+		}
+	}
+
+	userMap := make(map[string]struct {
+		Username    string
+		DisplayName string
+		AvatarURI   string
+	}, len(userIDs))
+
+	if users, err := s.authRepo.FindByIDs(ctx, userIDs); err == nil {
+		for _, u := range users {
+			entry := userMap[u.ID]
+			entry.Username = u.Username
+			userMap[u.ID] = entry
+		}
+	}
+	if profiles, err := s.profileRepo.FindByIDs(ctx, userIDs); err == nil {
+		for _, p := range profiles {
+			entry := userMap[p.UserID]
+			entry.DisplayName = p.DisplayName
+			entry.AvatarURI = p.AvatarURI
+			userMap[p.UserID] = entry
+		}
+	}
+
+	items := make([]dto.AdminCommentListItem, 0, len(comments))
+	for _, c := range comments {
+		info := userMap[c.UserID]
+		items = append(items, dto.AdminCommentListItem{
+			ID:           c.ID,
+			UserID:       c.UserID,
+			Username:     info.Username,
+			DisplayName:  info.DisplayName,
+			PostID:       c.PostID,
+			Content:      c.Content,
+			Status:       string(c.Status),
+			ReviewReason: c.ReviewReason,
+			CreatedAt:    c.CreatedAt,
+			UpdatedAt:    c.UpdatedAt,
+		})
+	}
+
+	resp := dto.AdminCommentListResponse{
+		Comments: items,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if len(items) == 0 {
+		resp.Message = "Không tìm thấy bình luận"
+	}
+	return resp, nil
+}
+
+func (s *AdminService) HideComment(ctx context.Context, superAdminID, commentID string, input dto.AdminHidePostInput) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	comment, err := s.postRepo.FindCommentByID(ctx, commentID)
+	if err != nil {
+		return fmt.Errorf("bình luận không tồn tại")
+	}
+
+	if comment.Status == models.CommentStatusHidden {
+		return errors.New("bình luận đã ở trạng thái ẩn")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetComment, commentID, input.Reason)
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if err := s.postRepo.UpdateCommentStatus(ctx, commentID, models.CommentStatusHidden, input.Reason); err != nil {
+		return err
+	}
+
+	senderID := superAdminID
+	postIDPtr := comment.PostID
+	commentIDPtr := commentID
+	_, err = s.notificationService.Create(
+		ctx,
+		comment.UserID,
+		&senderID,
+		models.NotificationTypeMessage,
+		"Bình luận của bạn đã bị ẩn vì: "+input.Reason,
+		&postIDPtr,
+		nil,
+		&commentIDPtr,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *AdminService) RevealComment(ctx context.Context, superAdminID, commentID string) error {
+	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+		return err
+	}
+
+	comment, err := s.postRepo.FindCommentByID(ctx, commentID)
+	if err != nil {
+		return fmt.Errorf("bình luận không tồn tại")
+	}
+
+	if comment.Status != models.CommentStatusHidden {
+		return errors.New("bình luận không ở trạng thái ẩn")
+	}
+
+	moderation := models.NewModerationLog(superAdminID, models.ModerationActionUpdate, models.ModerationTargetComment, commentID, "Hiện bình luận")
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return err
+	}
+
+	if err := s.postRepo.UpdateCommentStatus(ctx, commentID, models.CommentStatusActive, ""); err != nil {
+		return err
+	}
+
+	senderID := superAdminID
+	postIDPtr := comment.PostID
+	commentIDPtr := commentID
+	_, err = s.notificationService.Create(
+		ctx,
+		comment.UserID,
+		&senderID,
+		models.NotificationTypeMessage,
+		"Bình luận của bạn đã được hiện lại",
+		&postIDPtr,
+		nil,
+		&commentIDPtr,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *AdminService) ListReports(ctx context.Context, adminID string, input dto.AdminReportFilterInput) (dto.AdminReportListResponse, error) {
 	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return dto.AdminReportListResponse{}, err

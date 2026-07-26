@@ -184,6 +184,34 @@ func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string
 	return comments, err
 }
 
+func (r *PostRepository) ListComments(ctx context.Context, keyword, status string, limit, offset int) ([]models.Comment, error) {
+	var comments []models.Comment
+	q := r.db.WithContext(ctx).Model(&models.Comment{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("content LIKE ?", like)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&comments).Error
+	return comments, err
+}
+
+func (r *PostRepository) CountComments(ctx context.Context, keyword, status string) (int64, error) {
+	var count int64
+	q := r.db.WithContext(ctx).Model(&models.Comment{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("content LIKE ?", like)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	err := q.Count(&count).Error
+	return count, err
+}
+
 func (r *PostRepository) ListPosts(ctx context.Context, keyword, status string, limit, offset int) ([]models.Post, error) {
 	var posts []models.Post
 
