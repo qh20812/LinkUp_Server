@@ -133,7 +133,7 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
 		storyRepository := repository.NewStoryRepository(gormDB)
-		storyService := services.NewStoryService(storyRepository)
+		storyService := services.NewStoryService(storyRepository, mediaService)
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
