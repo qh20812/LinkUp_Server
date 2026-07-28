@@ -114,11 +114,16 @@ func main() {
 		seedAdPackages(gormDB)
 		// ====================================================================
 
+		// ===== KHỞI TẠO TẦNG ADMIN SETTINGS =====
+		adminSettingsRepository := repository.NewAdminSettingsRepository(gormDB)
+		adminSettingsService := services.NewAdminSettingsService(adminSettingsRepository, env)
+		adminSettingsController := controllers.NewAdminSettingsController(adminSettingsService)
+
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
 		banRepository := repository.NewBanRepository(gormDB)
-		authService := services.NewAuthService(authRepository, profileRepository, banRepository, env)
+		authService := services.NewAuthService(authRepository, profileRepository, banRepository, adminSettingsRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
 		routes.RegisterAuthRoutes(router, authController, env, gormDB)
@@ -260,11 +265,6 @@ func main() {
 		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
 		routes.RegisterAdRoutes(router, adController, adService, env, gormDB)
 		routes.RegisterPackageRoutes(router, packageController, env, gormDB)
-
-		// ===== KHỞI TẠO TẦNG ADMIN SETTINGS =====
-		adminSettingsRepository := repository.NewAdminSettingsRepository(gormDB)
-		adminSettingsService := services.NewAdminSettingsService(adminSettingsRepository, env)
-		adminSettingsController := controllers.NewAdminSettingsController(adminSettingsService)
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)

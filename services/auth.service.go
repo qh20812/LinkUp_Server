@@ -16,22 +16,32 @@ import (
 )
 
 type AuthService struct {
-	authRepo    *repository.AuthRepository
-	profileRepo *repository.ProfileRepository
-	banRepo     *repository.BanRepository
-	env         config.Env
+	authRepo           *repository.AuthRepository
+	profileRepo        *repository.ProfileRepository
+	banRepo            *repository.BanRepository
+	adminSettingsRepo  *repository.AdminSettingsRepository
+	env                config.Env
 }
 
-func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, banRepo *repository.BanRepository, env config.Env) *AuthService {
+func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, banRepo *repository.BanRepository, adminSettingsRepo *repository.AdminSettingsRepository, env config.Env) *AuthService {
 	return &AuthService{
-		authRepo:    authRepo,
-		profileRepo: profileRepo,
-		banRepo:     banRepo,
-		env:         env,
+		authRepo:          authRepo,
+		profileRepo:       profileRepo,
+		banRepo:           banRepo,
+		adminSettingsRepo: adminSettingsRepo,
+		env:               env,
 	}
 }
 
 func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dto.AuthResponse, error) {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if cfg != nil && cfg.Value == "false" {
+		return dto.AuthResponse{}, errors.New("đăng ký đã bị tắt bởi quản trị viên")
+	}
+
 	email := normalizeEmail(input.Email)
 
 	if _, err := s.authRepo.FindByEmail(ctx, email); err == nil {

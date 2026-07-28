@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"errors"
+
 	"linkup/models"
 
 	"gorm.io/gorm"
@@ -17,6 +19,18 @@ func NewAdminSettingsRepository(db *gorm.DB) *AdminSettingsRepository {
 
 func (r *AdminSettingsRepository) DB() *gorm.DB {
 	return r.db
+}
+
+func (r *AdminSettingsRepository) GetByKey(ctx context.Context, key string) (*models.SystemConfig, error) {
+	var config models.SystemConfig
+	err := r.db.WithContext(ctx).Where("`key` = ?", key).First(&config).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &config, nil
 }
 
 func (r *AdminSettingsRepository) GetAll(ctx context.Context) ([]models.SystemConfig, error) {
