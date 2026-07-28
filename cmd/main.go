@@ -128,6 +128,8 @@ func main() {
 		authController := controllers.NewAuthController(authService, authValidation)
 		routes.RegisterAuthRoutes(router, authController, env, gormDB)
 
+		adminSettingsService.SetAuthRepository(authRepository)
+
 		// ===== KHỞI TẠO TẦNG PASSWORD RESET =====
 		resetRepository := repository.NewPasswordResetRepository(gormDB)
 		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)

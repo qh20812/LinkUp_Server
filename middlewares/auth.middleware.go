@@ -60,7 +60,12 @@ func AuthMiddleware(env config.Env, db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if claims.TokenVersion != user.TokenVersion {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "phiên đăng nhập đã hết hạn"})
+			errMsg := "phiên đăng nhập đã hết hạn"
+			var sysConfig models.SystemConfig
+			if err := db.WithContext(c.Request.Context()).Where("`key` = ?", "maintenance_mode").First(&sysConfig).Error; err == nil && sysConfig.Value == "true" {
+				errMsg = "hệ thống đang bảo trì"
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{"error": errMsg})
 			c.Abort()
 			return
 		}

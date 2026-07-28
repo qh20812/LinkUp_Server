@@ -28,12 +28,17 @@ var allowedSettings = map[string]string{
 }
 
 type AdminSettingsService struct {
-	repo *repository.AdminSettingsRepository
-	env  config.Env
+	repo     *repository.AdminSettingsRepository
+	authRepo *repository.AuthRepository
+	env      config.Env
 }
 
 func NewAdminSettingsService(repo *repository.AdminSettingsRepository, env config.Env) *AdminSettingsService {
 	return &AdminSettingsService{repo: repo, env: env}
+}
+
+func (s *AdminSettingsService) SetAuthRepository(repo *repository.AuthRepository) {
+	s.authRepo = repo
 }
 
 func (s *AdminSettingsService) GetSettings(ctx context.Context, adminID string) (*dto.AdminSettingsResponse, error) {
@@ -73,7 +78,17 @@ func (s *AdminSettingsService) UpdateSettings(ctx context.Context, adminID strin
 		}
 	}
 
-	return s.repo.UpsertBatch(ctx, input.Settings)
+	if err := s.repo.UpsertBatch(ctx, input.Settings); err != nil {
+		return err
+	}
+
+	if val, ok := input.Settings["maintenance_mode"]; ok && val == "true" && s.authRepo != nil {
+		if err := s.authRepo.IncrementAllTokenVersions(ctx); err != nil {
+			return fmt.Errorf("vô hiệu hóa phiên đăng nhập thất bại: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (s *AdminSettingsService) ensureSuperAdmin(ctx context.Context, adminID string) error {

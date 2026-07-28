@@ -33,6 +33,14 @@ func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository
 	}
 }
 
+func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "maintenance_mode")
+	if err != nil {
+		return false, err
+	}
+	return cfg != nil && cfg.Value == "true", nil
+}
+
 func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dto.AuthResponse, error) {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
 	if err != nil {
@@ -40,6 +48,14 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	}
 	if cfg != nil && cfg.Value == "false" {
 		return dto.AuthResponse{}, errors.New("đăng ký đã bị tắt bởi quản trị viên")
+	}
+
+	maint, err := s.isMaintenanceMode(ctx)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if maint {
+		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
 	}
 
 	email := normalizeEmail(input.Email)
@@ -124,6 +140,14 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 	role, err := s.authRepo.GetUserRole(ctx, user.ID)
 	if err != nil {
 		return dto.AuthResponse{}, err
+	}
+
+	maint, err := s.isMaintenanceMode(ctx)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if maint && role != string(models.RoleSuperAdmin) && role != string(models.RoleAdmin) {
+		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
 	}
 
 	accessToken, refreshToken, err := s.generateTokens(user, role)
