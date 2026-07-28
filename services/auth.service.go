@@ -54,6 +54,18 @@ func (s *AuthService) getMinPasswordLength(ctx context.Context) int {
 	return n
 }
 
+func (s *AuthService) getJWTExpiryMinutes(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "jwt_expiry_minutes")
+	if err != nil || cfg == nil {
+		return s.env.JWTExpiresIn
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 1 {
+		return s.env.JWTExpiresIn
+	}
+	return n
+}
+
 func (s *AuthService) getMaxLoginAttempts(ctx context.Context) int {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "max_login_attempts")
 	if err != nil || cfg == nil {
@@ -136,12 +148,12 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(createdUser, "USER")
+	accessToken, refreshToken, err := s.generateTokens(ctx, createdUser, "USER")
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(), s.refreshTTL()), nil
+	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL()), nil
 }
 
 func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {
@@ -195,27 +207,28 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(user, role)
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(), s.refreshTTL()), nil
+	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL()), nil
 }
 
-func (s *AuthService) generateTokens(user *models.User, role string) (string, string, error) {
-	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(), s.refreshTTL())
+func (s *AuthService) generateTokens(ctx context.Context, user *models.User, role string) (string, string, error) {
+	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(ctx), s.refreshTTL())
 }
 
 func (s *AuthService) Logout(ctx context.Context, userID string) error {
 	return s.authRepo.IncrementTokenVersion(ctx, userID)
 }
 
-func (s *AuthService) accessTTL() time.Duration {
-	if s.env.JWTExpiresIn <= 0 {
+func (s *AuthService) accessTTL(ctx context.Context) time.Duration {
+	min := s.getJWTExpiryMinutes(ctx)
+	if min <= 0 {
 		return 15 * time.Minute
 	}
-	return time.Duration(s.env.JWTExpiresIn) * time.Minute
+	return time.Duration(min) * time.Minute
 }
 
 func (s *AuthService) refreshTTL() time.Duration {
@@ -334,7 +347,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		return dto.TokenResponse{}, err
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(user, role)
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
 	if err != nil {
 		return dto.TokenResponse{}, err
 	}
@@ -343,7 +356,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.accessTTL().Seconds()),
+		ExpiresIn:    int64(s.accessTTL(ctx).Seconds()),
 		RefreshTTLIn: int64(s.refreshTTL().Seconds()),
 	}, nil
 }
