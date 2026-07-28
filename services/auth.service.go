@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,18 @@ func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
 	return cfg != nil && cfg.Value == "true", nil
 }
 
+func (s *AuthService) getMinPasswordLength(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "password_min_length")
+	if err != nil || cfg == nil {
+		return 8
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 8 {
+		return 8
+	}
+	return n
+}
+
 func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dto.AuthResponse, error) {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
 	if err != nil {
@@ -56,6 +69,10 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	}
 	if maint {
 		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+	}
+
+	if len(input.Password) < s.getMinPasswordLength(ctx) {
+		return dto.AuthResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
 	}
 
 	email := normalizeEmail(input.Email)
@@ -208,6 +225,10 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 func (s *AuthService) ChangePassword(ctx context.Context, userID string, input dto.ChangePasswordInput) error {
 	if err := validations.NewAuthValidation().ValidatePassword(input.NewPassword); err != nil {
 		return err
+	}
+
+	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
+		return fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
 	}
 
 	user, err := s.authRepo.FindByID(ctx, userID)
