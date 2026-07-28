@@ -21,6 +21,7 @@ type AuthService struct {
 	profileRepo        *repository.ProfileRepository
 	banRepo            *repository.BanRepository
 	adminSettingsRepo  *repository.AdminSettingsRepository
+	emailVerifyService *EmailVerificationService
 	env                config.Env
 }
 
@@ -32,6 +33,10 @@ func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository
 		adminSettingsRepo: adminSettingsRepo,
 		env:               env,
 	}
+}
+
+func (s *AuthService) SetEmailVerificationService(svc *EmailVerificationService) {
+	s.emailVerifyService = svc
 }
 
 func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
@@ -148,12 +153,25 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
+	// Check if email verification is required
+	reqVerify := false
+	if cfg, err := s.adminSettingsRepo.GetByKey(ctx, "require_email_verify"); err == nil && cfg != nil && cfg.Value == "true" {
+		reqVerify = true
+	}
+
+	if reqVerify && s.emailVerifyService != nil {
+		if err := s.emailVerifyService.SendVerificationEmail(ctx, createdUser.ID, createdUser.Email, createdUser.Username); err != nil {
+			return dto.AuthResponse{}, err
+		}
+		return buildAuthResponse(*createdUser, "", "", s.accessTTL(ctx), s.refreshTTL(), true), nil
+	}
+
 	accessToken, refreshToken, err := s.generateTokens(ctx, createdUser, "USER")
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL()), nil
+	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(), false), nil
 }
 
 func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {
@@ -207,12 +225,19 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
 	}
 
+	// Check email verification if required
+	if cfg, err := s.adminSettingsRepo.GetByKey(ctx, "require_email_verify"); err == nil && cfg != nil && cfg.Value == "true" {
+		if !user.IsEmailVerified() {
+			return dto.AuthResponse{}, errors.New("vui lòng xác thực email trước khi đăng nhập")
+		}
+	}
+
 	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL()), nil
+	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(), false), nil
 }
 
 func (s *AuthService) generateTokens(ctx context.Context, user *models.User, role string) (string, string, error) {
@@ -239,7 +264,7 @@ func normalizeEmail(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func buildAuthResponse(user models.User, accessToken, refreshToken string, accessTTL, refreshTTL time.Duration) dto.AuthResponse {
+func buildAuthResponse(user models.User, accessToken, refreshToken string, accessTTL, refreshTTL time.Duration, verifyEmail bool) dto.AuthResponse {
 	return dto.AuthResponse{
 		User: dto.AuthUserResponse{
 			ID:        user.ID,
@@ -255,11 +280,12 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 			ExpiresIn:    int64(accessTTL.Seconds()),
 			RefreshTTLIn: int64(refreshTTL.Seconds()),
 		},
-		Storage: dto.StorageInfo{
+		Storage:     dto.StorageInfo{
 			QuotaBytes: user.StorageQuotaBytes,
 			UsedBytes:  user.StorageUsedBytes,
 			AvailBytes: user.AvailableStorageBytes(),
 		},
+		VerifyEmail: verifyEmail,
 	}
 }
 

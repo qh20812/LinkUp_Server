@@ -126,7 +126,14 @@ func main() {
 		authService := services.NewAuthService(authRepository, profileRepository, banRepository, adminSettingsRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG EMAIL VERIFICATION =====
+		emailVerifRepository := repository.NewEmailVerificationRepository(gormDB)
+		emailVerifService := services.NewEmailVerificationService(emailVerifRepository, authRepository, adminSettingsRepository, env)
+		emailVerifController := controllers.NewEmailVerificationController(emailVerifService, authValidation)
+		authService.SetEmailVerificationService(emailVerifService)
+
+		routes.RegisterAuthRoutes(router, authController, emailVerifController, env, gormDB)
 
 		adminSettingsService.SetAuthRepository(authRepository)
 

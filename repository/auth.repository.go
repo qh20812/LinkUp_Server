@@ -276,3 +276,14 @@ func (r *AuthRepository) ResetLoginAttempts(ctx context.Context, userID string) 
 		"locked_until":   nil,
 	}).Error
 }
+
+func (r *AuthRepository) UpdateEmailVerifiedAt(ctx context.Context, userID string, verifiedAt time.Time) error {
+	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Update("email_verified_at", verifiedAt)
+	if tx.Error != nil {
+		return fmt.Errorf("update email_verified_at: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}

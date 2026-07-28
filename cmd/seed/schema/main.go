@@ -552,7 +552,20 @@ func Run(env config.Env) error {
 			INDEX idx_password_reset_tokens_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 29. Depends on users, posts
+		// 29. Depends on users
+		`CREATE TABLE IF NOT EXISTS email_verification_tokens (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			token VARCHAR(255) NOT NULL UNIQUE,
+			expires_at DATETIME NOT NULL,
+			used_at DATETIME NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_email_verification_tokens_token (token),
+			INDEX idx_email_verification_tokens_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 30. Depends on users, posts
 		`CREATE TABLE IF NOT EXISTS post_shares (
 			id VARCHAR(36) PRIMARY KEY,
 			post_id VARCHAR(36) NOT NULL,
@@ -563,7 +576,7 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 30. Chat_invite
+		// 31. Chat_invite
 		`CREATE TABLE IF NOT EXISTS chat_invitations (
 			id VARCHAR(36) PRIMARY KEY,
 			requester_id VARCHAR(36) NOT NULL,
@@ -577,9 +590,9 @@ func Run(env config.Env) error {
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 31. Message Security — moved to idempotent addColumnIfMissing below
+		// 32. Message Security — moved to idempotent addColumnIfMissing below
 
-		// 32. group_chat_settings
+		// 33. group_chat_settings
 		`CREATE TABLE IF NOT EXISTS group_chat_settings (
 			chat_id VARCHAR(64) PRIMARY KEY,
 			allow_member_add BOOLEAN NOT NULL DEFAULT TRUE,
@@ -588,7 +601,7 @@ func Run(env config.Env) error {
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 33. group_chat_member_settings
+		// 34. group_chat_member_settings
 		`CREATE TABLE IF NOT EXISTS group_chat_member_settings (
 			chat_id VARCHAR(36) NOT NULL,
 			user_id VARCHAR(36) NOT NULL,
@@ -599,7 +612,7 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 34. group_chat_mutes
+		// 35. group_chat_mutes
 		`CREATE TABLE IF NOT EXISTS group_chat_mutes (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -611,7 +624,7 @@ func Run(env config.Env) error {
 			INDEX idx_group_chat_mutes_chat_user (chat_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 35. Depends on communities - Community contribution policy
+		// 36. Depends on communities - Community contribution policy
 		`CREATE TABLE IF NOT EXISTS community_policies (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL UNIQUE,
@@ -629,7 +642,7 @@ func Run(env config.Env) error {
 			INDEX idx_community_policies_community (community_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 36. Depends on communities, users - Member contribution tracking
+		// 37. Depends on communities, users - Member contribution tracking
 		`CREATE TABLE IF NOT EXISTS member_contributions (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -650,8 +663,8 @@ func Run(env config.Env) error {
 			INDEX idx_member_contributions_score (community_id, contribution_score DESC)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 37. Depends on communities, users - Community challenges
-		// 36b. Depends on communities, users — Invite codes
+		// 38. Depends on communities, users - Community challenges
+		// 37b. Depends on communities, users — Invite codes
 		`CREATE TABLE IF NOT EXISTS community_invite_codes (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -668,7 +681,7 @@ func Run(env config.Env) error {
 			INDEX idx_invite_codes_community (community_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 36c. Depends on communities, users — Direct invitations
+		// 37c. Depends on communities, users — Direct invitations
 		`CREATE TABLE IF NOT EXISTS community_invitations (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -684,7 +697,7 @@ func Run(env config.Env) error {
 			INDEX idx_invitations_invitee (invitee_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 37. Depends on community_policies, users — Community challenges
+		// 38. Depends on community_policies, users — Community challenges
 		`CREATE TABLE IF NOT EXISTS community_challenges (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -704,7 +717,7 @@ func Run(env config.Env) error {
 			INDEX idx_community_challenges_status (status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 38. Depends on community_challenges, users - Challenge participants
+		// 39. Depends on community_challenges, users - Challenge participants
 		`CREATE TABLE IF NOT EXISTS challenge_participants (
 			id VARCHAR(36) PRIMARY KEY,
 			challenge_id VARCHAR(36) NOT NULL,
@@ -717,7 +730,7 @@ func Run(env config.Env) error {
 			UNIQUE INDEX idx_challenge_participants_pair (challenge_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 39. Soft-delete for call history (user-level hide, row stays for the other party)
+		// 40. Soft-delete for call history (user-level hide, row stays for the other party)
 		`CREATE TABLE IF NOT EXISTS call_hidden (
 			call_id VARCHAR(36) NOT NULL,
 			user_id VARCHAR(36) NOT NULL,
@@ -726,7 +739,7 @@ func Run(env config.Env) error {
 			FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-		// 39. group_chat_member_request:
+		// 41. group_chat_member_request:
 		`CREATE TABLE IF NOT EXISTS group_chat_member_requests (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -744,15 +757,15 @@ func Run(env config.Env) error {
 			FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 40. Add 2 columns to messages
+		// 42. Add 2 columns to messages
 		`ALTER TABLE messages
 		ADD COLUMN is_anonymized TINYINT(1) NOT NULL DEFAULT 0,
 		ADD COLUMN anonymous_name VARCHAR(255) NULL`,
 
-		// 41. Reply Messges
+		// 43. Reply Messges
 		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
 
-		// 42. Depends on chats, users — group chat bans
+		// 44. Depends on chats, users — group chat bans
 		`CREATE TABLE IF NOT EXISTS group_chat_bans (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -765,7 +778,7 @@ func Run(env config.Env) error {
 			INDEX idx_group_chat_bans_chat_user (chat_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 43. system_configs — cài đặt hệ thống (không dependency)
+		// 45. system_configs — cài đặt hệ thống (không dependency)
 		`CREATE TABLE IF NOT EXISTS system_configs (
 			` + "`key`" + ` VARCHAR(100) PRIMARY KEY,
 			value TEXT NOT NULL,
@@ -897,6 +910,11 @@ func Run(env config.Env) error {
 	}
 	if err := addColumnIfMissing(database, "users", "locked_until", "DATETIME NULL"); err != nil {
 		return fmt.Errorf("schema: add users.locked_until: %w", err)
+	}
+
+	// Email verification column
+	if err := addColumnIfMissing(database, "users", "email_verified_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.email_verified_at: %w", err)
 	}
 
 	return nil

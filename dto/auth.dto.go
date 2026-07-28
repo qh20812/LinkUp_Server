@@ -30,9 +30,10 @@ type TokenResponse struct {
 }
 
 type AuthResponse struct {
-	User    AuthUserResponse `json:"user"`
-	Tokens  TokenResponse    `json:"tokens"`
-	Storage StorageInfo      `json:"storage,omitempty"`
+	User        AuthUserResponse `json:"user"`
+	Tokens      TokenResponse    `json:"tokens"`
+	Storage     StorageInfo      `json:"storage,omitempty"`
+	VerifyEmail bool             `json:"verify_email,omitempty"`
 }
 
 type ChangePasswordInput struct {
