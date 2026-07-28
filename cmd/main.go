@@ -68,6 +68,19 @@ func main() {
 		// ====================================================================
 		// TỰ ĐỘNG MIGRATION CHO STORIES & ADVERTISEMENT
 		// ====================================================================
+
+		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
+			_ = gormDB.Exec("ALTER TABLE partner_subscriptions DROP FOREIGN KEY fk_partner_subscriptions_package")
+		}
+
+		if gormDB.Migrator().HasTable(&models.AdPackage{}) {
+			_ = gormDB.Exec("ALTER TABLE ad_packages MODIFY COLUMN id VARCHAR(36) NOT NULL")
+		}
+
+		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
+			_ = gormDB.Exec("ALTER TABLE partner_subscriptions MODIFY COLUMN package_id VARCHAR(36) NOT NULL")
+		}
+
 		log.Println("Running database auto-migration...")
 		err = gormDB.AutoMigrate(
 			&models.User{},
@@ -91,7 +104,9 @@ func main() {
 
 		// Tạo Index giải quyết cảnh báo SLOW SQL cho Partner Subscriptions
 		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
-			_ = gormDB.Exec("ALTER TABLE partner_subscriptions ADD INDEX idx_user_status_expires (user_id, status, expires_at);")
+			if !gormDB.Migrator().HasIndex(&models.PartnerSubscription{}, "idx_user_status_expires") {
+				_ = gormDB.Exec("ALTER TABLE partner_subscriptions ADD INDEX idx_user_status_expires (user_id, status, expires_at)")
+			}
 		}
 
 		// Seed dữ liệu mặc định cho các Gói Quảng Cáo

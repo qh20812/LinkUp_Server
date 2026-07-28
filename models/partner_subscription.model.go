@@ -11,9 +11,9 @@ const (
 )
 
 type PartnerSubscription struct {
-	ID        string             `json:"id" gorm:"primaryKey"`
-	UserID    string             `json:"user_id" gorm:"index;not null"`
-	PackageID string             `json:"package_id" gorm:"index;not null"`
+	ID        string             `json:"id" gorm:"type:varchar(36);primaryKey"`
+	UserID    string             `json:"user_id" gorm:"type:varchar(36);index;not null"`
+	PackageID string             `json:"package_id" gorm:"type:varchar(36);index;not null"`
 	SlotsUsed int                `json:"slots_used" gorm:"default:0"`
 	StartedAt time.Time          `json:"started_at" gorm:"not null"`
 	ExpiresAt time.Time          `json:"expires_at" gorm:"not null"`

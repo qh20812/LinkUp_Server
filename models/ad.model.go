@@ -22,9 +22,9 @@ const (
 )
 
 type Ad struct {
-	ID             string     `json:"id" gorm:"type:varchar(191);primaryKey"`
-	PartnerID      string     `json:"partner_id" gorm:"type:varchar(191);index;not null"`
-	PackageID      *string    `json:"package_id,omitempty" gorm:"type:varchar(191);index"`
+	ID             string     `json:"id" gorm:"type:varchar(36);primaryKey"`
+	PartnerID      string     `json:"partner_id" gorm:"type:varchar(36);index;not null"`
+	PackageID      *string    `json:"package_id,omitempty" gorm:"type:varchar(36);index"`
 	Title          string     `json:"title" gorm:"size:100;not null"`
 	Content        string     `json:"content" gorm:"type:text;not null"`
 	Format         AdFormat   `json:"format" gorm:"size:20;default:'image'"`

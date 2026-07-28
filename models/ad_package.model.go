@@ -3,7 +3,7 @@ package models
 import "time"
 
 type AdPackage struct {
-	ID                   string    `json:"id" gorm:"primaryKey"`
+	ID                   string    `json:"id" gorm:"type:varchar(36);primaryKey"`
 	Name                 string    `json:"name" gorm:"size:100;not null"`
 	Description          string    `json:"description" gorm:"type:text"`
 	PriceMonthly         float64   `json:"price_monthly" gorm:"not null"`

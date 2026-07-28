@@ -95,7 +95,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		extra := postBodies[i%len(postBodies)]
 		views := randRange(10, 5000)
 
-		status := "active"
+		status := "public"
 		if i%15 == 7 {
 			status = "hidden"
 		}

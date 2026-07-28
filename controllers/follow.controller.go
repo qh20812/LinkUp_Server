@@ -4,6 +4,7 @@ import (
 	"linkup/dto"
 	"linkup/services"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -81,6 +82,26 @@ func (crtl *FollowController) GetFollowStats(c *gin.Context) {
 
 	if isFollowing, ok := stats["is_following"]; ok {
 		response.IsFollowing = isFollowing.(bool)
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (crtl *FollowController) GetSuggestions(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "bạn cần đăng nhập"})
+		return
+	}
+	userID := val.(string)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "5"))
+
+	response, err := crtl.followService.GetSuggestions(c.Request.Context(), userID, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, response)

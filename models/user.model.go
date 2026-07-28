@@ -17,8 +17,8 @@ const DefaultStorageQuotaBytes float64 = 2147483648
 
 type User struct {
 	ID                string     `json:"id"`
-	Username          string     `json:"username"`
-	Email             string     `json:"email"`
+	Username          string     `json:"username" gorm:"size:50"`
+	Email             string     `json:"email" gorm:"size:255"`
 	PasswordHash      string     `json:"password_hash"`
 	Status            UserStatus `json:"status"`
 	StorageQuotaBytes float64    `json:"storage_quota_bytes"`

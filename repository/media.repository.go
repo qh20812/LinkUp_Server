@@ -238,13 +238,6 @@ func (r *MediaRepository) GetMediaGroupsByUser(ctx context.Context, status, keyw
 		return []userMediaGroup{}, total, nil
 	}
 
-	type userInfo struct {
-		ID          string
-		Username    string
-		DisplayName string
-		AvatarURI   string
-	}
-
 	var users []userInfo
 	if err := r.db.WithContext(ctx).
 		Model(&models.User{}).

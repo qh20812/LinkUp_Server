@@ -18,6 +18,15 @@ func NewSearchController(searchService *services.SearchService) *SearchControlle
 	}
 }
 
+func (h *SearchController) GetTrending(c *gin.Context) {
+	hashtags, err := h.searchService.GetTrendingHashtags(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": hashtags})
+}
+
 func (h *SearchController) Search(c *gin.Context) {
 	var input dto.SearchInput
 	if err := c.ShouldBindQuery(&input); err != nil {

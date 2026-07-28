@@ -14,7 +14,7 @@ const (
 )
 
 type Comment struct {
-	ID           string         `json:"id"`
+	ID           string         `json:"id" gorm:"primaryKey"`
 	UserID       string         `json:"user_id"`
 	PostID       string         `json:"post_id"`
 	ParentID     *string        `json:"parent_id,omitempty"`
