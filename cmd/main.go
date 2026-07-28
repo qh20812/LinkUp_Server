@@ -91,6 +91,7 @@ func main() {
 			&models.Ad{},
 			&models.AdMedia{},
 			&models.AdAnalytics{},
+			&models.SystemConfig{},
 		)
 		if err != nil {
 			log.Printf("Warning: Migration failed: %v", err)
@@ -260,13 +261,18 @@ func main() {
 		routes.RegisterAdRoutes(router, adController, adService, env, gormDB)
 		routes.RegisterPackageRoutes(router, packageController, env, gormDB)
 
+		// ===== KHỞI TẠO TẦNG ADMIN SETTINGS =====
+		adminSettingsRepository := repository.NewAdminSettingsRepository(gormDB)
+		adminSettingsService := services.NewAdminSettingsService(adminSettingsRepository, env)
+		adminSettingsController := controllers.NewAdminSettingsController(adminSettingsService)
+
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
 		adminRepository := repository.NewAdminRepository(gormDB)
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
-		routes.RegisterAdminRoutes(router, adminController, env, gormDB)
+		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)

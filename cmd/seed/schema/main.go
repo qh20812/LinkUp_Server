@@ -752,7 +752,7 @@ func Run(env config.Env) error {
 		// 41. Reply Messges
 		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
 
-		// 35. Depends on chats, users — group chat bans
+		// 42. Depends on chats, users — group chat bans
 		`CREATE TABLE IF NOT EXISTS group_chat_bans (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -763,6 +763,13 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (banned_by) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_group_chat_bans_chat_user (chat_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 43. system_configs — cài đặt hệ thống (không dependency)
+		`CREATE TABLE IF NOT EXISTS system_configs (
+			` + "`key`" + ` VARCHAR(100) PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
