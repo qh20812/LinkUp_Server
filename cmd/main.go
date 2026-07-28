@@ -132,7 +132,7 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG PASSWORD RESET =====
 		resetRepository := repository.NewPasswordResetRepository(gormDB)
-		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)
+		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, adminSettingsRepository, authValidation, env)
 		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
 		routes.RegisterPasswordResetRoutes(router, passwordResetController)
 
