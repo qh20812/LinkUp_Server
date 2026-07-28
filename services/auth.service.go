@@ -54,6 +54,18 @@ func (s *AuthService) getMinPasswordLength(ctx context.Context) int {
 	return n
 }
 
+func (s *AuthService) getMaxLoginAttempts(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "max_login_attempts")
+	if err != nil || cfg == nil {
+		return 5
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 1 {
+		return 5
+	}
+	return n
+}
+
 func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dto.AuthResponse, error) {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
 	if err != nil {
@@ -150,8 +162,24 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, fmt.Errorf("tài khoản chưa được kích hoạt")
 	}
 
+	if user.IsLocked() {
+		return dto.AuthResponse{}, errors.New("tài khoản tạm thời bị khóa do nhập sai nhiều lần, vui lòng thử lại sau 15 phút")
+	}
+
 	if err := utils.ComparePassword(user.PasswordHash, input.Password); err != nil {
-		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
+		maxAttempts := s.getMaxLoginAttempts(ctx)
+		if err := s.authRepo.IncrementLoginAttempts(ctx, user.ID, maxAttempts); err != nil {
+			return dto.AuthResponse{}, err
+		}
+		remaining := maxAttempts - user.LoginAttempts - 1
+		if remaining > 0 {
+			return dto.AuthResponse{}, fmt.Errorf("email hoặc mật khẩu không hợp lệ. Bạn còn %d lần thử", remaining)
+		}
+		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ. Tài khoản của bạn đã bị khóa tạm thời")
+	}
+
+	if err := s.authRepo.ResetLoginAttempts(ctx, user.ID); err != nil {
+		return dto.AuthResponse{}, err
 	}
 
 	role, err := s.authRepo.GetUserRole(ctx, user.ID)

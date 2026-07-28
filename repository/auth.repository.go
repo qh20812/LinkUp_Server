@@ -257,3 +257,22 @@ func (r *AuthRepository) IncrementTokenVersion(ctx context.Context, userID strin
 	}
 	return nil
 }
+
+func (r *AuthRepository) IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int) error {
+	return r.db.WithContext(ctx).Exec(`
+		UPDATE users
+		SET login_attempts = login_attempts + 1,
+		    locked_until = CASE
+			WHEN login_attempts >= ? THEN DATE_ADD(NOW(), INTERVAL 15 MINUTE)
+			ELSE locked_until
+		    END
+		WHERE id = ?
+	`, maxAttempts, userID).Error
+}
+
+func (r *AuthRepository) ResetLoginAttempts(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"login_attempts": 0,
+		"locked_until":   nil,
+	}).Error
+}

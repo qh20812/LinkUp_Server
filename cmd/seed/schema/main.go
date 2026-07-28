@@ -891,5 +891,13 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add idx_comments_status: %w", err)
 	}
 
+	// Login attempt tracking columns (max_login_attempts lockout)
+	if err := addColumnIfMissing(database, "users", "login_attempts", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add users.login_attempts: %w", err)
+	}
+	if err := addColumnIfMissing(database, "users", "locked_until", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.locked_until: %w", err)
+	}
+
 	return nil
 }
