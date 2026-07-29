@@ -29,7 +29,32 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: linkup-server:latest
+
+      - name: Save image
+        run: |
+          docker save linkup-server | gzip > server.tar.gz
+
+      - name: Copy to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: server.tar.gz
+          target: /tmp/
+
+      - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -44,11 +69,8 @@ jobs:
             # Save current image as rollback candidate
             docker tag linkup-server:latest linkup-server:prev 2>/dev/null || true
 
-            # Pull & build
-            cd /opt/linkup/server
-            git pull origin main
-            cd /opt/linkup
-            docker compose build server
+            # Load new image
+            docker load -i /tmp/server.tar.gz
 
             # Deploy new version
             docker compose up -d server
