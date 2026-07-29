@@ -56,17 +56,38 @@ func (s *AuthService) getMinPasswordLength(ctx context.Context) int {
 	if err != nil || n < 8 {
 		return 8
 	}
+	if n > 50 {
+		return 50
+	}
 	return n
 }
 
 func (s *AuthService) getJWTExpiryMinutes(ctx context.Context) int {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "jwt_expiry_minutes")
 	if err != nil || cfg == nil {
-		return s.env.JWTExpiresIn
+		return clamp(s.env.JWTExpiresIn, 1, 60)
 	}
 	n, err := strconv.Atoi(cfg.Value)
 	if err != nil || n < 1 {
-		return s.env.JWTExpiresIn
+		return clamp(s.env.JWTExpiresIn, 1, 60)
+	}
+	if n > 60 {
+		return 60
+	}
+	return n
+}
+
+func (s *AuthService) getRefreshTokenExpiryDays(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "refresh_token_expiry_days")
+	if err != nil || cfg == nil {
+		return 7
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 1 {
+		return 7
+	}
+	if n > 30 {
+		return 30
 	}
 	return n
 }
@@ -79,6 +100,9 @@ func (s *AuthService) getMaxLoginAttempts(ctx context.Context) int {
 	n, err := strconv.Atoi(cfg.Value)
 	if err != nil || n < 1 {
 		return 5
+	}
+	if n > 10 {
+		return 10
 	}
 	return n
 }
@@ -102,6 +126,9 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 
 	if len(input.Password) < s.getMinPasswordLength(ctx) {
 		return dto.AuthResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+	}
+	if len(input.Password) > 50 {
+		return dto.AuthResponse{}, errors.New("mật khẩu không được vượt quá 50 ký tự")
 	}
 
 	email := normalizeEmail(input.Email)
@@ -163,7 +190,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		if err := s.emailVerifyService.SendVerificationEmail(ctx, createdUser.ID, createdUser.Email, createdUser.Username); err != nil {
 			return dto.AuthResponse{}, err
 		}
-		return buildAuthResponse(*createdUser, "", "", s.accessTTL(ctx), s.refreshTTL(), true), nil
+		return buildAuthResponse(*createdUser, "", "", s.accessTTL(ctx), s.refreshTTL(ctx), true), nil
 	}
 
 	accessToken, refreshToken, err := s.generateTokens(ctx, createdUser, "USER")
@@ -171,7 +198,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(), false), nil
+	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
 }
 
 func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {
@@ -241,11 +268,11 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(), false), nil
+	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
 }
 
 func (s *AuthService) generateTokens(ctx context.Context, user *models.User, role string) (string, string, error) {
-	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(ctx), s.refreshTTL())
+	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(ctx), s.refreshTTL(ctx))
 }
 
 func (s *AuthService) Logout(ctx context.Context, userID string) error {
@@ -260,8 +287,9 @@ func (s *AuthService) accessTTL(ctx context.Context) time.Duration {
 	return time.Duration(min) * time.Minute
 }
 
-func (s *AuthService) refreshTTL() time.Duration {
-	return 7 * 24 * time.Hour
+func (s *AuthService) refreshTTL(ctx context.Context) time.Duration {
+	days := s.getRefreshTokenExpiryDays(ctx)
+	return time.Duration(days) * 24 * time.Hour
 }
 
 func normalizeEmail(value string) string {
@@ -300,6 +328,9 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 
 	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
 		return fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+	}
+	if len(input.NewPassword) > 50 {
+		return errors.New("mật khẩu không được vượt quá 50 ký tự")
 	}
 
 	user, err := s.authRepo.FindByID(ctx, userID)
@@ -387,7 +418,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(s.accessTTL(ctx).Seconds()),
-		RefreshTTLIn: int64(s.refreshTTL().Seconds()),
+		RefreshTTLIn: int64(s.refreshTTL(ctx).Seconds()),
 	}, nil
 }
 
@@ -417,4 +448,14 @@ func (s *AuthService) ensureBanStatus(ctx context.Context, user *models.User) er
 	}
 
 	return errors.New("tài khoản bị ban vô thời hạn")
+}
+
+func clamp(value, min, max int) int {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }

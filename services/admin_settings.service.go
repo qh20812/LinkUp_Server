@@ -21,10 +21,11 @@ var allowedSettings = map[string]string{
 	"maintenance_mode":     "bool",
 	"allow_registration":   "bool",
 	"require_email_verify": "bool",
-	"password_min_length":  "int",
-	"max_login_attempts":   "int",
-	"jwt_expiry_minutes":   "int",
-	"default_user_role":    "string",
+	"password_min_length":       "int",
+	"max_login_attempts":        "int",
+	"jwt_expiry_minutes":        "int",
+	"refresh_token_expiry_days": "int",
+	"default_user_role":         "string",
 }
 
 type AdminSettingsService struct {
@@ -117,16 +118,32 @@ func validateSettingValue(key, value, expectedType string) error {
 		}
 		switch key {
 		case "password_min_length":
-			if num < 6 {
-				return fmt.Errorf("'password_min_length' phải >= 6")
+			if num < 8 {
+				return fmt.Errorf("'password_min_length' phải >= 8")
+			}
+			if num > 50 {
+				return fmt.Errorf("'password_min_length' không được vượt quá 50")
 			}
 		case "max_login_attempts":
 			if num < 1 {
 				return fmt.Errorf("'max_login_attempts' phải >= 1")
 			}
+			if num > 10 {
+				return fmt.Errorf("'max_login_attempts' không được vượt quá 10")
+			}
 		case "jwt_expiry_minutes":
 			if num < 1 {
 				return fmt.Errorf("'jwt_expiry_minutes' phải >= 1")
+			}
+			if num > 60 {
+				return fmt.Errorf("'jwt_expiry_minutes' không được vượt quá 60")
+			}
+		case "refresh_token_expiry_days":
+			if num < 1 {
+				return fmt.Errorf("'refresh_token_expiry_days' phải >= 1")
+			}
+			if num > 30 {
+				return fmt.Errorf("'refresh_token_expiry_days' không được vượt quá 30")
 			}
 		}
 	case "bool":
