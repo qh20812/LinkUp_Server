@@ -70,13 +70,51 @@ func main() {
 	// 5. Nếu kết nối cơ sở dữ liệu thành công, bắt đầu khởi tạo cấu trúc dự án qua GORM
 	if gormDB != nil {
 		// ====================================================================
-		// TỰ ĐỘNG TẠO BẢNG STORY VIEWS & CẬP NHẬT LẠI CẤU TRÚC BẢNG INTERACT
+		// TỰ ĐỘNG MIGRATION CHO STORIES & ADVERTISEMENT
 		// ====================================================================
-		log.Println("Running database auto-migration for Stories...")
-		err = gormDB.AutoMigrate(&models.StoryView{}, &models.StoryInteract{})
+
+		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
+			_ = gormDB.Exec("ALTER TABLE partner_subscriptions DROP FOREIGN KEY fk_partner_subscriptions_package")
+		}
+
+		if gormDB.Migrator().HasTable(&models.AdPackage{}) {
+			_ = gormDB.Exec("ALTER TABLE ad_packages MODIFY COLUMN id VARCHAR(36) NOT NULL")
+		}
+
+		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
+			_ = gormDB.Exec("ALTER TABLE partner_subscriptions MODIFY COLUMN package_id VARCHAR(36) NOT NULL")
+		}
+
+		log.Println("Running database auto-migration...")
+		err = gormDB.AutoMigrate(
+			&models.User{},
+			&models.StoryView{},
+			&models.StoryInteract{},
+			&models.AdPackage{},
+			&models.PartnerSubscription{},
+			&models.Ad{},
+			&models.AdMedia{},
+			&models.AdAnalytics{},
+		)
 		if err != nil {
 			log.Printf("Warning: Migration failed: %v", err)
 		}
+
+		// Tự động kiểm tra và đồng bộ lại tất cả các cột của struct Ad vào MySQL
+		// (Giải quyết trường hợp DB đã tạo bảng cũ nhưng thiếu cột mới)
+		if gormDB.Migrator().HasTable(&models.Ad{}) {
+			_ = gormDB.Migrator().AutoMigrate(&models.Ad{})
+		}
+
+		// Tạo Index giải quyết cảnh báo SLOW SQL cho Partner Subscriptions
+		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
+			if !gormDB.Migrator().HasIndex(&models.PartnerSubscription{}, "idx_user_status_expires") {
+				_ = gormDB.Exec("ALTER TABLE partner_subscriptions ADD INDEX idx_user_status_expires (user_id, status, expires_at)")
+			}
+		}
+
+		// Seed dữ liệu mặc định cho các Gói Quảng Cáo
+		seedAdPackages(gormDB)
 		// ====================================================================
 
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
@@ -137,7 +175,7 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
 		storyRepository := repository.NewStoryRepository(gormDB)
-		storyService := services.NewStoryService(storyRepository)
+		storyService := services.NewStoryService(storyRepository, mediaService)
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
@@ -212,11 +250,19 @@ func main() {
 		contributionController := controllers.NewContributionController(contributionService)
 		routes.RegisterContributionRoutes(router, contributionController, env, gormDB)
 
-		// ===== KHỞI TẠO TẦNG ADVERTISEMENT (QUẢNG CÁO & PHÂN QUYỀN PARTNER) =====
+		// ===== KHỞI TẠO TẦNG ADVERTISEMENT & PACKAGES (QUẢNG CÁO & GÓI ĐĂNG KÝ) =====
 		adRepository := repository.NewAdRepository(gormDB)
-		adService := services.NewAdService(adRepository)
+		packageRepository := repository.NewPackageRepository(gormDB)
+
+		adService := services.NewAdService(adRepository, packageRepository, mediaService)
+		packageService := services.NewPackageService(packageRepository)
+
 		adController := controllers.NewAdController(adService)
-		routes.RegisterAdRoutes(router, adController, env, gormDB)
+		packageController := controllers.NewPackageController(packageService)
+
+		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
+		routes.RegisterAdRoutes(router, adController, adService, env, gormDB)
+		routes.RegisterPackageRoutes(router, packageController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
@@ -245,7 +291,6 @@ func main() {
 			groupCallHub.SetCallStore(groupCallRepo)
 			groupMessageService.SetGroupCallRepository(groupCallRepo)
 		}
-		// allow hub to persist chat system messages when calls expire
 		groupCallHub.SetMessageService(groupMessageService)
 		routes.RegisterGroupCallRoutes(router, groupCallHub, groupMessageService, groupChatService, groupHub, env, gormDB)
 	}
@@ -259,4 +304,57 @@ func main() {
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
+}
+
+// seedAdPackages hỗ trợ khởi tạo sẵn 3 gói cước mẫu cho hệ thống
+func seedAdPackages(db *gorm.DB) {
+	var count int64
+	db.Model(&models.AdPackage{}).Count(&count)
+	if count > 0 {
+		return
+	}
+
+	packages := []models.AdPackage{
+		{
+			ID:                   "pkg_basic",
+			Name:                 "Gói Cơ Bản (Basic)",
+			Description:          "Phù hợp cho cá nhân kinh doanh nhỏ, hỗ trợ 3 chiến dịch ảnh tĩnh.",
+			PriceMonthly:         500000,
+			MaxSlots:             3,
+			MaxDurationDays:      30,
+			SupportsVideo:        false,
+			SupportsCarousel:     false,
+			HasAdvancedAnalytics: false,
+			SortOrder:            1,
+		},
+		{
+			ID:                   "pkg_standard",
+			Name:                 "Gói Tiêu Chuẩn (Standard)",
+			Description:          "Dành cho doanh nghiệp vừa, hỗ trợ tối đa 10 chiến dịch và định dạng Video.",
+			PriceMonthly:         1500000,
+			MaxSlots:             10,
+			MaxDurationDays:      30,
+			SupportsVideo:        true,
+			SupportsCarousel:     true,
+			HasAdvancedAnalytics: true,
+			SortOrder:            2,
+		},
+		{
+			ID:                   "pkg_vip",
+			Name:                 "Gói VIP Pro",
+			Description:          "Không giới hạn sáng tạo, full tính năng Carousel, Video & Analytics nâng cao.",
+			PriceMonthly:         3500000,
+			MaxSlots:             30,
+			MaxDurationDays:      60,
+			SupportsVideo:        true,
+			SupportsCarousel:     true,
+			HasAdvancedAnalytics: true,
+			SortOrder:            3,
+		},
+	}
+
+	for _, pkg := range packages {
+		db.Create(&pkg)
+	}
+	log.Println("[Seed] Đã tạo thành công 3 gói quảng cáo mẫu!")
 }

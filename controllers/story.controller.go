@@ -20,15 +20,11 @@ func NewStoryController(service services.StoryService) *StoryController {
 func (ctrl *StoryController) CreateStory(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
-	file, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng chọn file hình ảnh hoặc video"})
-		return
-	}
-
+	// Lấy file, nếu không có (err != nil) thì file sẽ là nil, ta không return lỗi nữa
+	file, _ := c.FormFile("file")
 	caption := c.PostForm("caption")
 
-	res, err := ctrl.service.CreateStory(userID.(string), file, caption)
+	res, err := ctrl.service.CreateStory(c.Request.Context(), userID.(string), file, caption)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

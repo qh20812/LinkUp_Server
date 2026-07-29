@@ -3,7 +3,7 @@ package models
 import "time"
 
 type PostReaction struct {
-	ID        string    `json:"id"`
+	ID        string    `json:"id" gorm:"primaryKey"`
 	UserID    string    `json:"user_id"`
 	PostID    string    `json:"post_id"`
 	EmojiID   string    `json:"emoji_id"`

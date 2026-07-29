@@ -57,19 +57,28 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 }
 
 func (ctrl *PostController) GetPosts(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	cursor := c.Query("cursor")
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	filter := c.Query("filter")
 
-	posts, err := ctrl.service.GetPostList(c.Request.Context(), page, pageSize)
+	userID, _ := c.Get("userID")
+	userIDStr, _ := userID.(string)
+
+	posts, nextCursor, err := ctrl.service.GetPostList(c.Request.Context(), cursor, pageSize, userIDStr, filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	var nc *string
+	if nextCursor != "" {
+		nc = &nextCursor
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"page":      page,
-		"page_size": pageSize,
-		"data":      posts,
+		"page_size":   pageSize,
+		"next_cursor": nc,
+		"data":        posts,
 	})
 }
 
@@ -170,7 +179,7 @@ func (ctrl *PostController) GetComments(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
-	comments, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize)
+	comments, total, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -179,6 +188,7 @@ func (ctrl *PostController) GetComments(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"page":      page,
 		"page_size": pageSize,
+		"total":     total,
 		"data":      comments,
 	})
 }
@@ -252,4 +262,13 @@ func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 		"page_size": pageSize,
 		"data":      posts,
 	})
+}
+
+func (ctrl *PostController) GetEmojis(c *gin.Context) {
+	emojis, err := ctrl.service.ListEmojis(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": emojis})
 }

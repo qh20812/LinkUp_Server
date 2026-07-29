@@ -7,20 +7,21 @@ import (
 )
 
 type TokenClaims struct {
-	UserID    string `json:"user_id"`
-	Email     string `json:"email"`
-	Role      string `json:"role"`
-	TokenType string `json:"token_type"`
+	UserID       string `json:"user_id"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	TokenType    string `json:"token_type"`
+	TokenVersion int    `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
-func GenerateTokenPair(secret string, userID string, email string, role string, accessTTL, refreshTTL time.Duration) (string, string, error) {
-	accessToken, err := generateToken(secret, userID, email, role, "access", accessTTL)
+func GenerateTokenPair(secret string, userID string, email string, role string, tokenVersion int, accessTTL, refreshTTL time.Duration) (string, string, error) {
+	accessToken, err := generateToken(secret, userID, email, role, tokenVersion, "access", accessTTL)
 	if err != nil {
 		return "", "", err
 	}
 
-	refreshToken, err := generateToken(secret, userID, email, role, "refresh", refreshTTL)
+	refreshToken, err := generateToken(secret, userID, email, role, tokenVersion, "refresh", refreshTTL)
 	if err != nil {
 		return "", "", err
 	}
@@ -28,8 +29,8 @@ func GenerateTokenPair(secret string, userID string, email string, role string, 
 	return accessToken, refreshToken, nil
 }
 
-func GenerateToken(secret string, userID string, email string, role string, tokenType string, ttl time.Duration) (string, error) {
-	return generateToken(secret, userID, email, role, tokenType, ttl)
+func GenerateToken(secret string, userID string, email string, role string, tokenVersion int, tokenType string, ttl time.Duration) (string, error) {
+	return generateToken(secret, userID, email, role, tokenVersion, tokenType, ttl)
 }
 
 func ParseToken(secret string, tokenString string) (*jwt.Token, error) {
@@ -38,13 +39,14 @@ func ParseToken(secret string, tokenString string) (*jwt.Token, error) {
 	})
 }
 
-func generateToken(secret string, userID string, email string, role string, tokenType string, ttl time.Duration) (string, error) {
+func generateToken(secret string, userID string, email string, role string, tokenVersion int, tokenType string, ttl time.Duration) (string, error) {
 	now := time.Now().UTC()
 	claims := TokenClaims{
 		UserID:    userID,
 		Email:     email,
 		Role:      role,
 		TokenType: tokenType,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   email,
 			IssuedAt:  jwt.NewNumericDate(now),

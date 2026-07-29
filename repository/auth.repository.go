@@ -233,3 +233,14 @@ func (r *AuthRepository) UpdateUserStatus(ctx context.Context, userID string, st
 	}
 	return nil
 }
+
+func (r *AuthRepository) IncrementTokenVersion(ctx context.Context, userID string) error {
+	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).UpdateColumn("token_version", gorm.Expr("token_version + 1"))
+	if tx.Error != nil {
+		return fmt.Errorf("increment token version: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}

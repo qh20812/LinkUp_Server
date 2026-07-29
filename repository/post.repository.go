@@ -20,22 +20,82 @@ func (r *PostRepository) Create(ctx context.Context, post *models.Post) error {
 	return r.db.WithContext(ctx).Create(post).Error
 }
 
-func (r *PostRepository) FetchActive(ctx context.Context, limit, offset int) ([]models.Post, error) {
+func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *string, cursorTier *int, cursorCreatedAt *time.Time, cursorID *string, filterFollowing bool) ([]models.Post, error) {
 	var posts []models.Post
 
-	err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Table("posts").
 		Select(`posts.*, 
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri,
             (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
             (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
             (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`).
-		Where("posts.status = ?", models.PostStatusActive).
-		Order("RAND()").
-		Limit(limit).
-		Offset(offset).
-		Find(&posts).Error
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
+		Where("posts.status = ?", models.PostStatusPublic).
+		Limit(limit)
+
+	if userID != nil && *userID != "" {
+		q = q.Select(`posts.*, 
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri,
+            (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
+            (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
+            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count,
+            EXISTS(SELECT 1 FROM post_reactions WHERE post_reactions.post_id = posts.id AND post_reactions.user_id = ?) AS is_liked,
+            EXISTS(SELECT 1 FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.user_id = ?) AS is_saved,
+            CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`,
+			*userID, *userID)
+		q = q.Where("posts.user_id != ?", *userID)
+		q = q.Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", *userID)
+
+		if filterFollowing {
+			q = q.Where("f.follower_id IS NOT NULL")
+
+			if cursorCreatedAt != nil && cursorID != nil {
+				q = q.Where("posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?)",
+					*cursorCreatedAt, *cursorCreatedAt, *cursorID)
+			}
+
+			q = q.Order("posts.created_at DESC, posts.id DESC")
+		} else {
+			if cursorTier != nil && cursorCreatedAt != nil && cursorID != nil {
+				q = q.Where(`(
+					CASE WHEN f.follower_id IS NOT NULL THEN 0 ELSE 1 END
+				) > ? OR (
+					(CASE WHEN f.follower_id IS NOT NULL THEN 0 ELSE 1 END) = ?
+					AND (posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?))
+				)`,
+					*cursorTier, *cursorTier, *cursorCreatedAt, *cursorCreatedAt, *cursorID)
+			}
+
+			q = q.Order("CASE WHEN f.follower_id IS NOT NULL THEN 0 ELSE 1 END, posts.created_at DESC, posts.id DESC")
+		}
+	} else {
+		if cursorTier != nil && cursorCreatedAt != nil && cursorID != nil {
+			q = q.Where("posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?)",
+				*cursorCreatedAt, *cursorCreatedAt, *cursorID)
+		}
+		q = q.Order("posts.created_at DESC, posts.id DESC")
+	}
+
+	err := q.Find(&posts).Error
 
 	return posts, err
+}
+
+func (r *PostRepository) CountActive(ctx context.Context, userID *string) (int64, error) {
+	var count int64
+	q := r.db.WithContext(ctx).Model(&models.Post{}).
+		Where("status = ?", models.PostStatusPublic)
+	if userID != nil && *userID != "" {
+		q = q.Where("user_id != ?", *userID)
+	}
+	err := q.Count(&count).Error
+	return count, err
 }
 
 func (r *PostRepository) FindByID(ctx context.Context, id string) (*models.Post, error) {
@@ -84,6 +144,15 @@ func (r *PostRepository) FindEmojiByID(ctx context.Context, id string) (*models.
 		return nil, err
 	}
 	return &emoji, nil
+}
+
+func (r *PostRepository) ListEmojis(ctx context.Context) ([]models.Emoji, error) {
+	var emojis []models.Emoji
+	err := r.db.WithContext(ctx).Find(&emojis).Error
+	if err != nil {
+		return nil, err
+	}
+	return emojis, nil
 }
 
 func (r *PostRepository) CreateShare(ctx context.Context, share models.PostShare) error {
@@ -184,6 +253,42 @@ func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string
 	return comments, err
 }
 
+func (r *PostRepository) ListComments(ctx context.Context, keyword, status string, limit, offset int) ([]models.Comment, error) {
+	var comments []models.Comment
+	q := r.db.WithContext(ctx).Model(&models.Comment{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("content LIKE ?", like)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&comments).Error
+	return comments, err
+}
+
+func (r *PostRepository) CountComments(ctx context.Context, keyword, status string) (int64, error) {
+	var count int64
+	q := r.db.WithContext(ctx).Model(&models.Comment{})
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("content LIKE ?", like)
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	err := q.Count(&count).Error
+	return count, err
+}
+
+func (r *PostRepository) CountCommentsByPostID(ctx context.Context, postID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&models.Comment{}).
+		Where("post_id = ? AND status != ?", postID, models.CommentStatusHidden).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *PostRepository) ListPosts(ctx context.Context, keyword, status string, limit, offset int) ([]models.Post, error) {
 	var posts []models.Post
 
@@ -264,6 +369,18 @@ func (r *PostRepository) DeletePostWithAssociations(ctx context.Context, postID 
 		if err := tx.Where("post_id = ?", postID).Delete(&models.PostShare{}).Error; err != nil {
 			return err
 		}
+		// Xóa các Reaction của bài viết
+		if err := tx.Where("post_id = ?", postID).Delete(&models.PostReaction{}).Error; err != nil {
+			return err
+		}
+		// Xóa các Comment của bài viết (cả reply)
+		if err := tx.Where("post_id = ?", postID).Delete(&models.Comment{}).Error; err != nil {
+			return err
+		}
+		// Ngắt liên kết Media khỏi bài viết (giữ nguyên file)
+		if err := tx.Table("media").Where("post_id = ?", postID).Update("post_id", nil).Error; err != nil {
+			return err
+		}
 		// Xóa các Hashtags/Tags liên quan đến bài viết
 		if err := tx.Table("tags").Where("post_id = ?", postID).Delete(map[string]interface{}{}).Error; err != nil {
 			return err
@@ -292,7 +409,7 @@ func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, of
             (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
             (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`).
 		Where("posts.id IN ?", ids).
-		Where("posts.status = ?", models.PostStatusActive).
+		Where("posts.status = ?", models.PostStatusPublic).
 		Order("posts.created_at DESC").
 		Limit(limit).
 		Offset(offset).

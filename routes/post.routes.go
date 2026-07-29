@@ -13,7 +13,7 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 	postGroup := router.Group("/posts")
 	{
 		postGroup.POST("", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
-		postGroup.GET("", ctrl.GetPosts)
+		postGroup.GET("", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)
 		postGroup.GET("/:id", ctrl.ViewPostDetail)
 		postGroup.DELETE("/:id", middlewares.AuthMiddleware(env, db), ctrl.DeletePost)
 		postGroup.POST("/:id/react", middlewares.AuthMiddleware(env, db), ctrl.ReactPost)
@@ -25,5 +25,19 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 		postGroup.POST("/:id/save", middlewares.AuthMiddleware(env, db), ctrl.SavePost)
 
 		postGroup.GET("/hashtag/:name", ctrl.GetPostsByHashtag)
+	}
+
+	apiGroup := router.Group("/api")
+	{
+		apiGroup.GET("/posts", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)
+		apiGroup.GET("/posts/:id", ctrl.ViewPostDetail)
+		apiGroup.POST("/posts", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
+		apiGroup.POST("/posts/:id/react", middlewares.AuthMiddleware(env, db), ctrl.ReactPost)
+		apiGroup.POST("/posts/:id/comments", middlewares.AuthMiddleware(env, db), ctrl.CreateComment)
+		apiGroup.GET("/posts/:id/comments", ctrl.GetComments)
+		apiGroup.POST("/posts/:id/share", middlewares.AuthMiddleware(env, db), ctrl.SharePost)
+		apiGroup.POST("/posts/:id/save", middlewares.AuthMiddleware(env, db), ctrl.SavePost)
+		apiGroup.GET("/posts/hashtag/:name", ctrl.GetPostsByHashtag)
+		apiGroup.GET("/emojis", ctrl.GetEmojis)
 	}
 }

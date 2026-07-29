@@ -25,6 +25,10 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.PUT("/posts/:postID/hide", adminController.HidePost)
 	adminGroup.PUT("/posts/:postID/status", adminController.ChangePostStatus)
 
+	adminGroup.GET("/comments", adminController.ListComments)
+	adminGroup.PUT("/comments/:commentID/hide", adminController.HideComment)
+	adminGroup.PUT("/comments/:commentID/reveal", adminController.RevealComment)
+
 	adminGroup.GET("/reports", adminController.ListReports)
 	adminGroup.GET("/reports/:reportID", adminController.GetReportDetail)
 	adminGroup.POST("/reports/:reportID/decision", adminController.ReviewReport)

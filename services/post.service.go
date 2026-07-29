@@ -3,26 +3,30 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
 	"log"
 	"mime/multipart"
+	"strconv"
+	"strings"
 	"time"
 )
 
 type PostService interface {
 	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error)
-	GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error)
+	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
-	GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, error)
+	GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, int64, error)
 	SharePost(ctx context.Context, userID, postID, content string) error
 	SavePost(ctx context.Context, userID, postID string) (action string, err error)
 	DeletePost(ctx context.Context, userID, postID string) error
 	GetPostsByHashtag(ctx context.Context, hashtag string, page, pageSize int) ([]models.Post, error)
+	ListEmojis(ctx context.Context) ([]models.Emoji, error)
 	SetMediaService(mediaService MediaService)
 }
 
@@ -108,10 +112,85 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 	return &post, nil
 }
 
-func (s *postService) GetPostList(ctx context.Context, page, pageSize int) ([]models.Post, error) {
-	page, pageSize = s.validation.NormalizePagination(page, pageSize)
-	offset := (page - 1) * pageSize
-	return s.repo.FetchActive(ctx, pageSize, offset)
+func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error) {
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+
+	filterFollowing := filter == "following"
+
+	var userIDPtr *string
+	if userID != "" {
+		userIDPtr = &userID
+	}
+
+	var cursorTier *int
+	var cursorCreatedAt *time.Time
+	var cursorID *string
+	if cursor != "" {
+		parts := strings.SplitN(cursor, "_", 3)
+		if filterFollowing {
+			if len(parts) == 2 {
+				unixNano, err := strconv.ParseInt(parts[0], 10, 64)
+				if err == nil {
+					t := time.Unix(0, unixNano)
+					cursorCreatedAt = &t
+					cursorID = &parts[1]
+				}
+			}
+		} else {
+			if len(parts) == 3 {
+				tier, err := strconv.Atoi(parts[0])
+				if err == nil {
+					unixNano, err := strconv.ParseInt(parts[1], 10, 64)
+					if err == nil {
+						t := time.Unix(0, unixNano)
+						cursorTier = &tier
+						cursorCreatedAt = &t
+						cursorID = &parts[2]
+					}
+				}
+			}
+		}
+	}
+
+	posts, err := s.repo.FetchActive(ctx, pageSize, userIDPtr, cursorTier, cursorCreatedAt, cursorID, filterFollowing)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(posts) > 0 && s.mediaService != nil {
+		postIDs := make([]string, len(posts))
+		for i, p := range posts {
+			postIDs[i] = p.ID
+		}
+		mediaMap, err := s.mediaService.GetByPostIDs(ctx, postIDs)
+		if err == nil {
+			for i := range posts {
+				if m, ok := mediaMap[posts[i].ID]; ok {
+					posts[i].Media = m
+				} else {
+					posts[i].Media = []models.Media{}
+				}
+			}
+		}
+	}
+
+	var nextCursor string
+	if len(posts) == pageSize {
+		last := posts[len(posts)-1]
+		if filterFollowing {
+			nextCursor = fmt.Sprintf("%d_%s", last.CreatedAt.UnixNano(), last.ID)
+		} else {
+			tier := 1
+			if last.IsFollowing {
+				tier = 0
+			}
+			nextCursor = fmt.Sprintf("%d_%d_%s", tier, last.CreatedAt.UnixNano(), last.ID)
+		}
+	}
+
+	return posts, nextCursor, nil
 }
 
 func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models.Post, error) {
@@ -257,16 +336,26 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 	return s.repo.FindCommentsByPostID(ctx, postID)
 }
 
-func (s *postService) GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, error) {
+func (s *postService) GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, int64, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return nil, errors.New("bài viết không tồn tại hoặc không thể truy cập")
+		return nil, 0, errors.New("bài viết không tồn tại hoặc không thể truy cập")
 	}
 
 	page, pageSize = s.validation.NormalizePagination(page, pageSize)
 	offset := (page - 1) * pageSize
 
-	return s.repo.FetchCommentsByPostID(ctx, postID, pageSize, offset)
+	total, err := s.repo.CountCommentsByPostID(ctx, postID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	comments, err := s.repo.FetchCommentsByPostID(ctx, postID, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return comments, total, nil
 }
 
 func (s *postService) SharePost(ctx context.Context, userID, postID, content string) error {
@@ -279,7 +368,15 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 	share.ID = utils.GenerateUUID()
 	share.CreatedAt = time.Now()
 
-	return s.repo.CreateShare(ctx, share)
+	if err := s.repo.CreateShare(ctx, share); err != nil {
+		return err
+	}
+
+	if post.UserID != userID {
+		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeShare, "đã chia sẻ bài viết của bạn", &postID, nil, nil)
+	}
+
+	return nil
 }
 
 // Bấm lưu bài viết lần nữa hệ thống tự hiểu và xóa (Toggle Bookmark)
@@ -364,4 +461,8 @@ func (s *postService) GetPostsByHashtag(ctx context.Context, hashtag string, pag
 	}
 	posts, err := s.repo.FetchByIDs(ctx, postIDs, pageSize, offset)
 	return posts, err
+}
+
+func (s *postService) ListEmojis(ctx context.Context) ([]models.Emoji, error) {
+	return s.repo.ListEmojis(ctx)
 }

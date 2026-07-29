@@ -125,7 +125,11 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 }
 
 func (s *AuthService) generateTokens(user *models.User, role string) (string, string, error) {
-	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, s.accessTTL(), s.refreshTTL())
+	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(), s.refreshTTL())
+}
+
+func (s *AuthService) Logout(ctx context.Context, userID string) error {
+	return s.authRepo.IncrementTokenVersion(ctx, userID)
 }
 
 func (s *AuthService) accessTTL() time.Duration {

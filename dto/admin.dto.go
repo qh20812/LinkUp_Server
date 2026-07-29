@@ -83,6 +83,36 @@ type AdminUpdatePostStatusInput struct {
 	Status string `json:"status" binding:"required"`
 }
 
+// ── Admin Comment Management ──
+
+type AdminCommentFilterInput struct {
+	Keyword  string `json:"keyword" form:"keyword"`
+	Status   string `json:"status" form:"status"`
+	Page     int    `json:"page" form:"page"`
+	PageSize int    `json:"page_size" form:"page_size"`
+}
+
+type AdminCommentListItem struct {
+	ID           string     `json:"id"`
+	UserID       string     `json:"user_id"`
+	Username     string     `json:"username"`
+	DisplayName  string     `json:"display_name"`
+	PostID       string     `json:"post_id"`
+	Content      string     `json:"content"`
+	Status       string     `json:"status"`
+	ReviewReason *string    `json:"review_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+}
+
+type AdminCommentListResponse struct {
+	Comments []AdminCommentListItem `json:"comments"`
+	Total    int64                  `json:"total"`
+	Page     int                    `json:"page"`
+	PageSize int                    `json:"page_size"`
+	Message  string                 `json:"message,omitempty"`
+}
+
 type AdminReportFilterInput struct {
 	Keyword    string `json:"keyword" form:"keyword"`
 	Status     string `json:"status" form:"status"`

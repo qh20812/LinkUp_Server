@@ -25,6 +25,7 @@ type MediaService interface {
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
+	GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error)
 }
 
 type mediaService struct {
@@ -157,6 +158,10 @@ func (s *mediaService) GetUserStorageStatus(ctx context.Context, userID string) 
 
 func (s *mediaService) GetUserMedia(ctx context.Context, userID string) ([]models.Media, error) {
 	return s.repo.GetByUserID(ctx, userID)
+}
+
+func (s *mediaService) GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error) {
+	return s.repo.GetByPostIDs(ctx, postIDs)
 }
 
 // sendModerationNotification gửi thông báo cho user về kết quả kiểm duyệt.

@@ -8,4 +8,5 @@ import (
 
 func RegisterSearchRoutes(router *gin.Engine, searchController *controllers.SearchController) {
 	router.GET("/api/search", searchController.Search)
+	router.GET("/api/trending", searchController.GetTrending)
 }

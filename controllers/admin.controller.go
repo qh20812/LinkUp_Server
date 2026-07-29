@@ -193,6 +193,76 @@ func (ctrl *AdminController) ChangePostStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật trạng thái bài viết thành công"})
 }
 
+func (ctrl *AdminController) ListComments(c *gin.Context) {
+	var input dto.AdminCommentFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		return
+	}
+
+	adminID := c.GetString("userID")
+	if adminID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	result, err := ctrl.adminService.ListComments(c.Request.Context(), adminID, input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *AdminController) HideComment(c *gin.Context) {
+	commentID := c.Param("commentID")
+	if commentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "commentID không hợp lệ"})
+		return
+	}
+
+	var input dto.AdminHidePostInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+
+	superAdminID := c.GetString("userID")
+	if superAdminID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	if err := ctrl.adminService.HideComment(c.Request.Context(), superAdminID, commentID, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Ẩn bình luận thành công"})
+}
+
+func (ctrl *AdminController) RevealComment(c *gin.Context) {
+	commentID := c.Param("commentID")
+	if commentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "commentID không hợp lệ"})
+		return
+	}
+
+	superAdminID := c.GetString("userID")
+	if superAdminID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		return
+	}
+
+	if err := ctrl.adminService.RevealComment(c.Request.Context(), superAdminID, commentID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Hiện bình luận thành công"})
+}
+
 func (ctrl *AdminController) ListReports(c *gin.Context) {
 	var input dto.AdminReportFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {

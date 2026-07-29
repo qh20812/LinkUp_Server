@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -107,4 +108,26 @@ func (s *FollowService) GetFollowerStats(ctx context.Context, userID string, vie
 	}
 
 	return result, nil
+}
+
+func (s *FollowService) GetSuggestions(ctx context.Context, userID string, page, pageSize int) (dto.FollowSuggestionsResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 20 {
+		pageSize = 5
+	}
+
+	items, total, err := s.followRepository.GetSuggestions(ctx, userID, page, pageSize)
+	if err != nil {
+		return dto.FollowSuggestionsResponse{}, fmt.Errorf("get suggestions: %w", err)
+	}
+
+	return dto.FollowSuggestionsResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
 }

@@ -19,6 +19,7 @@ func RegisterAuthRoutes(router *gin.Engine, authController *controllers.AuthCont
 		protected.Use(middlewares.AuthMiddleware(env, db))
 		{
 			protected.POST("/change-password", authController.ChangePassword)
+			protected.POST("/logout", authController.Logout)
 		}
 		
 	}

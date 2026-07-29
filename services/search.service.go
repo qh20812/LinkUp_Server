@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"linkup/dto"
 	"linkup/repository"
@@ -20,6 +22,47 @@ func NewSearchService(searchRepo *repository.SearchRepository, validation *valid
 		searchRepo: searchRepo,
 		validation: validation,
 	}
+}
+
+type trendingCache struct {
+	mu     sync.RWMutex
+	data   []dto.HashtagSearchResult
+	expiry time.Time
+}
+
+var trendingCacheInstance = &trendingCache{}
+
+const trendingCacheTTL = 5 * time.Minute
+
+func (s *SearchService) GetTrendingHashtags(ctx context.Context) ([]dto.HashtagSearchResult, error) {
+	trendingCacheInstance.mu.RLock()
+	valid := time.Now().Before(trendingCacheInstance.expiry)
+	hasCached := len(trendingCacheInstance.data) > 0
+	if valid {
+		data := trendingCacheInstance.data
+		trendingCacheInstance.mu.RUnlock()
+		return data, nil
+	}
+	trendingCacheInstance.mu.RUnlock()
+
+	trendingCacheInstance.mu.Lock()
+	defer trendingCacheInstance.mu.Unlock()
+
+	if time.Now().Before(trendingCacheInstance.expiry) {
+		return trendingCacheInstance.data, nil
+	}
+
+	data, err := s.searchRepo.GetTrendingHashtags(ctx)
+	if err != nil {
+		if hasCached {
+			return trendingCacheInstance.data, nil
+		}
+		return nil, err
+	}
+
+	trendingCacheInstance.data = data
+	trendingCacheInstance.expiry = time.Now().Add(trendingCacheTTL)
+	return data, nil
 }
 
 func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.SearchResponse, error) {

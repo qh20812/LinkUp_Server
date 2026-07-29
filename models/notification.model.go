@@ -25,6 +25,7 @@ const (
 	NotificationTypeCommunityInvitationReceived NotificationType = "community_invitation_received"
 	NotificationTypeCommunityInvitationAccepted NotificationType = "community_invitation_accepted"
 	NotificationTypeVoiceCall                  NotificationType = "voice_call"
+	NotificationTypeShare                      NotificationType = "share"
 )
 
 type Notification struct {
@@ -89,6 +90,8 @@ func ParseNotificationType(value string) NotificationType {
 		return NotificationTypeCommunityInvitationAccepted
 	case string(NotificationTypeVoiceCall):
 		return NotificationTypeVoiceCall
+	case string(NotificationTypeShare):
+		return NotificationTypeShare
 	default:
 		return NotificationTypeLike
 	}
