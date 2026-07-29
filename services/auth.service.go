@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,22 +17,93 @@ import (
 )
 
 type AuthService struct {
-	authRepo    *repository.AuthRepository
-	profileRepo *repository.ProfileRepository
-	banRepo     *repository.BanRepository
-	env         config.Env
+	authRepo           *repository.AuthRepository
+	profileRepo        *repository.ProfileRepository
+	banRepo            *repository.BanRepository
+	adminSettingsRepo  *repository.AdminSettingsRepository
+	emailVerifyService *EmailVerificationService
+	env                config.Env
 }
 
-func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, banRepo *repository.BanRepository, env config.Env) *AuthService {
+func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, banRepo *repository.BanRepository, adminSettingsRepo *repository.AdminSettingsRepository, env config.Env) *AuthService {
 	return &AuthService{
-		authRepo:    authRepo,
-		profileRepo: profileRepo,
-		banRepo:     banRepo,
-		env:         env,
+		authRepo:          authRepo,
+		profileRepo:       profileRepo,
+		banRepo:           banRepo,
+		adminSettingsRepo: adminSettingsRepo,
+		env:               env,
 	}
 }
 
+func (s *AuthService) SetEmailVerificationService(svc *EmailVerificationService) {
+	s.emailVerifyService = svc
+}
+
+func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "maintenance_mode")
+	if err != nil {
+		return false, err
+	}
+	return cfg != nil && cfg.Value == "true", nil
+}
+
+func (s *AuthService) getMinPasswordLength(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "password_min_length")
+	if err != nil || cfg == nil {
+		return 8
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 8 {
+		return 8
+	}
+	return n
+}
+
+func (s *AuthService) getJWTExpiryMinutes(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "jwt_expiry_minutes")
+	if err != nil || cfg == nil {
+		return s.env.JWTExpiresIn
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 1 {
+		return s.env.JWTExpiresIn
+	}
+	return n
+}
+
+func (s *AuthService) getMaxLoginAttempts(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "max_login_attempts")
+	if err != nil || cfg == nil {
+		return 5
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 1 {
+		return 5
+	}
+	return n
+}
+
 func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dto.AuthResponse, error) {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if cfg != nil && cfg.Value == "false" {
+		return dto.AuthResponse{}, errors.New("đăng ký đã bị tắt bởi quản trị viên")
+	}
+
+	maint, err := s.isMaintenanceMode(ctx)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if maint {
+		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+	}
+
+	if len(input.Password) < s.getMinPasswordLength(ctx) {
+		return dto.AuthResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+	}
+
 	email := normalizeEmail(input.Email)
 
 	if _, err := s.authRepo.FindByEmail(ctx, email); err == nil {
@@ -81,12 +153,25 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(createdUser, "USER")
+	// Check if email verification is required
+	reqVerify := false
+	if cfg, err := s.adminSettingsRepo.GetByKey(ctx, "require_email_verify"); err == nil && cfg != nil && cfg.Value == "true" {
+		reqVerify = true
+	}
+
+	if reqVerify && s.emailVerifyService != nil {
+		if err := s.emailVerifyService.SendVerificationEmail(ctx, createdUser.ID, createdUser.Email, createdUser.Username); err != nil {
+			return dto.AuthResponse{}, err
+		}
+		return buildAuthResponse(*createdUser, "", "", s.accessTTL(ctx), s.refreshTTL(), true), nil
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, createdUser, "USER")
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(), s.refreshTTL()), nil
+	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(), false), nil
 }
 
 func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {
@@ -107,36 +192,72 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, fmt.Errorf("tài khoản chưa được kích hoạt")
 	}
 
-	if err := utils.ComparePassword(user.PasswordHash, input.Password); err != nil {
-		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
-	}
-
 	role, err := s.authRepo.GetUserRole(ctx, user.ID)
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
+	isPrivileged := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
-	accessToken, refreshToken, err := s.generateTokens(user, role)
+	if !isPrivileged && user.IsLocked() {
+		return dto.AuthResponse{}, errors.New("tài khoản tạm thời bị khóa do nhập sai nhiều lần, vui lòng thử lại sau 15 phút")
+	}
+
+	if err := utils.ComparePassword(user.PasswordHash, input.Password); err != nil {
+		if !isPrivileged {
+			maxAttempts := s.getMaxLoginAttempts(ctx)
+			if err := s.authRepo.IncrementLoginAttempts(ctx, user.ID, maxAttempts); err != nil {
+				return dto.AuthResponse{}, err
+			}
+			remaining := maxAttempts - user.LoginAttempts - 1
+			if remaining > 0 {
+				return dto.AuthResponse{}, fmt.Errorf("email hoặc mật khẩu không hợp lệ. Bạn còn %d lần thử", remaining)
+			}
+			return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ. Tài khoản của bạn đã bị khóa tạm thời")
+		}
+		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
+	}
+
+	if err := s.authRepo.ResetLoginAttempts(ctx, user.ID); err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	maint, err := s.isMaintenanceMode(ctx)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if maint && role != string(models.RoleSuperAdmin) && role != string(models.RoleAdmin) {
+		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+	}
+
+	// Check email verification if required
+	if cfg, err := s.adminSettingsRepo.GetByKey(ctx, "require_email_verify"); err == nil && cfg != nil && cfg.Value == "true" {
+		if !user.IsEmailVerified() {
+			return dto.AuthResponse{}, errors.New("vui lòng xác thực email trước khi đăng nhập")
+		}
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
-	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(), s.refreshTTL()), nil
+	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(), false), nil
 }
 
-func (s *AuthService) generateTokens(user *models.User, role string) (string, string, error) {
-	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(), s.refreshTTL())
+func (s *AuthService) generateTokens(ctx context.Context, user *models.User, role string) (string, string, error) {
+	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(ctx), s.refreshTTL())
 }
 
 func (s *AuthService) Logout(ctx context.Context, userID string) error {
 	return s.authRepo.IncrementTokenVersion(ctx, userID)
 }
 
-func (s *AuthService) accessTTL() time.Duration {
-	if s.env.JWTExpiresIn <= 0 {
+func (s *AuthService) accessTTL(ctx context.Context) time.Duration {
+	min := s.getJWTExpiryMinutes(ctx)
+	if min <= 0 {
 		return 15 * time.Minute
 	}
-	return time.Duration(s.env.JWTExpiresIn) * time.Minute
+	return time.Duration(min) * time.Minute
 }
 
 func (s *AuthService) refreshTTL() time.Duration {
@@ -147,7 +268,7 @@ func normalizeEmail(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func buildAuthResponse(user models.User, accessToken, refreshToken string, accessTTL, refreshTTL time.Duration) dto.AuthResponse {
+func buildAuthResponse(user models.User, accessToken, refreshToken string, accessTTL, refreshTTL time.Duration, verifyEmail bool) dto.AuthResponse {
 	return dto.AuthResponse{
 		User: dto.AuthUserResponse{
 			ID:        user.ID,
@@ -163,17 +284,22 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 			ExpiresIn:    int64(accessTTL.Seconds()),
 			RefreshTTLIn: int64(refreshTTL.Seconds()),
 		},
-		Storage: dto.StorageInfo{
+		Storage:     dto.StorageInfo{
 			QuotaBytes: user.StorageQuotaBytes,
 			UsedBytes:  user.StorageUsedBytes,
 			AvailBytes: user.AvailableStorageBytes(),
 		},
+		VerifyEmail: verifyEmail,
 	}
 }
 
 func (s *AuthService) ChangePassword(ctx context.Context, userID string, input dto.ChangePasswordInput) error {
 	if err := validations.NewAuthValidation().ValidatePassword(input.NewPassword); err != nil {
 		return err
+	}
+
+	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
+		return fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
 	}
 
 	user, err := s.authRepo.FindByID(ctx, userID)
@@ -251,7 +377,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		return dto.TokenResponse{}, err
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(user, role)
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
 	if err != nil {
 		return dto.TokenResponse{}, err
 	}
@@ -260,7 +386,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
-		ExpiresIn:    int64(s.accessTTL().Seconds()),
+		ExpiresIn:    int64(s.accessTTL(ctx).Seconds()),
 		RefreshTTLIn: int64(s.refreshTTL().Seconds()),
 	}, nil
 }

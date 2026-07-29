@@ -234,10 +234,53 @@ func (r *AuthRepository) UpdateUserStatus(ctx context.Context, userID string, st
 	return nil
 }
 
+func (r *AuthRepository) IncrementAllTokenVersions(ctx context.Context) error {
+	return r.db.WithContext(ctx).Exec(`
+		UPDATE users
+		SET token_version = token_version + 1
+		WHERE id NOT IN (
+			SELECT ur.user_id FROM user_roles ur
+			JOIN roles r ON r.id = ur.role_id
+			WHERE r.name IN ('SUPER_ADMIN', 'ADMIN')
+			AND ur.scope_id IS NULL
+		)
+	`).Error
+}
+
 func (r *AuthRepository) IncrementTokenVersion(ctx context.Context, userID string) error {
 	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).UpdateColumn("token_version", gorm.Expr("token_version + 1"))
 	if tx.Error != nil {
 		return fmt.Errorf("increment token version: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *AuthRepository) IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int) error {
+	return r.db.WithContext(ctx).Exec(`
+		UPDATE users
+		SET login_attempts = login_attempts + 1,
+		    locked_until = CASE
+			WHEN login_attempts >= ? THEN DATE_ADD(NOW(), INTERVAL 15 MINUTE)
+			ELSE locked_until
+		    END
+		WHERE id = ?
+	`, maxAttempts, userID).Error
+}
+
+func (r *AuthRepository) ResetLoginAttempts(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"login_attempts": 0,
+		"locked_until":   nil,
+	}).Error
+}
+
+func (r *AuthRepository) UpdateEmailVerifiedAt(ctx context.Context, userID string, verifiedAt time.Time) error {
+	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Update("email_verified_at", verifiedAt)
+	if tx.Error != nil {
+		return fmt.Errorf("update email_verified_at: %w", tx.Error)
 	}
 	if tx.RowsAffected == 0 {
 		return ErrUserNotFound

@@ -185,5 +185,30 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 	}
 
+	systemConfigs := []struct {
+		key   string
+		value string
+	}{
+		{"site_name", "LinkUp"},
+		{"site_description", "Mạng xã hội Việt"},
+		{"contact_email", "admin@linkup.com"},
+		{"maintenance_mode", "false"},
+		{"allow_registration", "true"},
+		{"require_email_verify", "true"},
+		{"password_min_length", "8"},
+		{"max_login_attempts", "5"},
+		{"jwt_expiry_minutes", "15"},
+		{"default_user_role", "user"},
+	}
+
+	for _, sc := range systemConfigs {
+		if err := internal.Exec(database,
+			`INSERT INTO system_configs (key, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+			sc.key, sc.value,
+		); err != nil {
+			return fmt.Errorf("extended: insert system_configs %s: %w", sc.key, err)
+		}
+	}
+
 	return nil
 }

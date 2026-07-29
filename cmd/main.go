@@ -95,6 +95,7 @@ func main() {
 			&models.Ad{},
 			&models.AdMedia{},
 			&models.AdAnalytics{},
+			&models.SystemConfig{},
 		)
 		if err != nil {
 			log.Printf("Warning: Migration failed: %v", err)
@@ -117,18 +118,32 @@ func main() {
 		seedAdPackages(gormDB)
 		// ====================================================================
 
+		// ===== KHỞI TẠO TẦNG ADMIN SETTINGS =====
+		adminSettingsRepository := repository.NewAdminSettingsRepository(gormDB)
+		adminSettingsService := services.NewAdminSettingsService(adminSettingsRepository, env)
+		adminSettingsController := controllers.NewAdminSettingsController(adminSettingsService)
+
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
 		banRepository := repository.NewBanRepository(gormDB)
-		authService := services.NewAuthService(authRepository, profileRepository, banRepository, env)
+		authService := services.NewAuthService(authRepository, profileRepository, banRepository, adminSettingsRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG EMAIL VERIFICATION =====
+		emailVerifRepository := repository.NewEmailVerificationRepository(gormDB)
+		emailVerifService := services.NewEmailVerificationService(emailVerifRepository, authRepository, adminSettingsRepository, env)
+		emailVerifController := controllers.NewEmailVerificationController(emailVerifService, authValidation)
+		authService.SetEmailVerificationService(emailVerifService)
+
+		routes.RegisterAuthRoutes(router, authController, emailVerifController, env, gormDB)
+
+		adminSettingsService.SetAuthRepository(authRepository)
 
 		// ===== KHỞI TẠO TẦNG PASSWORD RESET =====
 		resetRepository := repository.NewPasswordResetRepository(gormDB)
-		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)
+		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, adminSettingsRepository, authValidation, env)
 		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
 		routes.RegisterPasswordResetRoutes(router, passwordResetController)
 
@@ -270,7 +285,7 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
-		routes.RegisterAdminRoutes(router, adminController, env, gormDB)
+		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)

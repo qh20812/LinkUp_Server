@@ -24,6 +24,9 @@ type User struct {
 	StorageQuotaBytes float64    `json:"storage_quota_bytes"`
 	StorageUsedBytes  float64    `json:"storage_used_bytes"`
 	TokenVersion      int        `json:"token_version" gorm:"default:0"`
+	LoginAttempts     int        `json:"login_attempts" gorm:"default:0"`
+	LockedUntil       *time.Time `json:"locked_until,omitempty"`
+	EmailVerifiedAt   *time.Time `json:"email_verified_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }
@@ -44,6 +47,14 @@ func (u User) IsActive() bool {
 
 func (u User) IsBanned() bool {
 	return u.Status == UserStatusBanned
+}
+
+func (u User) IsLocked() bool {
+	return u.LockedUntil != nil && u.LockedUntil.After(time.Now())
+}
+
+func (u User) IsEmailVerified() bool {
+	return u.EmailVerifiedAt != nil
 }
 
 func (u User) IsSuspended() bool {

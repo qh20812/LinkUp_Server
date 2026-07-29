@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"linkup/config"
@@ -18,19 +19,33 @@ import (
 )
 
 type PasswordResetService struct {
-	resetRepo  *repository.PasswordResetRepository
-	authRepo   *repository.AuthRepository
-	validation *validations.AuthValidation
-	env        config.Env
+	resetRepo          *repository.PasswordResetRepository
+	authRepo           *repository.AuthRepository
+	adminSettingsRepo  *repository.AdminSettingsRepository
+	validation         *validations.AuthValidation
+	env                config.Env
 }
 
-func NewPasswordResetService(resetRepo *repository.PasswordResetRepository, authRepo *repository.AuthRepository, validation *validations.AuthValidation, env config.Env) *PasswordResetService {
+func NewPasswordResetService(resetRepo *repository.PasswordResetRepository, authRepo *repository.AuthRepository, adminSettingsRepo *repository.AdminSettingsRepository, validation *validations.AuthValidation, env config.Env) *PasswordResetService {
 	return &PasswordResetService{
-		resetRepo:  resetRepo,
-		authRepo:   authRepo,
-		validation: validation,
-		env:        env,
+		resetRepo:          resetRepo,
+		authRepo:           authRepo,
+		adminSettingsRepo:  adminSettingsRepo,
+		validation:         validation,
+		env:                env,
 	}
+}
+
+func (s *PasswordResetService) getMinPasswordLength(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "password_min_length")
+	if err != nil || cfg == nil {
+		return 8
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 8 {
+		return 8
+	}
+	return n
 }
 
 // Gửi email quên mật khẩu
@@ -121,6 +136,10 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 
 	if err := s.validation.ValidatePassword(input.NewPassword); err != nil {
 		return dto.ResetPasswordResponse{}, err
+	}
+
+	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
+		return dto.ResetPasswordResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
 	}
 
 	hashedPassword, err := utils.HashPassword(input.NewPassword)
