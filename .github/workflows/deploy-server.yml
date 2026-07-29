@@ -69,6 +69,9 @@ jobs:
             # Save current image as rollback candidate
             docker tag linkup-server:latest linkup-server:prev 2>/dev/null || true
 
+            # Sync config files
+            git pull origin main
+
             # Load new image
             docker load -i /tmp/server.tar.gz
 
