@@ -85,6 +85,7 @@ jobs:
           format: html
           message: |
             ${{ job.status == 'success' && '✅' || '❌' }} <b>Server Deploy</b>
+            Pusher: ${{ github.event.pusher.name }}
             Repo: <a href="${{ github.server_url }}/${{ github.repository }}">LinkUp_Server</a>
             Commit: ${{ github.event.head_commit.message || 'manual' }}
-            Status: <b>${{ job.status }}</b>
+            Log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
