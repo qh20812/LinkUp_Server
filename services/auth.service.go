@@ -192,28 +192,32 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, fmt.Errorf("tài khoản chưa được kích hoạt")
 	}
 
-	if user.IsLocked() {
+	role, err := s.authRepo.GetUserRole(ctx, user.ID)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	isPrivileged := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
+
+	if !isPrivileged && user.IsLocked() {
 		return dto.AuthResponse{}, errors.New("tài khoản tạm thời bị khóa do nhập sai nhiều lần, vui lòng thử lại sau 15 phút")
 	}
 
 	if err := utils.ComparePassword(user.PasswordHash, input.Password); err != nil {
-		maxAttempts := s.getMaxLoginAttempts(ctx)
-		if err := s.authRepo.IncrementLoginAttempts(ctx, user.ID, maxAttempts); err != nil {
-			return dto.AuthResponse{}, err
+		if !isPrivileged {
+			maxAttempts := s.getMaxLoginAttempts(ctx)
+			if err := s.authRepo.IncrementLoginAttempts(ctx, user.ID, maxAttempts); err != nil {
+				return dto.AuthResponse{}, err
+			}
+			remaining := maxAttempts - user.LoginAttempts - 1
+			if remaining > 0 {
+				return dto.AuthResponse{}, fmt.Errorf("email hoặc mật khẩu không hợp lệ. Bạn còn %d lần thử", remaining)
+			}
+			return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ. Tài khoản của bạn đã bị khóa tạm thời")
 		}
-		remaining := maxAttempts - user.LoginAttempts - 1
-		if remaining > 0 {
-			return dto.AuthResponse{}, fmt.Errorf("email hoặc mật khẩu không hợp lệ. Bạn còn %d lần thử", remaining)
-		}
-		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ. Tài khoản của bạn đã bị khóa tạm thời")
+		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
 	}
 
 	if err := s.authRepo.ResetLoginAttempts(ctx, user.ID); err != nil {
-		return dto.AuthResponse{}, err
-	}
-
-	role, err := s.authRepo.GetUserRole(ctx, user.ID)
-	if err != nil {
 		return dto.AuthResponse{}, err
 	}
 
