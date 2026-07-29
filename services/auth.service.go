@@ -107,6 +107,19 @@ func (s *AuthService) getMaxLoginAttempts(ctx context.Context) int {
 	return n
 }
 
+func (s *AuthService) getDefaultUserRole(ctx context.Context) models.RoleName {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "default_user_role")
+	if err != nil || cfg == nil {
+		return models.RoleUser
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Value)) {
+	case "admin":
+		return models.RoleAdmin
+	default:
+		return models.RoleUser
+	}
+}
+
 func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dto.AuthResponse, error) {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
 	if err != nil {
@@ -176,7 +189,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
-	if err := s.authRepo.AssignUserRole(ctx, createdUser.ID, models.RoleUser, nil, nil); err != nil {
+	if err := s.authRepo.AssignUserRole(ctx, createdUser.ID, s.getDefaultUserRole(ctx), nil, nil); err != nil {
 		return dto.AuthResponse{}, err
 	}
 
