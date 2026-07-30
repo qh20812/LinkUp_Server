@@ -56,8 +56,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for _, u := range users {
 		if err := internal.Exec(database,
-			`INSERT INTO users (id, username, email, password_hash, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-			u.id, u.username, u.email, passwordHash, u.status, now,
+			`INSERT INTO users (id, username, email, password_hash, status, email_verified_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+			u.id, u.username, u.email, passwordHash, u.status, now, now,
 		); err != nil {
 			return fmt.Errorf("users: insert %s: %w", u.username, err)
 		}

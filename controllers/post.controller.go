@@ -61,6 +61,10 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 	filter := c.Query("filter")
 
+	if filter == "following" && pageSize > 5 {
+		pageSize = 5
+	}
+
 	userID, _ := c.Get("userID")
 	userIDStr, _ := userID.(string)
 
