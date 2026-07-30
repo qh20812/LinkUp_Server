@@ -110,7 +110,8 @@ func (s *EmailVerificationService) VerifyEmail(ctx context.Context, tokenStr str
 	}
 
 	accessTTL := s.getJWTExpiryMinutes(ctx)
-	refreshTTL := 7 * 24 * time.Hour
+	refreshDays := s.getRefreshTokenExpiryDays(ctx)
+	refreshTTL := time.Duration(refreshDays) * 24 * time.Hour
 
 	accessToken, refreshToken, err := utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, time.Duration(accessTTL)*time.Minute, refreshTTL)
 	if err != nil {
@@ -161,11 +162,39 @@ func (s *EmailVerificationService) generateToken() string {
 func (s *EmailVerificationService) getJWTExpiryMinutes(ctx context.Context) int {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "jwt_expiry_minutes")
 	if err != nil || cfg == nil {
-		return s.env.JWTExpiresIn
+		return clampEmail(s.env.JWTExpiresIn, 1, 60)
 	}
 	n, err := strconv.Atoi(cfg.Value)
 	if err != nil || n < 1 {
-		return s.env.JWTExpiresIn
+		return clampEmail(s.env.JWTExpiresIn, 1, 60)
+	}
+	if n > 60 {
+		return 60
 	}
 	return n
+}
+
+func (s *EmailVerificationService) getRefreshTokenExpiryDays(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "refresh_token_expiry_days")
+	if err != nil || cfg == nil {
+		return 7
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 1 {
+		return 7
+	}
+	if n > 30 {
+		return 30
+	}
+	return n
+}
+
+func clampEmail(value, min, max int) int {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
