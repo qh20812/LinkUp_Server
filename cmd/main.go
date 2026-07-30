@@ -61,7 +61,7 @@ func main() {
 
 	// Endpoint kiểm tra sức khỏe hệ thống
 	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+		c.JSON(200, gin.H{"status": "Server đang chạy"})
 	})
 
 	// Metrics endpoint cho Prometheus
