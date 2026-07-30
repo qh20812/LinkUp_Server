@@ -45,6 +45,9 @@ func (s *PasswordResetService) getMinPasswordLength(ctx context.Context) int {
 	if err != nil || n < 8 {
 		return 8
 	}
+	if n > 50 {
+		return 50
+	}
 	return n
 }
 
@@ -140,6 +143,9 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 
 	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
 		return dto.ResetPasswordResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+	}
+	if len(input.NewPassword) > 50 {
+		return dto.ResetPasswordResponse{}, errors.New("mật khẩu không được vượt quá 50 ký tự")
 	}
 
 	hashedPassword, err := utils.HashPassword(input.NewPassword)

@@ -16,7 +16,7 @@ var (
 	ErrEmailInvalid           = errors.New("định dạng email không hợp lệ")
 	ErrPasswordRequired       = errors.New("mật khẩu không được để trống")
 	ErrPasswordTooShort       = errors.New("mật khẩu phải có ít nhất 8 ký tự")
-	ErrPasswordTooLong        = errors.New("mật khẩu không được vượt quá 128 ký tự")
+	ErrPasswordTooLong        = errors.New("mật khẩu không được vượt quá 50 ký tự")
 	ErrPasswordMissingUpper   = errors.New("mật khẩu phải chứa ít nhất một chữ cái in hoa")
 	ErrPasswordMissingLower   = errors.New("mật khẩu phải chứa ít nhất một chữ cái in thường")
 	ErrPasswordMissingDigit   = errors.New("mật khẩu phải chứa ít nhất một chữ số")
@@ -101,7 +101,7 @@ func (v *AuthValidation) ValidatePassword(password string) error {
 	if len(password) < 8 {
 		return ErrPasswordTooShort
 	}
-	if len(password) > 128 {
+	if len(password) > 50 {
 		return ErrPasswordTooLong
 	}
 
