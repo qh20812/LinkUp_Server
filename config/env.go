@@ -21,11 +21,8 @@ type Env struct {
 	JWTSecret    string
 	JWTExpiresIn int
 
-	GmailUser        string
-	GmailPass        string
-	FrontendResetURL string
-
 	CloudinaryEnv string
+	FrontendURL   string
 
 	IceServerUrls  string
 	TurnServerUrl  string
@@ -86,11 +83,8 @@ func LoadEnv() error {
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
 
-		GmailUser:        getString("GMAIL_USER", ""),
-		GmailPass:        getString("GMAIL_PASSWORD", ""),
-		FrontendResetURL: getString("FRONTEND_RESET_URL", "http://localhost:3000"),
-
 		CloudinaryEnv: getRequiredString("CLOUDINARY_URL"),
+		FrontendURL:   getString("VERIFY_EMAIL_URL", getString("FRONTEND_RESET_URL", "http://localhost:3000")),
 
 		IceServerUrls:  getString("ICE_SERVER_URLS", ""),
 		TurnServerUrl:  getString("TURN_SERVER_URL", ""),

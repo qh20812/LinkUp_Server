@@ -277,12 +277,12 @@ func (r *AuthRepository) ResetLoginAttempts(ctx context.Context, userID string) 
 	}).Error
 }
 
-func (r *AuthRepository) UpdateEmailVerifiedAt(ctx context.Context, userID string, verifiedAt time.Time) error {
-	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Update("email_verified_at", verifiedAt)
-	if tx.Error != nil {
-		return fmt.Errorf("update email_verified_at: %w", tx.Error)
+func (r *AuthRepository) UpdateEmailVerifiedAtTx(ctx context.Context, tx *gorm.DB, userID string, verifiedAt time.Time) error {
+	result := tx.Model(&models.User{}).Where("id = ?", userID).Update("email_verified_at", verifiedAt)
+	if result.Error != nil {
+		return fmt.Errorf("update email_verified_at: %w", result.Error)
 	}
-	if tx.RowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return ErrUserNotFound
 	}
 	return nil
