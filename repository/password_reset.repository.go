@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"linkup/models"
@@ -33,8 +35,10 @@ func (r *PasswordResetRepository) Create(ctx context.Context, token *models.Pass
 }
 
 func (r *PasswordResetRepository) FindByToken(ctx context.Context, token string) (*models.PasswordResetToken, error) {
+	hash := sha256.Sum256([]byte(token))
+	hashed := hex.EncodeToString(hash[:])
 	var resetToken models.PasswordResetToken
-	err := r.db.WithContext(ctx).Where("token = ?", token).First(&resetToken).Error
+	err := r.db.WithContext(ctx).Where("token = ?", hashed).First(&resetToken).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrResetTokenNotFound
 	}
@@ -56,9 +60,19 @@ func (r *PasswordResetRepository) MarkAsUsed(ctx context.Context, tokenID string
 }
 
 func (r *PasswordResetRepository) DeleteUserOldToken(ctx context.Context, userID string) error {
-	tx := r.db.WithContext(ctx).Where("user_id = ? AND used_at IS NOT NULL", userID).Delete(&models.PasswordResetToken{})
+	tx := r.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&models.PasswordResetToken{})
 	if tx.Error != nil {
 		return fmt.Errorf("delete old token: %w", tx.Error)
+	}
+	return nil
+}
+
+func (r *PasswordResetRepository) DeleteExpired(ctx context.Context) error {
+	tx := r.db.WithContext(ctx).
+		Where("expires_at < ?", time.Now().UTC()).
+		Delete(&models.PasswordResetToken{})
+	if tx.Error != nil {
+		return fmt.Errorf("delete expired reset tokens: %w", tx.Error)
 	}
 	return nil
 }
