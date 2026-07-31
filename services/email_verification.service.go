@@ -3,10 +3,10 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
@@ -15,6 +15,8 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+
+	"gorm.io/gorm"
 )
 
 type EmailVerificationService struct {
@@ -39,23 +41,22 @@ func NewEmailVerificationService(
 }
 
 func (s *EmailVerificationService) SendVerificationEmail(ctx context.Context, userID, email, userName string) error {
+	if err := s.verifyRepo.DeleteExpired(ctx); err != nil {
+		return err
+	}
 	if err := s.verifyRepo.DeleteUserOldTokens(ctx, userID); err != nil {
 		return err
 	}
 
-	token := s.generateToken()
-	vt := models.NewEmailVerificationToken(userID, token, 1*time.Hour)
+	rawToken, hashedToken := s.generateToken()
+	vt := models.NewEmailVerificationToken(userID, hashedToken, 1*time.Hour)
 	vt.ID = utils.GenerateUUID()
 
 	if _, err := s.verifyRepo.Create(ctx, &vt); err != nil {
 		return err
 	}
 
-	frontendURL := os.Getenv("FRONTEND_RESET_URL")
-	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"
-	}
-	verifyLink := fmt.Sprintf("%s/verify-email?token=%s", frontendURL, token)
+	verifyLink := fmt.Sprintf("%s/verify-email?token=%s", s.env.FrontendURL, rawToken)
 
 	if err := utils.SendVerificationEmail(email, userName, verifyLink); err != nil {
 		fmt.Printf("Warning: Failed to send verification email: %v\n", err)
@@ -91,11 +92,15 @@ func (s *EmailVerificationService) VerifyEmail(ctx context.Context, tokenStr str
 	}
 
 	now := time.Now().UTC()
-	if err := s.authRepo.UpdateEmailVerifiedAt(ctx, vt.UserID, now); err != nil {
-		return nil, err
-	}
-
-	if err := s.verifyRepo.MarkAsUsed(ctx, vt.ID); err != nil {
+	if err := s.verifyRepo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.authRepo.UpdateEmailVerifiedAtTx(ctx, tx, vt.UserID, now); err != nil {
+			return err
+		}
+		if err := s.verifyRepo.MarkAsUsedTx(ctx, tx, vt.ID); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -144,6 +149,16 @@ func (s *EmailVerificationService) ResendVerification(ctx context.Context, email
 		}, nil
 	}
 
+	last, err := s.verifyRepo.FindLatestByUserID(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+	if last != nil && time.Since(last.CreatedAt) < 60*time.Second {
+		return &dto.ResendVerificationResponse{
+			Message: "Vui lòng đợi 60 giây trước khi yêu cầu gửi lại email xác thực",
+		}, nil
+	}
+
 	if err := s.SendVerificationEmail(ctx, user.ID, user.Email, user.Username); err != nil {
 		return nil, err
 	}
@@ -153,10 +168,13 @@ func (s *EmailVerificationService) ResendVerification(ctx context.Context, email
 	}, nil
 }
 
-func (s *EmailVerificationService) generateToken() string {
+func (s *EmailVerificationService) generateToken() (raw string, hashed string) {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	raw = hex.EncodeToString(bytes)
+	sum := sha256.Sum256([]byte(raw))
+	hashed = hex.EncodeToString(sum[:])
+	return
 }
 
 func (s *EmailVerificationService) getJWTExpiryMinutes(ctx context.Context) int {

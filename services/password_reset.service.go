@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -63,8 +64,15 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 		return dto.ForgotPasswordResponse{}, err
 	}
 
-	token := s.generateResetToken()
-	resetToken := models.NewPasswordResetToken(user.ID, token, 10*time.Minute)
+	if err := s.resetRepo.DeleteExpired(ctx); err != nil {
+		return dto.ForgotPasswordResponse{}, err
+	}
+	if err := s.resetRepo.DeleteUserOldToken(ctx, user.ID); err != nil {
+		return dto.ForgotPasswordResponse{}, err
+	}
+
+	rawToken, hashedToken := s.generateResetToken()
+	resetToken := models.NewPasswordResetToken(user.ID, hashedToken, 10*time.Minute)
 	resetToken.ID = utils.GenerateUUID()
 
 	if _, err := s.resetRepo.Create(ctx, &resetToken); err != nil {
@@ -75,7 +83,7 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
-	resetLink := fmt.Sprintf("%s?token=%s", frontendURL, token)
+	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, rawToken)
 
 	if err := utils.SendResetPasswordEmail(user.Email, user.Username, resetLink); err != nil {
 		fmt.Printf("Warning: Failed to send email: %v\n", err)
@@ -166,9 +174,12 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 	}, nil
 }
 
-// Helper: Tạo random token
-func (s *PasswordResetService) generateResetToken() string {
+// Helper: Tạo random token (raw dùng cho link email, hashed lưu DB)
+func (s *PasswordResetService) generateResetToken() (raw string, hashed string) {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	raw = hex.EncodeToString(bytes)
+	sum := sha256.Sum256([]byte(raw))
+	hashed = hex.EncodeToString(sum[:])
+	return
 }

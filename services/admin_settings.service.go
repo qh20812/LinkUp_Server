@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/mail"
-	"os"
 	"strconv"
 	"strings"
 
@@ -52,14 +51,10 @@ func (s *AdminSettingsService) GetSettings(ctx context.Context, adminID string) 
 		return nil, fmt.Errorf("không thể tải cài đặt: %w", err)
 	}
 
-	settings := make(map[string]string, len(configs)+3)
+	settings := make(map[string]string, len(configs))
 	for _, c := range configs {
 		settings[c.Key] = c.Value
 	}
-
-	settings["readonly_gmail_user"] = os.Getenv("GMAIL_USER")
-	settings["readonly_cloudinary_cloud_name"] = s.env.CloudinaryEnv
-	settings["readonly_storage_quota"] = "100"
 
 	return &dto.AdminSettingsResponse{Settings: settings}, nil
 }

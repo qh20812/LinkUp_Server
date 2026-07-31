@@ -31,7 +31,7 @@ type TokenResponse struct {
 
 type AuthResponse struct {
 	User        AuthUserResponse `json:"user"`
-	Tokens      TokenResponse    `json:"tokens"`
+	Tokens      TokenResponse    `json:"tokens,omitempty"`
 	Storage     StorageInfo      `json:"storage,omitempty"`
 	VerifyEmail bool             `json:"verify_email,omitempty"`
 }

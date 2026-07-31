@@ -37,7 +37,7 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
         <p>Để đặt lại mật khẩu, vui lòng nhấp vào nút bên dưới:</p>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Đặt lại mật khẩu</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Đặt lại mật khẩu</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
@@ -95,7 +95,7 @@ func SendVerificationEmail(toEmail, userName, verifyLink string) error {
         <p>Cảm ơn bạn đã đăng ký tài khoản LinkUp! Vui lòng nhấp vào nút bên dưới để xác thực địa chỉ email của bạn.</p>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Xác thực email</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Xác thực email</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
