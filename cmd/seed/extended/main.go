@@ -203,7 +203,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for _, sc := range systemConfigs {
 		if err := internal.Exec(database,
-			`INSERT INTO system_configs (key, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+			"INSERT INTO system_configs (`key`, `value`) VALUES (?, ?) AS new ON DUPLICATE KEY UPDATE `value` = new.`value`",
 			sc.key, sc.value,
 		); err != nil {
 			return fmt.Errorf("extended: insert system_configs %s: %w", sc.key, err)

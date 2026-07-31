@@ -159,18 +159,58 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 		return nil, "", err
 	}
 
-	if len(posts) > 0 && s.mediaService != nil {
+	if len(posts) > 0 {
 		postIDs := make([]string, len(posts))
 		for i, p := range posts {
 			postIDs[i] = p.ID
 		}
-		mediaMap, err := s.mediaService.GetByPostIDs(ctx, postIDs)
-		if err == nil {
+
+		likesMap, errL := s.repo.BatchCountLikes(ctx, postIDs)
+		if errL == nil {
 			for i := range posts {
-				if m, ok := mediaMap[posts[i].ID]; ok {
-					posts[i].Media = m
-				} else {
-					posts[i].Media = []models.Media{}
+				posts[i].LikesCount = likesMap[posts[i].ID]
+			}
+		}
+
+		commentsMap, errC := s.repo.BatchCountComments(ctx, postIDs)
+		if errC == nil {
+			for i := range posts {
+				posts[i].CommentsCount = commentsMap[posts[i].ID]
+			}
+		}
+
+		sharesMap, errS := s.repo.BatchCountShares(ctx, postIDs)
+		if errS == nil {
+			for i := range posts {
+				posts[i].SharesCount = sharesMap[posts[i].ID]
+			}
+		}
+
+		if userID != "" {
+			likedMap, errL := s.repo.BatchCheckLiked(ctx, userID, postIDs)
+			if errL == nil {
+				for i := range posts {
+					posts[i].IsLiked = likedMap[posts[i].ID]
+				}
+			}
+
+			savedMap, errS := s.repo.BatchCheckSaved(ctx, userID, postIDs)
+			if errS == nil {
+				for i := range posts {
+					posts[i].IsSaved = savedMap[posts[i].ID]
+				}
+			}
+		}
+
+		if s.mediaService != nil {
+			mediaMap, errM := s.mediaService.GetByPostIDs(ctx, postIDs)
+			if errM == nil {
+				for i := range posts {
+					if m, ok := mediaMap[posts[i].ID]; ok {
+						posts[i].Media = m
+					} else {
+						posts[i].Media = []models.Media{}
+					}
 				}
 			}
 		}

@@ -145,31 +145,8 @@ func (r *FollowRepository) GetSuggestions(ctx context.Context, userID string, pa
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(items) > 0 {
-		return items, total, nil
-	}
-
-	fallbackQuery := `SELECT u.id, u.username,
-		COALESCE(p.display_name, '') AS display_name,
-		COALESCE(p.avatar_uri, '') AS avatar_uri,
-		0 AS mutual_count
-	FROM users u
-	LEFT JOIN profiles p ON p.user_id = u.id
-	LEFT JOIN follows f_existing ON f_existing.following_id = u.id AND f_existing.follower_id = ?
-	LEFT JOIN blocks b1 ON b1.user_id = ? AND b1.blocked_user_id = u.id
-	LEFT JOIN blocks b2 ON b2.user_id = u.id AND b2.blocked_user_id = ?
-	WHERE ` + eligibleWhere + `
-	GROUP BY u.id
-	ORDER BY u.id
-	LIMIT ? OFFSET ?`
-
-	fbArgs := []interface{}{userID, userID, userID}
-	fbArgs = append(fbArgs, eligibleArgs()...)
-	fbArgs = append(fbArgs, pageSize, offset)
-
-	items, err = fetch(fallbackQuery, fbArgs...)
-	if err != nil {
-		return nil, 0, err
+	if len(items) == 0 {
+		return []dto.FollowSuggestionItem{}, 0, nil
 	}
 
 	return items, total, nil

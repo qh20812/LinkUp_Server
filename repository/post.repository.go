@@ -28,10 +28,7 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
 		Select(`posts.*, 
             users.username,
             COALESCE(profiles.display_name, users.username) AS display_name,
-            COALESCE(profiles.avatar_uri, '') AS avatar_uri,
-            (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
-            (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
-            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`).
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
 		Joins("LEFT JOIN users ON users.id = posts.user_id").
 		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
 		Where("posts.status = ?", models.PostStatusPublic).
@@ -42,13 +39,7 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
             users.username,
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri,
-            (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
-            (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
-            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count,
-            EXISTS(SELECT 1 FROM post_reactions WHERE post_reactions.post_id = posts.id AND post_reactions.user_id = ?) AS is_liked,
-            EXISTS(SELECT 1 FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.user_id = ?) AS is_saved,
-            CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`,
-			*userID, *userID)
+            CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`)
 		q = q.Where("posts.user_id != ?", *userID)
 		q = q.Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", *userID)
 
@@ -85,6 +76,119 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
 	err := q.Find(&posts).Error
 
 	return posts, err
+}
+
+type countRow struct {
+	PostID string
+	Count  int
+}
+
+func (r *PostRepository) BatchCountLikes(ctx context.Context, postIDs []string) (map[string]int, error) {
+	if len(postIDs) == 0 {
+		return map[string]int{}, nil
+	}
+	var rows []countRow
+	err := r.db.WithContext(ctx).
+		Table("post_reactions").
+		Select("post_id, COUNT(*) AS count").
+		Where("post_id IN ?", postIDs).
+		Group("post_id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]int, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Count
+	}
+	return m, nil
+}
+
+func (r *PostRepository) BatchCountComments(ctx context.Context, postIDs []string) (map[string]int, error) {
+	if len(postIDs) == 0 {
+		return map[string]int{}, nil
+	}
+	var rows []countRow
+	err := r.db.WithContext(ctx).
+		Table("comments").
+		Select("post_id, COUNT(*) AS count").
+		Where("post_id IN ?", postIDs).
+		Group("post_id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]int, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Count
+	}
+	return m, nil
+}
+
+func (r *PostRepository) BatchCountShares(ctx context.Context, postIDs []string) (map[string]int, error) {
+	if len(postIDs) == 0 {
+		return map[string]int{}, nil
+	}
+	var rows []countRow
+	err := r.db.WithContext(ctx).
+		Table("post_shares").
+		Select("post_id, COUNT(*) AS count").
+		Where("post_id IN ?", postIDs).
+		Group("post_id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]int, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Count
+	}
+	return m, nil
+}
+
+type boolRow struct {
+	PostID string
+	Exists bool
+}
+
+func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, postIDs []string) (map[string]bool, error) {
+	if len(postIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	var rows []boolRow
+	err := r.db.WithContext(ctx).
+		Table("post_reactions").
+		Select("post_id, true AS exists").
+		Where("post_id IN ? AND user_id = ?", postIDs, userID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]bool, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Exists
+	}
+	return m, nil
+}
+
+func (r *PostRepository) BatchCheckSaved(ctx context.Context, userID string, postIDs []string) (map[string]bool, error) {
+	if len(postIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	var rows []boolRow
+	err := r.db.WithContext(ctx).
+		Table("bookmarks").
+		Select("post_id, true AS exists").
+		Where("post_id IN ? AND user_id = ?", postIDs, userID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]bool, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Exists
+	}
+	return m, nil
 }
 
 func (r *PostRepository) CountActive(ctx context.Context, userID *string) (int64, error) {
