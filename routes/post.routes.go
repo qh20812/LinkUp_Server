@@ -32,6 +32,7 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 		apiGroup.GET("/posts", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)
 		apiGroup.GET("/posts/:id", ctrl.ViewPostDetail)
 		apiGroup.POST("/posts", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
+		apiGroup.DELETE("/posts/:id", middlewares.AuthMiddleware(env, db), ctrl.DeletePost)
 		apiGroup.POST("/posts/:id/react", middlewares.AuthMiddleware(env, db), ctrl.ReactPost)
 		apiGroup.POST("/posts/:id/comments", middlewares.AuthMiddleware(env, db), ctrl.CreateComment)
 		apiGroup.GET("/posts/:id/comments", ctrl.GetComments)

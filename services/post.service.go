@@ -89,6 +89,21 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		}
 	}
 
+	post.Media = []models.Media{}
+	if s.mediaService != nil {
+		if mediaMap, errM := s.mediaService.GetByPostIDs(ctx, []string{post.ID}); errM == nil {
+			if m, ok := mediaMap[post.ID]; ok {
+				post.Media = m
+			}
+		}
+	}
+
+	if author, err := s.repo.FetchPostAuthor(ctx, userID); err == nil {
+		post.Username = author.Username
+		post.DisplayName = author.DisplayName
+		post.AvatarURI = author.AvatarURI
+	}
+
 	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
 	}
@@ -245,6 +260,15 @@ func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models
 
 	_ = s.repo.IncrementViewsCount(ctx, postID)
 	post.ViewsCount++
+
+	post.Media = []models.Media{}
+	if s.mediaService != nil {
+		if mediaMap, errM := s.mediaService.GetByPostIDs(ctx, []string{postID}); errM == nil {
+			if m, ok := mediaMap[postID]; ok {
+				post.Media = m
+			}
+		}
+	}
 
 	return post, nil
 }

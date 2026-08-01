@@ -40,7 +40,6 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri,
             CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`)
-		q = q.Where("posts.user_id != ?", *userID)
 		q = q.Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", *userID)
 
 		if filterFollowing {
@@ -455,6 +454,20 @@ func (r *PostRepository) DeleteBookmark(ctx context.Context, id string) error {
 // Liên kết các Media ID tạm thời vào Post ID sau khi upload xong
 func (r *PostRepository) LinkMediaToPost(ctx context.Context, mediaIDs []string, postID string) error {
 	return r.db.WithContext(ctx).Table("media").Where("id IN ?", mediaIDs).Update("post_id", postID).Error
+}
+
+// Lấy thông tin tác giả (username, display_name, avatar_uri) theo user_id
+func (r *PostRepository) FetchPostAuthor(ctx context.Context, userID string) (models.Post, error) {
+	var author models.Post
+	err := r.db.WithContext(ctx).
+		Table("users").
+		Select(`users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Where("users.id = ?", userID).
+		First(&author).Error
+	return author, err
 }
 
 // Xóa bài viết đồng thời xóa hàng loạt Bookmark & Share trong DB GORM Transaction
