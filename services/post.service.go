@@ -18,6 +18,7 @@ import (
 type PostService interface {
 	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error)
 	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
+	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
@@ -242,6 +243,91 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 				tier = 0
 			}
 			nextCursor = fmt.Sprintf("%d_%d_%s", tier, last.CreatedAt.UnixNano(), last.ID)
+		}
+	}
+
+	return posts, nextCursor, nil
+}
+
+// Lấy danh sách bài viết đã lưu (Bookmark) của người dùng hiện tại theo con trỏ
+func (s *postService) GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error) {
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+
+	var cursorCreatedAt *time.Time
+	var cursorID *string
+	if cursor != "" {
+		parts := strings.SplitN(cursor, "_", 2)
+		if len(parts) == 2 {
+			unixNano, err := strconv.ParseInt(parts[0], 10, 64)
+			if err == nil {
+				t := time.Unix(0, unixNano)
+				cursorCreatedAt = &t
+				cursorID = &parts[1]
+			}
+		}
+	}
+
+	posts, err := s.repo.FetchSaved(ctx, userID, pageSize, cursorCreatedAt, cursorID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(posts) > 0 {
+		postIDs := make([]string, len(posts))
+		for i, p := range posts {
+			postIDs[i] = p.ID
+			posts[i].IsSaved = true
+		}
+
+		likesMap, errL := s.repo.BatchCountLikes(ctx, postIDs)
+		if errL == nil {
+			for i := range posts {
+				posts[i].LikesCount = likesMap[posts[i].ID]
+			}
+		}
+
+		commentsMap, errC := s.repo.BatchCountComments(ctx, postIDs)
+		if errC == nil {
+			for i := range posts {
+				posts[i].CommentsCount = commentsMap[posts[i].ID]
+			}
+		}
+
+		sharesMap, errS := s.repo.BatchCountShares(ctx, postIDs)
+		if errS == nil {
+			for i := range posts {
+				posts[i].SharesCount = sharesMap[posts[i].ID]
+			}
+		}
+
+		likedMap, errL := s.repo.BatchCheckLiked(ctx, userID, postIDs)
+		if errL == nil {
+			for i := range posts {
+				posts[i].IsLiked = likedMap[posts[i].ID]
+			}
+		}
+
+		if s.mediaService != nil {
+			mediaMap, errM := s.mediaService.GetByPostIDs(ctx, postIDs)
+			if errM == nil {
+				for i := range posts {
+					if m, ok := mediaMap[posts[i].ID]; ok {
+						posts[i].Media = m
+					} else {
+						posts[i].Media = []models.Media{}
+					}
+				}
+			}
+		}
+	}
+
+	var nextCursor string
+	if len(posts) == pageSize {
+		last := posts[len(posts)-1]
+		if last.BookmarkID != nil && last.SavedAt != nil {
+			nextCursor = fmt.Sprintf("%d_%s", last.SavedAt.UnixNano(), *last.BookmarkID)
 		}
 	}
 

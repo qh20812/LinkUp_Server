@@ -86,6 +86,36 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 	})
 }
 
+// Lấy danh sách bài viết đã lưu (Bookmark) của người dùng hiện tại
+func (ctrl *PostController) GetSavedPosts(c *gin.Context) {
+	cursor := c.Query("cursor")
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để xem bài viết đã lưu"})
+		return
+	}
+	userID := fmt.Sprintf("%v", val)
+
+	posts, nextCursor, err := ctrl.service.GetSavedPosts(c.Request.Context(), userID, cursor, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var nc *string
+	if nextCursor != "" {
+		nc = &nextCursor
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"page_size":   pageSize,
+		"next_cursor": nc,
+		"data":        posts,
+	})
+}
+
 func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 	postID := c.Param("id")
 	if postID == "" {

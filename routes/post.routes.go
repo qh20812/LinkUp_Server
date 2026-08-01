@@ -14,6 +14,7 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 	{
 		postGroup.POST("", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
 		postGroup.GET("", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)
+		postGroup.GET("/saved", middlewares.AuthMiddleware(env, db), ctrl.GetSavedPosts)
 		postGroup.GET("/:id", ctrl.ViewPostDetail)
 		postGroup.DELETE("/:id", middlewares.AuthMiddleware(env, db), ctrl.DeletePost)
 		postGroup.POST("/:id/react", middlewares.AuthMiddleware(env, db), ctrl.ReactPost)
@@ -30,6 +31,7 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 	apiGroup := router.Group("/api")
 	{
 		apiGroup.GET("/posts", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)
+		apiGroup.GET("/posts/saved", middlewares.AuthMiddleware(env, db), ctrl.GetSavedPosts)
 		apiGroup.GET("/posts/:id", ctrl.ViewPostDetail)
 		apiGroup.POST("/posts", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
 		apiGroup.DELETE("/posts/:id", middlewares.AuthMiddleware(env, db), ctrl.DeletePost)

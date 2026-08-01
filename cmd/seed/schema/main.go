@@ -810,6 +810,15 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add fk_posts_community: %w", err)
 	}
 
+	// Bookmark cursor metadata columns on posts (read-only in the Post model via gorm:"->").
+	// Populated by the saved-posts listing (FetchSaved JOINs bookmarks); harmless NULLs elsewhere.
+	if err := addColumnIfMissing(database, "posts", "bookmark_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.bookmark_id: %w", err)
+	}
+	if err := addColumnIfMissing(database, "posts", "saved_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.saved_at: %w", err)
+	}
+
 	// 31. Message encryption column
 	if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFAULT true"); err != nil {
 		return fmt.Errorf("schema: add is_encrypted: %w", err)
