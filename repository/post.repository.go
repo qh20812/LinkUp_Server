@@ -512,6 +512,38 @@ func (r *PostRepository) DeletePostWithAssociations(ctx context.Context, postID 
 	return bookmarkedUserIDs, err
 }
 
+// Lấy danh sách bài viết đã lưu (Bookmark) của người dùng theo con trỏ
+func (r *PostRepository) FetchSaved(ctx context.Context, userID string, limit int, cursorCreatedAt *time.Time, cursorID *string) ([]models.Post, error) {
+	var posts []models.Post
+
+	q := r.db.WithContext(ctx).
+		Table("bookmarks b").
+		Select(`p.*,
+            b.id AS bookmark_id,
+            b.created_at AS saved_at,
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri,
+            CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`).
+		Joins("JOIN posts p ON p.id = b.post_id").
+		Joins("LEFT JOIN users ON users.id = p.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = p.user_id").
+		Joins("LEFT JOIN follows f ON f.following_id = p.user_id AND f.follower_id = ?", userID).
+		Where("b.user_id = ?", userID).
+		Where("p.status = ?", models.PostStatusPublic).
+		Limit(limit)
+
+	if cursorCreatedAt != nil && cursorID != nil {
+		q = q.Where("b.created_at < ? OR (b.created_at = ? AND b.id < ?)",
+			*cursorCreatedAt, *cursorCreatedAt, *cursorID)
+	}
+
+	q = q.Order("b.created_at DESC, b.id DESC")
+
+	err := q.Find(&posts).Error
+	return posts, err
+}
+
 // Lấy danh sách thông tin bài viết theo tập hợp các ID tìm được từ Hashtag
 func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, offset int) ([]models.Post, error) {
 	var posts []models.Post

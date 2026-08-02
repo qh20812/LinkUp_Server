@@ -39,6 +39,9 @@ type Post struct {
 	IsLiked     bool `json:"is_liked" gorm:"->"`
 	IsSaved     bool `json:"is_saved" gorm:"->"`
 	IsFollowing bool `json:"is_following" gorm:"->"`
+
+	SavedAt    *time.Time `json:"saved_at,omitempty" gorm:"->"`
+	BookmarkID *string    `json:"bookmark_id,omitempty" gorm:"->"`
 }
 
 func NewPost(userID, title, content string, status PostStatus) Post {
