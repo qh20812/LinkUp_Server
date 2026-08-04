@@ -322,8 +322,15 @@ func (r *PostRepository) HideCommentsByIDs(ctx context.Context, ids []string, re
 func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int) ([]models.Comment, error) {
 	var comments []models.Comment
 	err := r.db.WithContext(ctx).
-		Where("post_id = ? AND status != ?", postID, models.CommentStatusHidden).
-		Order("created_at DESC").
+		Table("comments").
+		Select(`comments.*,
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = comments.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = comments.user_id").
+		Where("comments.post_id = ? AND comments.status != ?", postID, models.CommentStatusHidden).
+		Order("comments.created_at DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&comments).Error
@@ -350,8 +357,15 @@ func (r *PostRepository) CreateNotification(ctx context.Context, notification mo
 func (r *PostRepository) FindCommentsByPostID(ctx context.Context, postID string) ([]models.Comment, error) {
 	var comments []models.Comment
 	err := r.db.WithContext(ctx).
-		Where("post_id = ? AND status != ?", postID, models.CommentStatusHidden).
-		Order("created_at DESC").
+		Table("comments").
+		Select(`comments.*,
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = comments.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = comments.user_id").
+		Where("comments.post_id = ? AND comments.status != ?", postID, models.CommentStatusHidden).
+		Order("comments.created_at DESC").
 		Find(&comments).Error
 	return comments, err
 }

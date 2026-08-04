@@ -23,6 +23,10 @@ type Comment struct {
 	ReviewReason *string        `json:"review_reason,omitempty"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    *time.Time     `json:"updated_at,omitempty"`
+
+	Username    string `json:"username" gorm:"->"`
+	DisplayName string `json:"display_name" gorm:"->"`
+	AvatarURI   string `json:"avatar_uri" gorm:"->"`
 }
 
 func NewComment(userID, postID string, parentID *string, content string) Comment {
