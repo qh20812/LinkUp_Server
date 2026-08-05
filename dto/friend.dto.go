@@ -43,10 +43,11 @@ type FriendListResponse struct {
 }
 
 type FriendSuggestionItem struct {
-	UserID      string `json:"user_id"`
-	DisplayName string `json:"display_name"`
-	AvatarURI   string `json:"avatar_uri"`
-	MutualCount int    `json:"mutual_count"`
+	UserID      string   `json:"user_id"`
+	DisplayName string   `json:"display_name"`
+	AvatarURI   string   `json:"avatar_uri"`
+	MutualCount int      `json:"mutual_count"`
+	MutualNames []string `json:"mutual_names,omitempty"`
 }
 
 type FriendSuggestionsResponse struct {

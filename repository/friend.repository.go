@@ -2,8 +2,10 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"linkup/dto"
 	"linkup/models"
@@ -226,17 +228,23 @@ func (r *FriendRepository) GetFriendSuggestions(ctx context.Context, userID stri
 		DisplayName string
 		AvatarURI   string
 		MutualCount int
+		MutualNames sql.NullString
 	}
 
 	query := `SELECT u.id,
 		COALESCE(p.display_name, '') AS display_name,
 		COALESCE(p.avatar_uri, '') AS avatar_uri,
-		COUNT(DISTINCT CASE WHEN uf.id IS NOT NULL THEN m.id END) AS mutual_count
+		COUNT(DISTINCT CASE WHEN uf.id IS NOT NULL THEN m.id END) AS mutual_count,
+		GROUP_CONCAT(DISTINCT CASE WHEN uf.id IS NOT NULL
+			THEN COALESCE(NULLIF(mp.display_name, ''), m.username) END
+			ORDER BY COALESCE(NULLIF(mp.display_name, ''), m.username)
+			SEPARATOR 0x1F) AS mutual_names
 	FROM users u
 	LEFT JOIN profiles p ON p.user_id = u.id
 	LEFT JOIN friends myf ON myf.status = ?
 		AND (myf.sender_id = ? OR myf.receiver_id = ?)
 	LEFT JOIN users m ON m.id = CASE WHEN myf.sender_id = ? THEN myf.receiver_id ELSE myf.sender_id END
+	LEFT JOIN profiles mp ON mp.user_id = m.id
 	LEFT JOIN friends uf ON uf.status = ?
 		AND ((uf.sender_id = u.id AND uf.receiver_id = m.id) OR (uf.sender_id = m.id AND uf.receiver_id = u.id))
 	WHERE ` + eligibleWhere + `
@@ -258,11 +266,25 @@ func (r *FriendRepository) GetFriendSuggestions(ctx context.Context, userID stri
 
 	items := make([]dto.FriendSuggestionItem, len(rows))
 	for i, row := range rows {
+		names := []string{}
+		if row.MutualNames.Valid && row.MutualNames.String != "" {
+			for _, n := range strings.Split(row.MutualNames.String, "\x1f") {
+				n = strings.TrimSpace(n)
+				if n == "" {
+					continue
+				}
+				names = append(names, n)
+				if len(names) == 3 {
+					break
+				}
+			}
+		}
 		items[i] = dto.FriendSuggestionItem{
 			UserID:      row.ID,
 			DisplayName: row.DisplayName,
 			AvatarURI:   row.AvatarURI,
 			MutualCount: row.MutualCount,
+			MutualNames: names,
 		}
 	}
 	return items, total, nil
