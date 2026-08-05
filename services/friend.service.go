@@ -196,3 +196,73 @@ func (s *FriendService) RejectFriendRequest(ctx context.Context, userID, request
 		Message: "Đã từ chối lời mời kết bạn",
 	}, nil
 }
+
+func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pageSize int) (dto.FriendListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+
+	items, total, err := s.friendRepo.FindAcceptedFriends(ctx, userID, page, pageSize)
+	if err != nil {
+		return dto.FriendListResponse{}, fmt.Errorf("get friends: %w", err)
+	}
+
+	return dto.FriendListResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}
+
+func (s *FriendService) Unfriend(ctx context.Context, userID, targetUserID string) (dto.FriendActionResponse, error) {
+	if targetUserID == "" {
+		return dto.FriendActionResponse{}, fmt.Errorf("userID là bắt buộc")
+	}
+	if userID == targetUserID {
+		return dto.FriendActionResponse{}, fmt.Errorf("không thể tự hủy kết bạn với chính mình")
+	}
+
+	friend, err := s.friendRepo.FindPair(ctx, userID, targetUserID)
+	if err != nil {
+		return dto.FriendActionResponse{}, fmt.Errorf("lỗi khi tìm quan hệ bạn bè: %w", err)
+	}
+	if friend == nil || friend.Status != models.FriendStatusAccepted {
+		return dto.FriendActionResponse{}, fmt.Errorf("hai người không phải là bạn bè")
+	}
+
+	if err := s.friendRepo.DeletePair(ctx, userID, targetUserID); err != nil {
+		return dto.FriendActionResponse{}, fmt.Errorf("hủy kết bạn thất bại: %w", err)
+	}
+
+	return dto.FriendActionResponse{
+		Status:  "unfriended",
+		Message: "Đã hủy kết bạn",
+	}, nil
+}
+
+func (s *FriendService) GetFriendSuggestions(ctx context.Context, userID string, page, pageSize int) (dto.FriendSuggestionsResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+
+	items, total, err := s.friendRepo.GetFriendSuggestions(ctx, userID, page, pageSize)
+	if err != nil {
+		return dto.FriendSuggestionsResponse{}, fmt.Errorf("get friend suggestions: %w", err)
+	}
+
+	return dto.FriendSuggestionsResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}

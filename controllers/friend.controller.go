@@ -3,6 +3,7 @@ package controllers
 import (
 	"linkup/services"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -97,6 +98,69 @@ func (ctrl *FriendController) RejectFriendRequest(c *gin.Context) {
 	response, err := ctrl.friendService.RejectFriendRequest(c.Request.Context(), userID, requestID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *FriendController) GetFriends(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "bạn cần đăng nhập"})
+		return
+	}
+	userID := val.(string)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	response, err := ctrl.friendService.GetFriends(c.Request.Context(), userID, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *FriendController) Unfriend(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "userID là bắt buộc"})
+		return
+	}
+
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "bạn cần đăng nhập"})
+		return
+	}
+	userID := val.(string)
+
+	response, err := ctrl.friendService.Unfriend(c.Request.Context(), userID, targetUserID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *FriendController) GetFriendSuggestions(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "bạn cần đăng nhập"})
+		return
+	}
+	userID := val.(string)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	response, err := ctrl.friendService.GetFriendSuggestions(c.Request.Context(), userID, page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
