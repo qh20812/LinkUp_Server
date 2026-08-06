@@ -27,6 +27,7 @@ type User struct {
 	LoginAttempts     int        `json:"login_attempts" gorm:"default:0"`
 	LockedUntil       *time.Time `json:"locked_until,omitempty"`
 	EmailVerifiedAt   *time.Time `json:"email_verified_at,omitempty"`
+	SelfDeactivatedAt *time.Time `json:"self_deactivated_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }

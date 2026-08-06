@@ -27,7 +27,9 @@ func (r *SearchRepository) SearchUsers(ctx context.Context, keyword string) ([]d
 		Model(&models.User{}).
 		Select("users.id, users.username, COALESCE(profiles.display_name, '') AS display_name, COALESCE(profiles.avatar_uri, '') AS avatar_uri").
 		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Joins("LEFT JOIN user_settings ON user_settings.user_id = users.id").
 		Where("users.status = ?", models.UserStatusActive).
+		Where("(user_settings.discoverable_in_search IS NULL OR user_settings.discoverable_in_search = ?)", true).
 		Where("users.username LIKE ? OR users.email LIKE ? OR profiles.display_name LIKE ?", like, like, like).
 		Where("NOT EXISTS (SELECT 1 FROM user_roles JOIN roles ON roles.id = user_roles.role_id WHERE user_roles.user_id = users.id AND roles.name IN (?, ?))", models.RoleSuperAdmin, models.RoleAdmin).
 		Limit(10).

@@ -52,7 +52,9 @@ func (h *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	response, err := h.authService.Login(c.Request.Context(), input)
+	deviceName, ipAddress, userAgent := clientDeviceInfo(c)
+
+	response, err := h.authService.Login(c.Request.Context(), input, deviceName, ipAddress, userAgent)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
@@ -89,13 +91,30 @@ func (h *AuthController) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	response, err := h.authService.RefreshToken(c.Request.Context(), input)
+	deviceName, ipAddress, userAgent := clientDeviceInfo(c)
+
+	response, err := h.authService.RefreshToken(c.Request.Context(), input, deviceName, ipAddress, userAgent)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// clientDeviceInfo extracts device metadata from the request for session tracking.
+func clientDeviceInfo(c *gin.Context) (deviceName, ipAddress, userAgent string) {
+	userAgent = c.GetHeader("User-Agent")
+	ipAddress = c.ClientIP()
+	deviceName = "Web"
+	if userAgent != "" {
+		if len(userAgent) > 64 {
+			deviceName = userAgent[:64]
+		} else {
+			deviceName = userAgent
+		}
+	}
+	return deviceName, ipAddress, userAgent
 }
 
 func (h *AuthController) Logout(c *gin.Context) {

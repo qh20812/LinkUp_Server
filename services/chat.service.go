@@ -17,22 +17,24 @@ import (
 const errMySQLDuplicate = "Duplicate entry"
 
 type ChatService struct {
-	chatRepo     *repository.ChatRepository
-	friendRepo   *repository.FriendRepository
-	inviteRepo   *repository.ChatInvitationRepository
-	mediaRepo    *repository.MediaRepository
-	notifService *NotificationService
-	validation   *validations.ChatValidation
+	chatRepo        *repository.ChatRepository
+	friendRepo      *repository.FriendRepository
+	inviteRepo      *repository.ChatInvitationRepository
+	mediaRepo       *repository.MediaRepository
+	userSettingsRepo *repository.UserSettingsRepository
+	notifService    *NotificationService
+	validation      *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, userSettingsRepo *repository.UserSettingsRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
-		chatRepo:     chatRepo,
-		friendRepo:   friendRepo,
-		inviteRepo:   inviteRepo,
-		mediaRepo:    mediaRepo,
-		notifService: notifService,
-		validation:   validation,
+		chatRepo:         chatRepo,
+		friendRepo:       friendRepo,
+		inviteRepo:       inviteRepo,
+		mediaRepo:        mediaRepo,
+		userSettingsRepo: userSettingsRepo,
+		notifService:     notifService,
+		validation:       validation,
 	}
 }
 
@@ -170,7 +172,14 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 	if err := s.validation.ValidateDirectChat(userID, targetUserID); err != nil {
 		return nil, false, err
 	}
-	return s.ensureDirectChat(ctx, userID, targetUserID, true)
+
+	// A stranger may start a direct chat only if the target allows it.
+	requiredFriendship := true
+	if setting, err := s.userSettingsRepo.GetByUserID(ctx, targetUserID); err == nil && setting != nil && setting.AllowStrangerMessages {
+		requiredFriendship = false
+	}
+
+	return s.ensureDirectChat(ctx, userID, targetUserID, requiredFriendship)
 }
 
 func (s *ChatService) ensureDirectChat(ctx context.Context, userID, targetUserID string, requiredFriendship bool) (*models.Chat, bool, error) {

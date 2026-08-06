@@ -784,6 +784,32 @@ func Run(env config.Env) error {
 			value TEXT NOT NULL,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 46. user_settings — cài đặt quyền riêng tư của user (1-1 với users)
+		`CREATE TABLE IF NOT EXISTS user_settings (
+			user_id VARCHAR(36) PRIMARY KEY,
+			discoverable_in_search TINYINT(1) NOT NULL DEFAULT 1,
+			allow_stranger_messages TINYINT(1) NOT NULL DEFAULT 0,
+			theme VARCHAR(10) NOT NULL DEFAULT 'light',
+			language VARCHAR(5) NOT NULL DEFAULT 'vi',
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 47. user_sessions — phiên đăng nhập (id = JWT jti)
+		`CREATE TABLE IF NOT EXISTS user_sessions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			device_name VARCHAR(255) NOT NULL DEFAULT '',
+			ip_address VARCHAR(45) NOT NULL DEFAULT '',
+			user_agent VARCHAR(512) NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			last_active_at DATETIME NOT NULL,
+			revoked_at DATETIME NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_user_sessions_user_id (user_id),
+			INDEX idx_user_sessions_expires_at (expires_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
@@ -924,6 +950,11 @@ func Run(env config.Env) error {
 	// Email verification column
 	if err := addColumnIfMissing(database, "users", "email_verified_at", "DATETIME NULL"); err != nil {
 		return fmt.Errorf("schema: add users.email_verified_at: %w", err)
+	}
+
+	// Self deactivation column (user deactivates own account; reactivates on login)
+	if err := addColumnIfMissing(database, "users", "self_deactivated_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)
 	}
 
 	return nil

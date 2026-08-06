@@ -22,6 +22,7 @@ type AuthService struct {
 	banRepo            *repository.BanRepository
 	adminSettingsRepo  *repository.AdminSettingsRepository
 	emailVerifyService *EmailVerificationService
+	sessionRepo        *repository.UserSessionRepository
 	env                config.Env
 }
 
@@ -37,6 +38,10 @@ func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository
 
 func (s *AuthService) SetEmailVerificationService(svc *EmailVerificationService) {
 	s.emailVerifyService = svc
+}
+
+func (s *AuthService) SetSessionRepository(sessionRepo *repository.UserSessionRepository) {
+	s.sessionRepo = sessionRepo
 }
 
 func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
@@ -206,7 +211,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return buildAuthResponse(*createdUser, "", "", s.accessTTL(ctx), s.refreshTTL(ctx), true), nil
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(ctx, createdUser, "USER")
+	accessToken, refreshToken, err := s.generateTokens(ctx, createdUser, "USER", "")
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -214,7 +219,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
 }
 
-func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {
+func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceName, ipAddress, userAgent string) (dto.AuthResponse, error) {
 	email := normalizeEmail(input.Email)
 	user, err := s.authRepo.FindByEmail(ctx, email)
 	if err != nil {
@@ -228,7 +233,9 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, err
 	}
 
-	if !user.IsActive() {
+	// Self-deactivated accounts may log in again (which reactivates them).
+	// Admin suspensions (status=suspended without self_deactivated_at) stay blocked.
+	if !user.IsActive() && !(user.Status == models.UserStatusSuspended && user.SelfDeactivatedAt != nil) {
 		return dto.AuthResponse{}, fmt.Errorf("tài khoản chưa được kích hoạt")
 	}
 
@@ -261,6 +268,15 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		return dto.AuthResponse{}, err
 	}
 
+	// Restore a self-deactivated account after a successful login.
+	if user.Status == models.UserStatusSuspended && user.SelfDeactivatedAt != nil {
+		if err := s.authRepo.Reactivate(ctx, user.ID); err != nil {
+			return dto.AuthResponse{}, err
+		}
+		user.Status = models.UserStatusActive
+		user.SelfDeactivatedAt = nil
+	}
+
 	maint, err := s.isMaintenanceMode(ctx)
 	if err != nil {
 		return dto.AuthResponse{}, err
@@ -276,7 +292,12 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 		}
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
+	sessionID, err := s.createSession(ctx, user, deviceName, ipAddress, userAgent)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role, sessionID)
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -284,11 +305,43 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.Auth
 	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
 }
 
-func (s *AuthService) generateTokens(ctx context.Context, user *models.User, role string) (string, string, error) {
-	return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(ctx), s.refreshTTL(ctx))
+// createSession records a login session and returns its ID, which is embedded
+// in the issued tokens as the `jti` claim. Expired rows are cleaned up lazily.
+func (s *AuthService) createSession(ctx context.Context, user *models.User, deviceName, ipAddress, userAgent string) (string, error) {
+	if s.sessionRepo == nil {
+		return "", nil
+	}
+
+	_ = s.sessionRepo.CleanupExpired(ctx)
+
+	now := time.Now().UTC()
+	session := &models.UserSession{
+		ID:           utils.GenerateUUID(),
+		UserID:       user.ID,
+		DeviceName:   deviceName,
+		IPAddress:    ipAddress,
+		UserAgent:    userAgent,
+		CreatedAt:    now,
+		ExpiresAt:    now.Add(s.refreshTTL(ctx)),
+		LastActiveAt: now,
+	}
+	if err := s.sessionRepo.Create(ctx, session); err != nil {
+		return "", err
+	}
+	return session.ID, nil
+}
+
+func (s *AuthService) generateTokens(ctx context.Context, user *models.User, role string, sessionID string) (string, string, error) {
+	if sessionID == "" {
+		return utils.GenerateTokenPair(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, s.accessTTL(ctx), s.refreshTTL(ctx))
+	}
+	return utils.GenerateTokenPairWithSession(s.env.JWTSecret, user.ID, user.Email, role, user.TokenVersion, sessionID, s.accessTTL(ctx), s.refreshTTL(ctx))
 }
 
 func (s *AuthService) Logout(ctx context.Context, userID string) error {
+	if s.sessionRepo != nil {
+		_ = s.sessionRepo.RevokeAllByUserID(ctx, userID)
+	}
 	return s.authRepo.IncrementTokenVersion(ctx, userID)
 }
 
@@ -368,7 +421,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 	}
 
 	for _, history := range histories {
-		if err := utils.ComparePassword(history.PasswordHash, input.NewPassword); err != nil {
+		if err := utils.ComparePassword(history.PasswordHash, input.NewPassword); err == nil {
 			return errors.New("không thể sử dụng lại mật khẩu trước đó")
 		}
 	}
@@ -378,14 +431,19 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 		return err
 	}
 
-	if err := s.authRepo.SavePasswordHistory(ctx, userID, user.PasswordHash); err != nil {
+	if err := s.authRepo.UpdatePasswordWithHistory(ctx, userID, user.PasswordHash, hashedPassword); err != nil {
 		return err
 	}
 
-	return s.authRepo.UpdatePassword(ctx, userID, hashedPassword)
+	// A password change invalidates every existing token/session so that a
+	// compromised account is fully locked out elsewhere.
+	if s.sessionRepo != nil {
+		_ = s.sessionRepo.RevokeAllByUserID(ctx, userID)
+	}
+	return s.authRepo.IncrementTokenVersion(ctx, userID)
 }
 
-func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenInput) (dto.TokenResponse, error) {
+func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenInput, deviceName, ipAddress, userAgent string) (dto.TokenResponse, error) {
 	token, err := utils.ParseToken(s.env.JWTSecret, input.RefreshToken)
 	if err != nil || !token.Valid {
 		return dto.TokenResponse{}, errors.New("refresh token không hợp lệ hoặc đã hết hạn")
@@ -421,7 +479,17 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		return dto.TokenResponse{}, err
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
+	// Rotate: revoke the session that the old refresh token belonged to.
+	if s.sessionRepo != nil && claims.ID != "" {
+		_, _ = s.sessionRepo.Revoke(ctx, claims.ID, claims.UserID)
+	}
+
+	sessionID, err := s.createSession(ctx, user, deviceName, ipAddress, userAgent)
+	if err != nil {
+		return dto.TokenResponse{}, err
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role, sessionID)
 	if err != nil {
 		return dto.TokenResponse{}, err
 	}
