@@ -474,6 +474,12 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 		return dto.TokenResponse{}, errors.New("tài khoản chưa được kích hoạt")
 	}
 
+	// Reject refresh tokens issued before the latest token_version bump (e.g.
+	// after logout or password change), mirroring the middleware for access tokens.
+	if claims.TokenVersion != user.TokenVersion {
+		return dto.TokenResponse{}, errors.New("phiên đăng nhập đã hết hạn")
+	}
+
 	role, err := s.authRepo.GetUserRole(ctx, user.ID)
 	if err != nil {
 		return dto.TokenResponse{}, err
