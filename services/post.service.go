@@ -514,6 +514,15 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 		return errors.New("bài viết không tồn tại hoặc không cho phép chia sẻ")
 	}
 
+	if post.UserID == userID {
+		return errors.New("bạn không thể chia sẻ bài viết của chính mình")
+	}
+
+	existing, err := s.repo.FindShareByUser(ctx, userID, postID)
+	if err == nil && existing != nil {
+		return errors.New("bạn đã chia sẻ bài viết này rồi")
+	}
+
 	share := models.NewPostShare(userID, postID, content)
 	share.ID = utils.GenerateUUID()
 	share.CreatedAt = time.Now()
@@ -534,6 +543,10 @@ func (s *postService) SavePost(ctx context.Context, userID, postID string) (stri
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
 		return "", errors.New("bài viết không tồn tại hoặc đã bị ẩn")
+	}
+
+	if post.UserID == userID {
+		return "", errors.New("bạn không thể lưu bài viết của chính mình")
 	}
 
 	existingBookmark, err := s.repo.FindBookmark(ctx, userID, postID)

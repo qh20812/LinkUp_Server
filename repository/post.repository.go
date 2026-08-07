@@ -262,6 +262,16 @@ func (r *PostRepository) CreateShare(ctx context.Context, share models.PostShare
 	return r.db.WithContext(ctx).Create(&share).Error
 }
 
+// Tìm share của một user cho một bài viết cụ thể
+func (r *PostRepository) FindShareByUser(ctx context.Context, userID, postID string) (*models.PostShare, error) {
+	var share models.PostShare
+	err := r.db.WithContext(ctx).Where("user_id = ? AND post_id = ?", userID, postID).First(&share).Error
+	if err != nil {
+		return nil, err
+	}
+	return &share, nil
+}
+
 func (r *PostRepository) CreateComment(ctx context.Context, comment *models.Comment) error {
 	return r.db.WithContext(ctx).Create(comment).Error
 }

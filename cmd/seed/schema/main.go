@@ -573,7 +573,8 @@ func Run(env config.Env) error {
 			content TEXT NOT NULL,
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_post_shares_user_post (user_id, post_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 31. Chat_invite
@@ -922,6 +923,10 @@ func Run(env config.Env) error {
 	if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_post_id",
 		"INDEX idx_post_shares_post_id (post_id)"); err != nil {
 		return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
+	}
+	if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_user_post",
+		"UNIQUE INDEX idx_post_shares_user_post (user_id, post_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_post_shares_user_post: %w", err)
 	}
 
 	// Phase 4: comment moderation columns (status + review_reason for report handling)
