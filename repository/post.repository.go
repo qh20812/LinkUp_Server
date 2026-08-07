@@ -190,6 +190,26 @@ func (r *PostRepository) BatchCheckSaved(ctx context.Context, userID string, pos
 	return m, nil
 }
 
+func (r *PostRepository) BatchCheckShared(ctx context.Context, userID string, postIDs []string) (map[string]bool, error) {
+	if len(postIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	var rows []boolRow
+	err := r.db.WithContext(ctx).
+		Table("post_shares").
+		Select("post_id, true AS found").
+		Where("post_id IN ? AND user_id = ?", postIDs, userID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]bool, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Found
+	}
+	return m, nil
+}
+
 func (r *PostRepository) CountActive(ctx context.Context, userID *string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&models.Post{}).

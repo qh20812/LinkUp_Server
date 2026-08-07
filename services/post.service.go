@@ -216,6 +216,13 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 					posts[i].IsSaved = savedMap[posts[i].ID]
 				}
 			}
+
+			sharedMap, errSh := s.repo.BatchCheckShared(ctx, userID, postIDs)
+			if errSh == nil {
+				for i := range posts {
+					posts[i].IsShared = sharedMap[posts[i].ID]
+				}
+			}
 		}
 
 		if s.mediaService != nil {
@@ -306,6 +313,13 @@ func (s *postService) GetSavedPosts(ctx context.Context, userID string, cursor s
 		if errL == nil {
 			for i := range posts {
 				posts[i].IsLiked = likedMap[posts[i].ID]
+			}
+		}
+
+		sharedMap, errSh := s.repo.BatchCheckShared(ctx, userID, postIDs)
+		if errSh == nil {
+			for i := range posts {
+				posts[i].IsShared = sharedMap[posts[i].ID]
 			}
 		}
 
