@@ -147,7 +147,7 @@ func (r *PostRepository) BatchCountShares(ctx context.Context, postIDs []string)
 
 type boolRow struct {
 	PostID string
-	Exists bool
+	Found  bool
 }
 
 func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, postIDs []string) (map[string]bool, error) {
@@ -157,7 +157,7 @@ func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, pos
 	var rows []boolRow
 	err := r.db.WithContext(ctx).
 		Table("post_reactions").
-		Select("post_id, true AS exists").
+		Select("post_id, true AS found").
 		Where("post_id IN ? AND user_id = ?", postIDs, userID).
 		Find(&rows).Error
 	if err != nil {
@@ -165,7 +165,7 @@ func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, pos
 	}
 	m := make(map[string]bool, len(postIDs))
 	for _, row := range rows {
-		m[row.PostID] = row.Exists
+		m[row.PostID] = row.Found
 	}
 	return m, nil
 }
@@ -177,7 +177,7 @@ func (r *PostRepository) BatchCheckSaved(ctx context.Context, userID string, pos
 	var rows []boolRow
 	err := r.db.WithContext(ctx).
 		Table("bookmarks").
-		Select("post_id, true AS exists").
+		Select("post_id, true AS found").
 		Where("post_id IN ? AND user_id = ?", postIDs, userID).
 		Find(&rows).Error
 	if err != nil {
@@ -185,7 +185,7 @@ func (r *PostRepository) BatchCheckSaved(ctx context.Context, userID string, pos
 	}
 	m := make(map[string]bool, len(postIDs))
 	for _, row := range rows {
-		m[row.PostID] = row.Exists
+		m[row.PostID] = row.Found
 	}
 	return m, nil
 }
