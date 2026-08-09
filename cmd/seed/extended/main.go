@@ -35,8 +35,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 		fileType string
 		fileSize float64
 	}{
-		{0, 0, "https://picsum.photos/seed/media0/800/600", "image/jpeg", 2048576},
-		{1, 1, "https://picsum.photos/seed/media1/800/600", "image/jpeg", 1543200},
+		{2, 0, "https://picsum.photos/seed/media0/800/600", "image/jpeg", 2048576},
+		{3, 1, "https://picsum.photos/seed/media1/800/600", "image/jpeg", 1543200},
 		{2, 2, "https://www.w3schools.com/html/mov_bbb.mp4", "video/mp4", 52428800},
 		{3, 3, "https://picsum.photos/seed/media3/800/600", "image/jpeg", 1024000},
 		{4, 4, "https://picsum.photos/seed/media4/800/600", "image/png", 3850240},
@@ -44,7 +44,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		{6, 6, "https://picsum.photos/seed/media6/800/600", "image/jpeg", 1254400},
 		{7, 7, "https://picsum.photos/seed/media7/400/400", "image/jpeg", 512000},
 		{8, 8, "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4", "video/mp4", 104857600},
-		{0, 9, "https://picsum.photos/seed/media9/800/600", "image/jpeg", 2891000},
+		{9, 9, "https://picsum.photos/seed/media9/800/600", "image/jpeg", 2891000},
 		{2, 10, "https://picsum.photos/seed/media10/800/600", "image/png", 4560000},
 		{5, 11, "https://picsum.photos/seed/media11/800/600", "image/jpeg", 1843200},
 		{9, 12, "https://picsum.photos/seed/media12/800/600", "image/jpeg", 900000},
@@ -72,36 +72,31 @@ func Run(env config.Env, state *internal.SeedState) error {
 		targetURL string
 		budget    float64
 		status    string
-		mediaIdx  int
 	}{
-		{"Boost Your Productivity", "Try our new project management tool", "https://example.com/productivity", 5000.00, "active", 0},
-		{"Learn Go Programming", "Master Go in 30 days", "https://example.com/learn-go", 2500.00, "active", 1},
-		{"Cloud Hosting Sale", "50% off your first year", "https://example.com/cloud-hosting", 10000.00, "active", 4},
-		{"AI-Powered Analytics", "Understand your users better", "https://example.com/analytics", 7500.00, "paused", 6},
-		{"DevOps Conference 2026", "Early bird tickets available", "https://example.com/devops-conf", 3000.00, "completed", -1},
+		{"Boost Your Productivity", "Try our new project management tool", "https://example.com/productivity", 5000.00, "active"},
+		{"Learn Go Programming", "Master Go in 30 days", "https://example.com/learn-go", 2500.00, "active"},
+		{"Cloud Hosting Sale", "50% off your first year", "https://example.com/cloud-hosting", 10000.00, "active"},
+		{"AI-Powered Analytics", "Understand your users better", "https://example.com/analytics", 7500.00, "paused"},
+		{"DevOps Conference 2026", "Early bird tickets available", "https://example.com/devops-conf", 3000.00, "completed"},
 	}
 
 	partnerUserID := state.UserIDs[2]
 
 	for _, a := range ads {
 		adID := internal.UUID()
-		var mediaID *string
-		if a.mediaIdx >= 0 && a.mediaIdx < len(state.MediaIDs) {
-			mediaID = internal.Ptr(state.MediaIDs[a.mediaIdx])
-		}
 		startedAt := internal.PtrTime(now.Add(-time.Duration(randRange(1, 30)) * 24 * time.Hour))
 		expiresAt := internal.PtrTime(now.Add(time.Duration(randRange(15, 60)) * 24 * time.Hour))
 
 		if err := internal.Exec(database,
-			`INSERT INTO ads (id, partner_id, title, content, media_id, target_url, status, budget, started_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			adID, partnerUserID, a.title, a.content, mediaID, a.targetURL, a.status, a.budget, startedAt, expiresAt, now.Add(-time.Duration(randRange(1, 60))*24*time.Hour),
+			`INSERT INTO ads (id, partner_id, title, content, target_url, status, budget, started_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			adID, partnerUserID, a.title, a.content, a.targetURL, a.status, a.budget, startedAt, expiresAt, now.Add(-time.Duration(randRange(1, 60))*24*time.Hour),
 		); err != nil {
 			return fmt.Errorf("extended: insert ad %s: %w", a.title, err)
 		}
 
 		actionTypes := []string{"impression", "impression", "click", "conversion"}
 		for j := 0; j < randRange(1, 4); j++ {
-			userID := internal.Ptr(state.UserIDs[randRange(0, len(state.UserIDs)-1)])
+			userID := internal.Ptr(state.UserIDs[randRange(2, len(state.UserIDs)-1)])
 			if err := internal.Exec(database,
 				`INSERT INTO ad_analytics (id, ad_id, user_id, action_type, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 				internal.UUID(), adID, userID, pick(actionTypes),
@@ -114,7 +109,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 	}
 
 	for i := 0; i < 10; i++ {
-		userID := state.UserIDs[i%len(state.UserIDs)]
+		userID := state.UserIDs[internal.ContentIndex(i)]
 		caption := pick([]string{
 			"Beautiful morning!",
 			"Check out this view 🌄",
@@ -151,7 +146,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 	for i := 0; i < 20; i++ {
 		// Loại trừ superadmin (index 0) và admin (index 1) khỏi receiver
 		receiverID := state.UserIDs[i%18+2]
-		senderID := internal.Ptr(state.UserIDs[(i+2)%len(state.UserIDs)])
+		senderID := internal.Ptr(state.UserIDs[(i+2)%18+2])
 		notifType := pick(notifTypes)
 		isRead := rng.Intn(3) > 0
 
@@ -167,8 +162,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 	callStatuses := []string{"ended", "ended", "missed", "rejected"}
 
 	for i := 0; i < 5; i++ {
-		callerID := state.UserIDs[i%len(state.UserIDs)]
-		calleeID := state.UserIDs[(i+1)%len(state.UserIDs)]
+		callerID := state.UserIDs[internal.ContentIndex(i)]
+		calleeID := state.UserIDs[internal.ContentIndex(i+1)]
 		callType := pick(callTypes)
 		status := pick(callStatuses)
 		startedAt := now.Add(-time.Duration(randRange(1, 48)) * time.Hour)

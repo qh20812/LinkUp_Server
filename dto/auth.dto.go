@@ -13,6 +13,10 @@ type LoginInput struct {
 	Password string `json:"password"`
 }
 
+type GoogleLoginInput struct {
+	IDToken string `json:"id_token" binding:"required"`
+}
+
 type AuthUserResponse struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`

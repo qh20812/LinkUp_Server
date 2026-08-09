@@ -17,29 +17,6 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	now := time.Now().UTC()
 
-	displayNames := []string{
-		"Nguyễn Văn An",
-		"Trần Thị Bình",
-		"Lê Hoàng Cường",
-		"Phạm Minh Đức",
-		"Hoàng Thị Mai",
-		"Đỗ Gia Huy",
-		"Vũ Ngọc Linh",
-		"Bùi Thanh Tùng",
-		"Đặng Hồng Nhung",
-		"Ngô Tuấn Kiệt",
-		"Phan Thùy Dương",
-		"Lý Quốc Bảo",
-		"Tô Minh Tâm",
-		"Đinh Văn Hùng",
-		"Hồ Cẩm Tú",
-		"Mai Thanh Hà",
-		"Dương Khánh Vy",
-		"Lưu Bích Ngọc",
-		"Chu Đức Minh",
-		"Trịnh Hoài Nam",
-	}
-
 	phones := []string{
 		"0912345678",
 		"0987654321",
@@ -137,7 +114,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		dob, _ := time.Parse("2006-01-02", dobs[i])
 		if err := internal.Exec(database,
 			`INSERT INTO profiles (id, user_id, display_name, phone_number, date_of_birth, avatar_uri, bio, is_private_profile, is_private_posts, allow_stranger_friend_request, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			internal.UUID(), uid, displayNames[i], phones[i], dob, avatars[i], bios[i], isPrivate, false, true, now,
+			internal.UUID(), uid, internal.SeedUsers[i].DisplayName, phones[i], dob, avatars[i], bios[i], isPrivate, false, true, now,
 		); err != nil {
 			return fmt.Errorf("profiles: insert for user %s: %w", uid, err)
 		}

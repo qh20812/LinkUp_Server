@@ -133,6 +133,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 			if err := addRole(uid, adminID); err != nil {
 				return fmt.Errorf("core: user_role admin for %s: %w", uid, err)
 			}
+			continue
 		}
 		if i == 2 {
 			if err := addRole(uid, partnerID); err != nil {

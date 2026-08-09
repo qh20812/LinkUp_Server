@@ -34,3 +34,13 @@ func Exec(db *sql.DB, query string, args ...any) error {
 	_, err := db.Exec(query, args...)
 	return err
 }
+
+// ContentUserIDs trả về danh sách user thường (bỏ 2 hệ thống role đầu: superadmin, admin).
+func ContentUserIDs(state *SeedState) []string {
+	return state.UserIDs[2:]
+}
+
+// ContentIndex trong [2, 19]: ánh xạ index vòng cho user thường.
+func ContentIndex(i int) int {
+	return 2 + (i % 18)
+}

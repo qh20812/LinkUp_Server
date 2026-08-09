@@ -27,6 +27,7 @@ type User struct {
 	LoginAttempts     int        `json:"login_attempts" gorm:"default:0"`
 	LockedUntil       *time.Time `json:"locked_until,omitempty"`
 	EmailVerifiedAt   *time.Time `json:"email_verified_at,omitempty"`
+	GoogleID          *string    `json:"google_id,omitempty" gorm:"type:varchar(255)"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }

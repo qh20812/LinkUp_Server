@@ -287,3 +287,32 @@ func (r *AuthRepository) UpdateEmailVerifiedAtTx(ctx context.Context, tx *gorm.D
 	}
 	return nil
 }
+
+func (r *AuthRepository) FindByGoogleID(ctx context.Context, googleID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by google id: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *AuthRepository) LinkGoogleAccount(ctx context.Context, userID string, googleID string, verifiedAt time.Time) error {
+	res := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id = ? AND google_id IS NULL", userID).
+		Update("google_id", googleID)
+	if res.Error != nil {
+		return fmt.Errorf("link google account: %w", res.Error)
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id = ? AND email_verified_at IS NULL", userID).
+		Update("email_verified_at", verifiedAt).Error; err != nil {
+		return fmt.Errorf("mark google email verified: %w", err)
+	}
+	return nil
+}

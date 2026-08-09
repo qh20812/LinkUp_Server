@@ -31,6 +31,8 @@ type Env struct {
 
 	MongoURI string
 	MongoDBName string
+
+	GoogleClientIDs []string
 }
 
 var (
@@ -93,6 +95,8 @@ func LoadEnv() error {
 
 		MongoURI: getRequiredString("MONGO_URI"),
 		MongoDBName: getString("MONGO_DB_NAME", "linkup"),
+
+		GoogleClientIDs: parseCSV(getString("GOOGLE_CLIENT_IDS", "")),
 	}
 
 	missing := validateRequired(env)
@@ -227,4 +231,15 @@ func getBool(key string) (bool, error) {
 		return false, fmt.Errorf("invalid bool env var %s: %w", key, err)
 	}
 	return parsed, nil
+}
+
+func parseCSV(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

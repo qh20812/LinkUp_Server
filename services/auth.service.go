@@ -22,6 +22,7 @@ type AuthService struct {
 	banRepo            *repository.BanRepository
 	adminSettingsRepo  *repository.AdminSettingsRepository
 	emailVerifyService *EmailVerificationService
+	googleVerifier     GoogleIDTokenVerifier
 	env                config.Env
 }
 
@@ -37,6 +38,10 @@ func NewAuthService(authRepo *repository.AuthRepository, profileRepo *repository
 
 func (s *AuthService) SetEmailVerificationService(svc *EmailVerificationService) {
 	s.emailVerifyService = svc
+}
+
+func (s *AuthService) SetGoogleIDTokenVerifier(v GoogleIDTokenVerifier) {
+	s.googleVerifier = v
 }
 
 func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
@@ -212,6 +217,124 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 	}
 
 	return buildAuthResponse(*createdUser, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
+}
+
+func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.AuthResponse, error) {
+	if s.googleVerifier == nil {
+		return dto.AuthResponse{}, errors.New("đăng nhập google chưa được cấu hình")
+	}
+
+	claims, err := s.googleVerifier.Verify(ctx, idToken)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	email := normalizeEmail(claims.Email)
+	user, err := s.authRepo.FindByEmail(ctx, email)
+	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+		return dto.AuthResponse{}, err
+	}
+	if user == nil {
+		user, err = s.authRepo.FindByGoogleID(ctx, claims.GoogleID)
+		if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+			return dto.AuthResponse{}, err
+		}
+	}
+
+	if user == nil {
+		user, err = s.createUserFromGoogle(ctx, claims, email)
+		if err != nil {
+			return dto.AuthResponse{}, err
+		}
+	} else {
+		if user.GoogleID == nil {
+			if err := s.authRepo.LinkGoogleAccount(ctx, user.ID, claims.GoogleID, time.Now().UTC()); err != nil {
+				return dto.AuthResponse{}, err
+			}
+			user.GoogleID = &claims.GoogleID
+		} else if *user.GoogleID != claims.GoogleID {
+			return dto.AuthResponse{}, errors.New("tài khoản google không khớp với tài khoản hiện tại")
+		}
+
+		if err := s.ensureBanStatus(ctx, user); err != nil {
+			return dto.AuthResponse{}, err
+		}
+		if !user.IsActive() {
+			return dto.AuthResponse{}, errors.New("tài khoản không hoạt động")
+		}
+	}
+
+	maint, err := s.isMaintenanceMode(ctx)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	role, err := s.authRepo.GetUserRole(ctx, user.ID)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	if maint && role != string(models.RoleSuperAdmin) && role != string(models.RoleAdmin) {
+		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
+}
+
+// createUserFromGoogle tạo tài khoản mới từ thông tin Google đã xác thực.
+func (s *AuthService) createUserFromGoogle(ctx context.Context, claims *GoogleClaims, email string) (*models.User, error) {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
+	if err != nil {
+		return nil, err
+	}
+	if cfg != nil && cfg.Value == "false" {
+		return nil, errors.New("đăng ký đã bị tắt bởi quản trị viên")
+	}
+
+	username, err := utils.GenerateUsername(email, func(u string) (bool, error) {
+		return s.authRepo.IsUsernameTaken(ctx, u)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	displayName := strings.TrimSpace(claims.Name)
+	if displayName == "" {
+		displayName = strings.Split(email, "@")[0]
+	}
+
+	googleID := claims.GoogleID
+	now := time.Now().UTC()
+	createdUser, err := s.authRepo.Create(ctx, &models.User{
+		ID:                utils.GenerateUUID(),
+		Username:          username,
+		Email:             email,
+		PasswordHash:      "", // không có mật khẩu -> không dùng được Login truyền thống
+		Status:            models.UserStatusActive,
+		StorageQuotaBytes: models.DefaultStorageQuotaBytes,
+		EmailVerifiedAt:   &now,
+		GoogleID:          &googleID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.profileRepo.Create(ctx, &models.Profile{
+		ID:          utils.GenerateUUID(),
+		UserID:      createdUser.ID,
+		DisplayName: displayName,
+		AvatarURI:   claims.Picture,
+	}); err != nil {
+		return nil, err
+	}
+
+	if err := s.authRepo.AssignUserRole(ctx, createdUser.ID, s.getDefaultUserRole(ctx), nil, nil); err != nil {
+		return nil, err
+	}
+
+	return createdUser, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {

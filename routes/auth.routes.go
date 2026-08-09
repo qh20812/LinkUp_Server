@@ -13,6 +13,7 @@ func RegisterAuthRoutes(router *gin.Engine, authController *controllers.AuthCont
 	{
 		auth.POST("/register", authController.Register)
 		auth.POST("/login", authController.Login)
+		auth.POST("/google", authController.GoogleLogin)
 		auth.POST("/refresh", authController.RefreshToken)
 		auth.POST("/verify-email", emailVerifyController.VerifyEmail)
 		auth.POST("/resend-verification", emailVerifyController.ResendVerification)
