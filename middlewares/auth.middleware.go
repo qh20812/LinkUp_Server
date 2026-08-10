@@ -1,14 +1,15 @@
 package middlewares
 
 import (
-    "net/http"
-    "strings"
+	"net/http"
+	"strings"
+	"time"
 
-    "github.com/gin-gonic/gin"
-    "gorm.io/gorm"
-    "linkup/config"
-    "linkup/models"
-    "linkup/utils"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"linkup/config"
+	"linkup/models"
+	"linkup/utils"
 )
 
 func AuthMiddleware(env config.Env, db *gorm.DB) gin.HandlerFunc {
@@ -69,10 +70,31 @@ func AuthMiddleware(env config.Env, db *gorm.DB) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		// Per-session revocation: tokens bound to a session carry the session id
+		// (jti). Legacy tokens (no jti) skip this check but still expire via the
+		// token_version check above.
+		if claims.ID != "" {
+			var session models.UserSession
+			if err := db.WithContext(c.Request.Context()).
+				Select("revoked_at, expires_at").
+				Where("id = ? AND user_id = ?", claims.ID, claims.UserID).
+				First(&session).Error; err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "phiên đăng nhập đã hết hạn"})
+				c.Abort()
+				return
+			}
+			if session.RevokedAt != nil || time.Now().UTC().After(session.ExpiresAt) {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "phiên đăng nhập đã hết hạn"})
+				c.Abort()
+				return
+			}
+		}
 	}
 
         c.Set("userID", claims.UserID)
         c.Set("email", claims.Email)
+        c.Set("sessionID", claims.ID)
         c.Next()
     }
 }

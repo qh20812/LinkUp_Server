@@ -86,6 +86,8 @@ func main() {
 			&models.AdMedia{},
 			&models.AdAnalytics{},
 			&models.SystemConfig{},
+			&models.UserSetting{},
+			&models.UserSession{},
 		)
 		if err != nil {
 			log.Printf("Warning: Migration failed: %v", err)
@@ -133,6 +135,10 @@ func main() {
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
 
+		// ===== KHỞI TẠO TẦNG USER SESSION (QUẢN LÝ PHIÊN ĐĂNG NHẬP) =====
+		userSessionRepository := repository.NewUserSessionRepository(gormDB)
+		authService.SetSessionRepository(userSessionRepository)
+
 		// ===== KHỞI TẠO TẦNG EMAIL VERIFICATION =====
 		emailVerifRepository := repository.NewEmailVerificationRepository(gormDB)
 		emailVerifService := services.NewEmailVerificationService(emailVerifRepository, authRepository, adminSettingsRepository, env)
@@ -155,6 +161,12 @@ func main() {
 		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, adminSettingsRepository, authValidation, env)
 		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
 		routes.RegisterPasswordResetRoutes(router, passwordResetController)
+
+		// ===== KHỞI TẠO TẦNG USER SETTINGS (CÀI ĐẶT & QUYỀN RIÊNG TƯ) =====
+		userSettingsRepository := repository.NewUserSettingsRepository(gormDB)
+		userSettingsService := services.NewUserSettingsService(userSettingsRepository, userSessionRepository, authRepository, env)
+		userSettingsController := controllers.NewUserSettingsController(userSettingsService)
+		routes.RegisterSettingsRoutes(router, userSettingsController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG NOTIFICATION (HỖ TRỢ THÔNG BÁO TIN NHẮN/LIKE/COMMENT) =====
 		notificationRepository := repository.NewNotificationRepository(gormDB)
@@ -236,7 +248,7 @@ func main() {
 		friendRepository = repository.NewFriendRepository(gormDB)
 		inviteRepository := repository.NewChatInvitationRepository(gormDB)
 		chatValidation := validations.NewChatValidation()
-		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, notificationService, chatValidation)
+		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, userSettingsRepository, notificationService, chatValidation)
 		chatHub := ws.NewHub()
 		go chatHub.Run()
 		chatController := controllers.NewChatController(chatHub, chatService, env)

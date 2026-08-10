@@ -38,6 +38,7 @@ type Post struct {
 
 	IsLiked     bool `json:"is_liked" gorm:"->"`
 	IsSaved     bool `json:"is_saved" gorm:"->"`
+	IsShared    bool `json:"is_shared" gorm:"->"`
 	IsFollowing bool `json:"is_following" gorm:"->"`
 
 	SavedAt    *time.Time `json:"saved_at,omitempty" gorm:"->"`

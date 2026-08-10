@@ -83,6 +83,45 @@ func (r *AuthRepository) FindByIDs(ctx context.Context, userIDs []string) ([]mod
 	return users, nil
 }
 
+// PasswordHistoryLimit is how many past passwords are kept to reject reuse.
+const PasswordHistoryLimit = 5
+
+// UpdatePasswordWithHistory changes the user's password inside a single
+// transaction: it records the previous hash in password_histories, updates the
+// account hash, then prunes history to the most recent PasswordHistoryLimit rows.
+func (r *AuthRepository) UpdatePasswordWithHistory(ctx context.Context, userID string, oldHash string, newHash string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		history := &models.PasswordHistory{
+			ID:           utils.GenerateUUID(),
+			UserID:       userID,
+			PasswordHash: oldHash,
+			CreatedAt:    time.Now(),
+		}
+		if err := tx.Create(history).Error; err != nil {
+			return fmt.Errorf("save password history: %w", err)
+		}
+
+		if err := tx.Model(&models.User{}).Where("id = ?", userID).Update("password_hash", newHash).Error; err != nil {
+			return fmt.Errorf("update password: %w", err)
+		}
+
+		// MySQL 8.0 window function: delete rows ranked beyond the newest `keep`.
+		if err := tx.Exec(`
+			DELETE ph FROM password_histories ph
+			JOIN (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) AS rn
+				FROM password_histories
+				WHERE user_id = ?
+			) r ON r.id = ph.id
+			WHERE ph.user_id = ? AND r.rn > ?`,
+			userID, userID, PasswordHistoryLimit).Error; err != nil {
+			return fmt.Errorf("prune password history: %w", err)
+		}
+
+		return nil
+	})
+}
+
 // SavePasswordHistory lưu lịch sử mật khẩu của người dùng vào cơ sở dữ liệu.
 func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string, hashedPassword string) error {
 	history := &models.PasswordHistory{
@@ -313,6 +352,40 @@ func (r *AuthRepository) LinkGoogleAccount(ctx context.Context, userID string, g
 		Where("id = ? AND email_verified_at IS NULL", userID).
 		Update("email_verified_at", verifiedAt).Error; err != nil {
 		return fmt.Errorf("mark google email verified: %w", err)
+	}
+	return nil
+}
+
+// Deactivate marks the account as self-deactivated: status = suspended,
+// self_deactivated_at = now, and invalidates all existing tokens.
+func (r *AuthRepository) Deactivate(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"status":              models.UserStatusSuspended,
+			"self_deactivated_at": time.Now().UTC(),
+			"token_version":       gorm.Expr("token_version + 1"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("deactivate user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// Reactivate restores a self-deactivated account (status = active, clears the
+// self-deactivation marker). Only valid for accounts with self_deactivated_at set.
+func (r *AuthRepository) Reactivate(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ? AND self_deactivated_at IS NOT NULL", userID).
+		Updates(map[string]interface{}{
+			"status":              models.UserStatusActive,
+			"self_deactivated_at": nil,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("reactivate user: %w", result.Error)
 	}
 	return nil
 }

@@ -147,7 +147,7 @@ func (r *PostRepository) BatchCountShares(ctx context.Context, postIDs []string)
 
 type boolRow struct {
 	PostID string
-	Exists bool
+	Found  bool
 }
 
 func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, postIDs []string) (map[string]bool, error) {
@@ -157,7 +157,7 @@ func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, pos
 	var rows []boolRow
 	err := r.db.WithContext(ctx).
 		Table("post_reactions").
-		Select("post_id, true AS exists").
+		Select("post_id, true AS found").
 		Where("post_id IN ? AND user_id = ?", postIDs, userID).
 		Find(&rows).Error
 	if err != nil {
@@ -165,7 +165,7 @@ func (r *PostRepository) BatchCheckLiked(ctx context.Context, userID string, pos
 	}
 	m := make(map[string]bool, len(postIDs))
 	for _, row := range rows {
-		m[row.PostID] = row.Exists
+		m[row.PostID] = row.Found
 	}
 	return m, nil
 }
@@ -177,7 +177,7 @@ func (r *PostRepository) BatchCheckSaved(ctx context.Context, userID string, pos
 	var rows []boolRow
 	err := r.db.WithContext(ctx).
 		Table("bookmarks").
-		Select("post_id, true AS exists").
+		Select("post_id, true AS found").
 		Where("post_id IN ? AND user_id = ?", postIDs, userID).
 		Find(&rows).Error
 	if err != nil {
@@ -185,7 +185,27 @@ func (r *PostRepository) BatchCheckSaved(ctx context.Context, userID string, pos
 	}
 	m := make(map[string]bool, len(postIDs))
 	for _, row := range rows {
-		m[row.PostID] = row.Exists
+		m[row.PostID] = row.Found
+	}
+	return m, nil
+}
+
+func (r *PostRepository) BatchCheckShared(ctx context.Context, userID string, postIDs []string) (map[string]bool, error) {
+	if len(postIDs) == 0 {
+		return map[string]bool{}, nil
+	}
+	var rows []boolRow
+	err := r.db.WithContext(ctx).
+		Table("post_shares").
+		Select("post_id, true AS found").
+		Where("post_id IN ? AND user_id = ?", postIDs, userID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]bool, len(postIDs))
+	for _, row := range rows {
+		m[row.PostID] = row.Found
 	}
 	return m, nil
 }
@@ -260,6 +280,16 @@ func (r *PostRepository) ListEmojis(ctx context.Context) ([]models.Emoji, error)
 
 func (r *PostRepository) CreateShare(ctx context.Context, share models.PostShare) error {
 	return r.db.WithContext(ctx).Create(&share).Error
+}
+
+// Tìm share của một user cho một bài viết cụ thể
+func (r *PostRepository) FindShareByUser(ctx context.Context, userID, postID string) (*models.PostShare, error) {
+	var share models.PostShare
+	err := r.db.WithContext(ctx).Where("user_id = ? AND post_id = ?", userID, postID).First(&share).Error
+	if err != nil {
+		return nil, err
+	}
+	return &share, nil
 }
 
 func (r *PostRepository) CreateComment(ctx context.Context, comment *models.Comment) error {

@@ -16,12 +16,23 @@ type TokenClaims struct {
 }
 
 func GenerateTokenPair(secret string, userID string, email string, role string, tokenVersion int, accessTTL, refreshTTL time.Duration) (string, string, error) {
-	accessToken, err := generateToken(secret, userID, email, role, tokenVersion, "access", accessTTL)
+	return generateTokenPair(secret, userID, email, role, tokenVersion, "", accessTTL, refreshTTL)
+}
+
+// GenerateTokenPairWithSession issues an access/refresh pair bound to a user
+// session. The session ID is embedded as the JWT `jti` claim, which the auth
+// middleware uses to enforce per-session revocation (list/revoke devices).
+func GenerateTokenPairWithSession(secret string, userID string, email string, role string, tokenVersion int, sessionID string, accessTTL, refreshTTL time.Duration) (string, string, error) {
+	return generateTokenPair(secret, userID, email, role, tokenVersion, sessionID, accessTTL, refreshTTL)
+}
+
+func generateTokenPair(secret string, userID string, email string, role string, tokenVersion int, sessionID string, accessTTL, refreshTTL time.Duration) (string, string, error) {
+	accessToken, err := generateToken(secret, userID, email, role, tokenVersion, "access", sessionID, accessTTL)
 	if err != nil {
 		return "", "", err
 	}
 
-	refreshToken, err := generateToken(secret, userID, email, role, tokenVersion, "refresh", refreshTTL)
+	refreshToken, err := generateToken(secret, userID, email, role, tokenVersion, "refresh", sessionID, refreshTTL)
 	if err != nil {
 		return "", "", err
 	}
@@ -30,7 +41,7 @@ func GenerateTokenPair(secret string, userID string, email string, role string, 
 }
 
 func GenerateToken(secret string, userID string, email string, role string, tokenVersion int, tokenType string, ttl time.Duration) (string, error) {
-	return generateToken(secret, userID, email, role, tokenVersion, tokenType, ttl)
+	return generateToken(secret, userID, email, role, tokenVersion, tokenType, "", ttl)
 }
 
 func ParseToken(secret string, tokenString string) (*jwt.Token, error) {
@@ -39,15 +50,16 @@ func ParseToken(secret string, tokenString string) (*jwt.Token, error) {
 	})
 }
 
-func generateToken(secret string, userID string, email string, role string, tokenVersion int, tokenType string, ttl time.Duration) (string, error) {
+func generateToken(secret string, userID string, email string, role string, tokenVersion int, tokenType string, sessionID string, ttl time.Duration) (string, error) {
 	now := time.Now().UTC()
 	claims := TokenClaims{
-		UserID:    userID,
-		Email:     email,
-		Role:      role,
-		TokenType: tokenType,
+		UserID:       userID,
+		Email:        email,
+		Role:         role,
+		TokenType:    tokenType,
 		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        sessionID,
 			Subject:   email,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
