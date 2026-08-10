@@ -205,10 +205,10 @@ func (r *adRepositoryImpl) ListAds(ctx context.Context, keyword, status string, 
 
 	query := `
 		SELECT a.id, a.title, a.content, a.partner_id, a.target_url, a.status, a.budget,
-		       a.media_id, a.started_at, a.expires_at, a.created_at,
+		       a.started_at, a.expires_at, a.created_at,
 		       u.username AS partner_name,
 		       COALESCE(p.display_name, u.username) AS partner_display_name,
-		       COALESCE((SELECT file_uri FROM media m WHERE m.id = a.media_id LIMIT 1), '') AS media_uri,
+		       COALESCE((SELECT am.url FROM ad_media am WHERE am.ad_id = a.id ORDER BY am.sort_order, am.created_at LIMIT 1), '') AS media_uri,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression') AS impressions,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'click') AS clicks,
 		       ROUND(

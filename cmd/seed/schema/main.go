@@ -229,23 +229,28 @@ func Run(env config.Env) error {
 			INDEX idx_media_post_id (post_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 7. Depends on media
+		// 7. Depends on users (ads không còn media_id — media chuyển sang ad_media)
 		`CREATE TABLE IF NOT EXISTS ads (
             id VARCHAR(36) PRIMARY KEY,
             partner_id VARCHAR(36) NOT NULL,
-            title VARCHAR(255) NOT NULL,
-            content TEXT,
-            media_id VARCHAR(36) NULL,
-            target_url VARCHAR(512) NOT NULL DEFAULT '',
-		status VARCHAR(20) NOT NULL DEFAULT 'public',
+            package_id VARCHAR(36) NULL,
+            title VARCHAR(100) NOT NULL,
+            content TEXT NOT NULL,
+            format VARCHAR(20) NOT NULL DEFAULT 'image',
+            target_url TEXT NOT NULL,
+		status VARCHAR(20) NOT NULL DEFAULT 'active',
             budget DOUBLE NOT NULL DEFAULT 0,
+            daily_budget DOUBLE NOT NULL DEFAULT 0,
+            total_spent DOUBLE NOT NULL DEFAULT 0,
+            cpm_price DOUBLE NOT NULL DEFAULT 0,
+            cpc_price DOUBLE NOT NULL DEFAULT 0,
+            max_impressions INT NOT NULL DEFAULT 0,
             started_at DATETIME NULL,
             expires_at DATETIME NULL,
             created_at DATETIME NOT NULL,
-            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
             FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE CASCADE,
             INDEX idx_ads_partner_id (partner_id),
-            INDEX idx_ads_media_id (media_id),
+            INDEX idx_ads_package_id (package_id),
             INDEX idx_ads_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -959,7 +964,14 @@ func Run(env config.Env) error {
 
 	// Self deactivation column (user deactivates own account; reactivates on login)
 	if err := addColumnIfMissing(database, "users", "self_deactivated_at", "DATETIME NULL"); err != nil {
-		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)
+		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)}
+	// Google OAuth column
+	if err := addColumnIfMissing(database, "users", "google_id", "VARCHAR(255) NULL"); err != nil {
+		return fmt.Errorf("schema: add users.google_id: %w", err)
+	}
+	if err := addIndexIfMissing(database, "users", "idx_users_google_id",
+		"UNIQUE INDEX idx_users_google_id (google_id)"); err != nil {
+		return fmt.Errorf("schema: add users.google_id index: %w", err)
 	}
 
 	return nil

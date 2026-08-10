@@ -49,7 +49,9 @@ func main() {
 		log.Println("DB connection: success")
 		defer database.Close()
 
-		gormDB, err = gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{})
+		gormDB, err = gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{
+			DisableForeignKeyConstraintWhenMigrating: true,
+		})
 		if err != nil {
 			log.Fatalf("failed to init gorm: %v", err)
 		}
@@ -69,22 +71,10 @@ func main() {
 
 	// 5. Nếu kết nối cơ sở dữ liệu thành công, bắt đầu khởi tạo cấu trúc dự án qua GORM
 	if gormDB != nil {
-		// ====================================================================
-		// TỰ ĐỘNG MIGRATION CHO STORIES & ADVERTISEMENT
-		// ====================================================================
-
-		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
-			_ = gormDB.Exec("ALTER TABLE partner_subscriptions DROP FOREIGN KEY fk_partner_subscriptions_package")
-		}
-
-		if gormDB.Migrator().HasTable(&models.AdPackage{}) {
-			_ = gormDB.Exec("ALTER TABLE ad_packages MODIFY COLUMN id VARCHAR(36) NOT NULL")
-		}
-
-		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
-			_ = gormDB.Exec("ALTER TABLE partner_subscriptions MODIFY COLUMN package_id VARCHAR(36) NOT NULL")
-		}
-
+		// Bảng do GORM tạo (ad_packages, partner_subscriptions, story_views, ...) mặc định
+		// thừa hưởng collation của DB (utf8mb4_0900_ai_ci) trong khi bảng seed dùng
+		// utf8mb4_unicode_ci → khi GORM tự tạo FK lệch collation sẽ báo Error 3780.
+		// Vì vậy: tắt FK trong AutoMigrate, tự đồng bộ collation toàn bảng, rồi tạo lại FK.
 		log.Println("Running database auto-migration...")
 		err = gormDB.AutoMigrate(
 			&models.User{},
@@ -102,6 +92,18 @@ func main() {
 		if err != nil {
 			log.Printf("Warning: Migration failed: %v", err)
 		}
+
+		// Đồng bộ collation toàn bảng GORM về utf8mb4_unicode_ci (idempotent).
+		// “ads” do seed tạo đã là unicode_ci nhưng chạy lại cũng an toàn.
+		for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts"} {
+			if gormDB.Migrator().HasTable(table) {
+				_ = gormDB.Exec("ALTER TABLE " + table + " CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+			}
+		}
+
+		// Tạo lại các FK liên quan ads sau khi collation đã đồng nhất (idempotent).
+		ensureForeignKey(gormDB, "ads", "fk_ads_package", "package_id", "ad_packages", "id")
+		ensureForeignKey(gormDB, "partner_subscriptions", "fk_partner_subscriptions_package", "package_id", "ad_packages", "id")
 
 		// Tự động kiểm tra và đồng bộ lại tất cả các cột của struct Ad vào MySQL
 		// (Giải quyết trường hợp DB đã tạo bảng cũ nhưng thiếu cột mới)
@@ -142,6 +144,13 @@ func main() {
 		emailVerifService := services.NewEmailVerificationService(emailVerifRepository, authRepository, adminSettingsRepository, env)
 		emailVerifController := controllers.NewEmailVerificationController(emailVerifService, authValidation)
 		authService.SetEmailVerificationService(emailVerifService)
+
+		// ===== KHỞI TẠO GOOGLE SIGN-IN (ID-token verification) =====
+		if googleVerifier, gerr := services.NewGoogleIDTokenVerifier(context.Background(), env.GoogleClientIDs); gerr != nil {
+			log.Printf("Google auth: init failed (%v)", gerr)
+		} else {
+			authService.SetGoogleIDTokenVerifier(googleVerifier)
+		}
 
 		routes.RegisterAuthRoutes(router, authController, emailVerifController, env, gormDB)
 
@@ -384,4 +393,23 @@ func seedAdPackages(db *gorm.DB) {
 		db.Create(&pkg)
 	}
 	log.Println("[Seed] Đã tạo thành công 3 gói quảng cáo mẫu!")
+}
+
+// ensureForeignKey tạo FK nếu chưa tồn tại (idempotent). Kiểm tra
+// information_schema trước, tránh lỗi duplicate khi chạy lại server.
+func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn string) {
+	type row struct {
+		Count int
+	}
+	var r row
+	err := db.Raw(`SELECT COUNT(*) AS count FROM information_schema.REFERENTIAL_CONSTRAINTS
+		WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = ? AND TABLE_NAME = ?`,
+		fkName, table).Scan(&r).Error
+	if err != nil || r.Count > 0 {
+		return
+	}
+	if err := db.Exec("ALTER TABLE "+table+" ADD CONSTRAINT "+fkName+
+		" FOREIGN KEY ("+column+") REFERENCES "+refTable+"("+refColumn+")").Error; err != nil {
+		log.Printf("Warning: ensure FK %s: %v", fkName, err)
+	}
 }

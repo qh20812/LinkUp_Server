@@ -89,7 +89,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i := 0; i < 30; i++ {
 		postID := internal.UUID()
-		userID := state.UserIDs[i%len(state.UserIDs)]
+		userID := state.UserIDs[internal.ContentIndex(i)]
 		title := postTitles[i%len(postTitles)]
 		body := postContents[i%len(postContents)]
 		extra := postBodies[i%len(postBodies)]
@@ -131,7 +131,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	for i := 0; i < 60; i++ {
 		commentID := internal.UUID()
-		userID := state.UserIDs[i%len(state.UserIDs)]
+		userID := state.UserIDs[internal.ContentIndex(i)]
 		postID := state.PostIDs[i%len(state.PostIDs)]
 		var parentID *string
 		if i >= 30 && i%3 == 0 {
@@ -164,8 +164,9 @@ func Run(env config.Env, state *internal.SeedState) error {
 		if i >= 25 {
 			tagType = "mention"
 			commentID = internal.Ptr(state.CommentIDs[i%len(state.CommentIDs)])
-			targetUserID = internal.Ptr(state.UserIDs[i%len(state.UserIDs)])
-			name = "@" + pick([]string{"john_doe", "jane_smith", "alice_wonder", "bob_builder", "charlie_dev"})
+			mentionIdx := internal.ContentIndex(i)
+			targetUserID = internal.Ptr(state.UserIDs[mentionIdx])
+			name = "@" + internal.SeedUsers[mentionIdx].Username
 		}
 
 		if err := internal.Exec(database,
@@ -178,7 +179,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	reactionSeen := map[string]bool{}
 	for i := 0; i < 80; i++ {
-		userID := state.UserIDs[randRange(0, len(state.UserIDs)-1)]
+		userID := state.UserIDs[randRange(2, len(state.UserIDs)-1)]
 		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
 		emojiID := state.EmojiIDs[randRange(0, len(state.EmojiIDs)-1)]
 		key := userID + "|" + postID + "|" + emojiID
@@ -197,8 +198,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	followSeen := map[string]bool{}
 	for i := 0; i < 40; i++ {
-		followerIdx := randRange(0, len(state.UserIDs)-1)
-		// Loại trừ superadmin (index 0) và admin (index 1) — không ai được follow họ
+		followerIdx := randRange(2, len(state.UserIDs)-1)
+		// Cả follower lẫn following đều là user thường — không ai trong hệ thống role (superadmin/admin)
 		followingIdx := randRange(2, len(state.UserIDs)-1)
 		if followerIdx == followingIdx {
 			continue
@@ -220,8 +221,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 	friendStatuses := []string{"pending", "accepted", "accepted", "accepted", "rejected"}
 	friendSeen := map[string]bool{}
 	for i := 0; i < 15; i++ {
-		senderIdx := randRange(0, len(state.UserIDs)-1)
-		receiverIdx := randRange(0, len(state.UserIDs)-1)
+		senderIdx := randRange(2, len(state.UserIDs)-1)
+		receiverIdx := randRange(2, len(state.UserIDs)-1)
 		if senderIdx == receiverIdx {
 			continue
 		}
@@ -241,8 +242,8 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	blockSeen := map[string]bool{}
 	for i := 0; i < 5; i++ {
-		userIdx := randRange(0, len(state.UserIDs)-1)
-		blockedIdx := randRange(0, len(state.UserIDs)-1)
+		userIdx := randRange(2, len(state.UserIDs)-1)
+		blockedIdx := randRange(2, len(state.UserIDs)-1)
 		if userIdx == blockedIdx {
 			continue
 		}
@@ -262,7 +263,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	bookmarkSeen := map[string]bool{}
 	for i := 0; i < 20; i++ {
-		userID := state.UserIDs[randRange(0, len(state.UserIDs)-1)]
+		userID := state.UserIDs[randRange(2, len(state.UserIDs)-1)]
 		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
 		key := userID + "|" + postID
 		if bookmarkSeen[key] {

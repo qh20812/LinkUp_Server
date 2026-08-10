@@ -16,7 +16,7 @@ const (
 type AdAnalytics struct {
 	ID         string    `json:"id" gorm:"type:varchar(36);primaryKey"`
 	AdID       string    `json:"ad_id" gorm:"type:varchar(36);index"`
-	UserID     *string   `json:"user_id,omitempty" gorm:"index"`
+	UserID     *string   `json:"user_id,omitempty" gorm:"type:varchar(36);index"`
 	ActionType string    `json:"action_type"`
 	IPAddress  string    `json:"ip_address"`
 	CreatedAt  time.Time `json:"created_at"`

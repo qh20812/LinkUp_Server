@@ -327,6 +327,7 @@ func (r *AuthRepository) UpdateEmailVerifiedAtTx(ctx context.Context, tx *gorm.D
 	return nil
 }
 
+<<<<<<< HEAD
 // Deactivate marks the account as self-deactivated: status = suspended,
 // self_deactivated_at = now, and invalidates all existing tokens.
 func (r *AuthRepository) Deactivate(ctx context.Context, userID string) error {
@@ -357,6 +358,33 @@ func (r *AuthRepository) Reactivate(ctx context.Context, userID string) error {
 		})
 	if result.Error != nil {
 		return fmt.Errorf("reactivate user: %w", result.Error)
+=======
+func (r *AuthRepository) FindByGoogleID(ctx context.Context, googleID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by google id: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *AuthRepository) LinkGoogleAccount(ctx context.Context, userID string, googleID string, verifiedAt time.Time) error {
+	res := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id = ? AND google_id IS NULL", userID).
+		Update("google_id", googleID)
+	if res.Error != nil {
+		return fmt.Errorf("link google account: %w", res.Error)
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id = ? AND email_verified_at IS NULL", userID).
+		Update("email_verified_at", verifiedAt).Error; err != nil {
+		return fmt.Errorf("mark google email verified: %w", err)
+>>>>>>> 420275d9434676cbe4e08b2ca05a492b8f82b23c
 	}
 	return nil
 }

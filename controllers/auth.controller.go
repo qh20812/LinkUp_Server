@@ -63,6 +63,26 @@ func (h *AuthController) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+func (h *AuthController) GoogleLogin(c *gin.Context) {
+	var input dto.GoogleLoginInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		return
+	}
+	if input.IDToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id_token không được để trống"})
+		return
+	}
+
+	response, err := h.authService.GoogleLogin(c.Request.Context(), input.IDToken)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
 func (h *AuthController) ChangePassword(c *gin.Context) {
 	userID := c.GetString("userID") //From JWT middlware
 	if userID == "" {

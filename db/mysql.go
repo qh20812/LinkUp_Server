@@ -14,7 +14,7 @@ import (
 func ConnectDb(env config.Env) (*sql.DB, error) {
 
 	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4",
+		"%s:%s@tcp(%s:%d)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",
 		env.DBUser,
 		env.DBPassword,
 		env.DBHost,
