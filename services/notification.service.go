@@ -2,10 +2,10 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -31,7 +31,7 @@ func NewNotificationService(notifRepo *repository.NotificationRepository, prefRe
 func (s *NotificationService) Create(ctx context.Context, receiverID string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string) (*models.Notification, error) {
 	pref, err := s.prefRepo.GetByUserID(ctx, receiverID)
 	if err != nil {
-		return nil, fmt.Errorf("create notification: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
 	}
 
 	if pref != nil && !isNotificationEnabled(pref, notifType) {
@@ -53,7 +53,7 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	}
 
 	if err := s.notifRepo.Create(ctx, notification); err != nil {
-		return nil, fmt.Errorf("create notification: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
 	}
 
 	s.hub.SendToUser(receiverID, ws.OutgoingMessage{
@@ -100,7 +100,7 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 	}
 
 	if err := s.notifRepo.CreateBulk(ctx, notifications); err != nil {
-		return nil, fmt.Errorf("create notifications bulk: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationBulkFailed, err)
 	}
 
 	for i := range notifications {

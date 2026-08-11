@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -381,8 +382,10 @@ func TestJoinChallenge_AlreadyJoined(t *testing.T) {
 	}
 	if err := seed.Service.JoinChallenge(ctx, seed.UserID, challengeID); err == nil {
 		t.Fatal("expected error on second join, got nil")
-	} else if !errors.Is(err, ErrChallengeAlreadyJoined) {
-		t.Errorf("error = %v, want ErrChallengeAlreadyJoined", err)
+	} else {
+		if appErr, ok := errorsapp.IsAppError(err); !ok || appErr.Code != errorsapp.ErrCodeContribAlreadyJoined {
+			t.Errorf("error = %v, want ErrCodeContribAlreadyJoined", err)
+		}
 	}
 }
 
@@ -394,8 +397,8 @@ func TestJoinChallenge_NotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrChallengeNotFound) {
-		t.Errorf("error = %v, want ErrChallengeNotFound", err)
+	if appErr, ok := errorsapp.IsAppError(err); !ok || appErr.Code != errorsapp.ErrCodeContribChallengeNotFound {
+		t.Errorf("error = %v, want ErrCodeContribChallengeNotFound", err)
 	}
 }
 
@@ -422,8 +425,8 @@ func TestJoinChallenge_Inactive(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrChallengeInactive) {
-		t.Errorf("error = %v, want ErrChallengeInactive", err)
+	if appErr, ok := errorsapp.IsAppError(err); !ok || appErr.Code != errorsapp.ErrCodeContribChallengeInactive {
+		t.Errorf("error = %v, want ErrCodeContribChallengeInactive", err)
 	}
 }
 
@@ -450,8 +453,8 @@ func TestJoinChallenge_NotStarted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrChallengeNotStarted) {
-		t.Errorf("error = %v, want ErrChallengeNotStarted", err)
+	if appErr, ok := errorsapp.IsAppError(err); !ok || appErr.Code != errorsapp.ErrCodeContribChallengeNotStarted {
+		t.Errorf("error = %v, want ErrCodeContribChallengeNotStarted", err)
 	}
 }
 
@@ -478,8 +481,8 @@ func TestJoinChallenge_Ended(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrChallengeEnded) {
-		t.Errorf("error = %v, want ErrChallengeEnded", err)
+	if appErr, ok := errorsapp.IsAppError(err); !ok || appErr.Code != errorsapp.ErrCodeContribChallengeEnded {
+		t.Errorf("error = %v, want ErrCodeContribChallengeEnded", err)
 	}
 }
 
@@ -521,8 +524,8 @@ func TestJoinChallenge_ParticipantLimitHit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrChallengeParticipantLimitHit) {
-		t.Errorf("error = %v, want ErrChallengeParticipantLimitHit", err)
+	if appErr, ok := errorsapp.IsAppError(err); !ok || appErr.Code != errorsapp.ErrCodeContribParticipantLimitHit {
+		t.Errorf("error = %v, want ErrCodeContribParticipantLimitHit", err)
 	}
 }
 

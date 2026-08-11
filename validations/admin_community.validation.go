@@ -1,15 +1,15 @@
 package validations
 
-import "errors"
+import errorsapp "linkup/errors"
 
 var (
-	ErrAdminCommunityActionInvalid      = errors.New("hành động moderation không hợp lệ")
-	ErrAdminCommunityReasonRequired     = errors.New("lý do là bắt buộc")
-	ErrAdminCommunityReasonTooShort     = errors.New("lý do phải có ít nhất 10 ký tự")
-	ErrAdminCommunityReasonTooLong      = errors.New("lý do không được vượt quá 1000 ký tự")
-	ErrAdminCommunityTransferSelf       = errors.New("không thể chuyển quyền cho chính mình")
-	ErrAdminCommunityTransferEmpty      = errors.New("người nhận không được để trống")
-	ErrAdminCommunityActionNotAllowed   = errors.New("action không được hỗ trợ cho cộng đồng")
+	ErrAdminCommunityActionInvalid    = errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
+	ErrAdminCommunityReasonRequired   = errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
+	ErrAdminCommunityReasonTooShort   = errorsapp.New(errorsapp.ErrCodeAdminReasonTooShort)
+	ErrAdminCommunityReasonTooLong    = errorsapp.New(errorsapp.ErrCodeAdminReasonTooLong)
+	ErrAdminCommunityTransferSelf     = errorsapp.New(errorsapp.ErrCodeAdminTransferSelf)
+	ErrAdminCommunityTransferEmpty    = errorsapp.New(errorsapp.ErrCodeAdminTransferEmpty)
+	ErrAdminCommunityActionNotAllowed = errorsapp.New(errorsapp.ErrCodeAdminActionNotAllowedComm)
 )
 
 var AllowedCommunityModerationActions = []string{"hide", "unhide", "archive", "warn"}

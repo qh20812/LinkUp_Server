@@ -2,13 +2,13 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"net/mail"
 	"strconv"
 	"strings"
 
 	"linkup/config"
 	"linkup/dto"
+	"linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 )
@@ -48,7 +48,7 @@ func (s *AdminSettingsService) GetSettings(ctx context.Context, adminID string) 
 
 	configs, err := s.repo.GetAll(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("không thể tải cài đặt: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeAdminSettingsLoadFailed, err)
 	}
 
 	settings := make(map[string]string, len(configs))
@@ -67,7 +67,7 @@ func (s *AdminSettingsService) UpdateSettings(ctx context.Context, adminID strin
 	for key, value := range input.Settings {
 		expectedType, ok := allowedSettings[key]
 		if !ok {
-			return fmt.Errorf("cài đặt '%s' không hợp lệ", key)
+			return errors.Newf(errors.ErrCodeAdminInvalidSettingKey, map[string]any{"key": key})
 		}
 		if err := validateSettingValue(key, value, expectedType); err != nil {
 			return err
@@ -80,7 +80,7 @@ func (s *AdminSettingsService) UpdateSettings(ctx context.Context, adminID strin
 
 	if val, ok := input.Settings["maintenance_mode"]; ok && val == "true" && s.authRepo != nil {
 		if err := s.authRepo.IncrementAllTokenVersions(ctx); err != nil {
-			return fmt.Errorf("vô hiệu hóa phiên đăng nhập thất bại: %w", err)
+			return errors.Wrap(errors.ErrCodeAdminSessionsInvalidFailed, err)
 		}
 	}
 
@@ -96,10 +96,10 @@ func (s *AdminSettingsService) ensureSuperAdmin(ctx context.Context, adminID str
 		Where("user_roles.scope_id IS NULL").
 		Scan(&roleName).Error
 	if err != nil || roleName == "" {
-		return fmt.Errorf("không thể xác thực quyền: %w", err)
+		return errors.Wrap(errors.ErrCodeAdminNoAccess, err)
 	}
 	if roleName != string(models.RoleSuperAdmin) {
-		return fmt.Errorf("Bạn không có quyền truy cập trang này")
+		return errors.New(errors.ErrCodeAdminNotSuperadmin)
 	}
 	return nil
 }
@@ -109,48 +109,48 @@ func validateSettingValue(key, value, expectedType string) error {
 	case "int":
 		num, err := strconv.Atoi(value)
 		if err != nil {
-			return fmt.Errorf("'%s' phải là số nguyên", key)
+			return errors.Newf(errors.ErrCodeAdminInvalidInt, map[string]any{"key": key})
 		}
 		switch key {
 		case "password_min_length":
 			if num < 8 {
-				return fmt.Errorf("'password_min_length' phải >= 8")
+				return errors.Newf(errors.ErrCodeAdminValueTooLow, map[string]any{"key": key, "min": 8})
 			}
 			if num > 50 {
-				return fmt.Errorf("'password_min_length' không được vượt quá 50")
+				return errors.Newf(errors.ErrCodeAdminValueTooHigh, map[string]any{"key": key, "max": 50})
 			}
 		case "max_login_attempts":
 			if num < 1 {
-				return fmt.Errorf("'max_login_attempts' phải >= 1")
+				return errors.Newf(errors.ErrCodeAdminValueTooLow, map[string]any{"key": key, "min": 1})
 			}
 			if num > 10 {
-				return fmt.Errorf("'max_login_attempts' không được vượt quá 10")
+				return errors.Newf(errors.ErrCodeAdminValueTooHigh, map[string]any{"key": key, "max": 10})
 			}
 		case "jwt_expiry_minutes":
 			if num < 1 {
-				return fmt.Errorf("'jwt_expiry_minutes' phải >= 1")
+				return errors.Newf(errors.ErrCodeAdminValueTooLow, map[string]any{"key": key, "min": 1})
 			}
 			if num > 60 {
-				return fmt.Errorf("'jwt_expiry_minutes' không được vượt quá 60")
+				return errors.Newf(errors.ErrCodeAdminValueTooHigh, map[string]any{"key": key, "max": 60})
 			}
 		case "refresh_token_expiry_days":
 			if num < 1 {
-				return fmt.Errorf("'refresh_token_expiry_days' phải >= 1")
+				return errors.Newf(errors.ErrCodeAdminValueTooLow, map[string]any{"key": key, "min": 1})
 			}
 			if num > 30 {
-				return fmt.Errorf("'refresh_token_expiry_days' không được vượt quá 30")
+				return errors.Newf(errors.ErrCodeAdminValueTooHigh, map[string]any{"key": key, "max": 30})
 			}
 		}
 	case "bool":
 		if value != "true" && value != "false" {
-			return fmt.Errorf("'%s' phải là 'true' hoặc 'false'", key)
+			return errors.Newf(errors.ErrCodeAdminInvalidBool, map[string]any{"key": key})
 		}
 	case "email":
 		if strings.TrimSpace(value) == "" {
 			return nil
 		}
 		if _, err := mail.ParseAddress(value); err != nil {
-			return fmt.Errorf("'%s' không phải email hợp lệ", key)
+			return errors.Newf(errors.ErrCodeAdminInvalidEmail, map[string]any{"key": key})
 		}
 	}
 	return nil

@@ -37,7 +37,7 @@ func TestValidatePolicyInput(t *testing.T) {
 				TopContributorThreshold:     2500,
 				ModeratorPromotionThreshold: 5000,
 			},
-			wantErr: "trọng số bài viết phải từ 0 đến 100",
+			wantErr: "Trọng số bài viết phải từ 0 đến 100",
 		},
 		{
 			name: "threshold order invalid",
@@ -49,7 +49,7 @@ func TestValidatePolicyInput(t *testing.T) {
 				TopContributorThreshold:     5000,
 				ModeratorPromotionThreshold: 2500,
 			},
-			wantErr: "ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor",
+			wantErr: "Ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor",
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestValidateCreateChallenge(t *testing.T) {
 				StartDate:     "2026-09-01T00:00:00Z",
 				EndDate:       "2026-09-07T00:00:00Z",
 			},
-			wantErr: "hashtag phải bắt đầu bằng #",
+			wantErr: "Hashtag phải bắt đầu bằng #",
 		},
 		{
 			name: "end before start",
@@ -115,7 +115,7 @@ func TestValidateCreateChallenge(t *testing.T) {
 				StartDate:     "2026-09-10T00:00:00Z",
 				EndDate:       "2026-09-03T00:00:00Z",
 			},
-			wantErr: "ngày kết thúc phải sau ngày bắt đầu",
+			wantErr: "Ngày kết thúc phải sau ngày bắt đầu",
 		},
 	}
 

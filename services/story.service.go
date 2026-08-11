@@ -2,8 +2,8 @@ package services
 
 import (
 	"context"
-	"errors"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"mime/multipart"
@@ -47,7 +47,7 @@ func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeade
 		} else if ext == ".mp4" || ext == ".mov" {
 			mediaType = models.StoryMediaTypeVideo
 		} else {
-			return nil, errors.New("định dạng file không hỗ trợ, chỉ nhận ảnh (jpg, png) hoặc video (mp4, mov)")
+			return nil, errorsapp.New(errorsapp.ErrCodeStoryInvalidFormat)
 		}
 
 		// Upload file qua MediaService
@@ -59,7 +59,7 @@ func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeade
 	} else {
 		// Trường hợp KHÔNG CÓ file, bắt buộc phải có caption (story dạng text)
 		if strings.TrimSpace(caption) == "" {
-			return nil, errors.New("story phải có hình ảnh, video hoặc nội dung chữ (caption)")
+			return nil, errorsapp.New(errorsapp.ErrCodeStoryContentRequired)
 		}
 		mediaType = ""
 	}
@@ -108,7 +108,7 @@ func (s *storyService) GetHomeStories() ([]dto.StoryResponse, error) {
 func (s *storyService) ViewStory(storyID, viewerID string) (*models.Story, error) {
 	story, err := s.repo.FindByID(storyID)
 	if err != nil {
-		return nil, errors.New("không tìm thấy bản tin (story) này")
+		return nil, errorsapp.New(errorsapp.ErrCodeStoryNotFound)
 	}
 
 	// Nếu người xem không phải chủ story
@@ -134,18 +134,18 @@ func (s *storyService) ViewStory(storyID, viewerID string) (*models.Story, error
 func (s *storyService) InteractWithStory(storyID string, userID string, req dto.InteractStoryRequest) error {
 	_, err := s.repo.FindByID(storyID)
 	if err != nil {
-		return errors.New("không tìm thấy bản tin để tương tác")
+		return errorsapp.New(errorsapp.ErrCodeStoryInteractNotFound)
 	}
 
 	if req.Type == "react" {
 		if req.EmojiID == "" {
-			return errors.New("emoji_id không được để trống khi thực hiện thả cảm xúc")
+			return errorsapp.New(errorsapp.ErrCodeStoryEmojiIDRequired)
 		}
 
 		existingReact, err := s.repo.FindReactByUser(storyID, userID)
 		if err == nil && existingReact != nil {
 			if existingReact.ClickCount >= 5 {
-				return errors.New("bạn đã đạt giới hạn tối đa 5 lần biểu cảm cho story này")
+				return errorsapp.New(errorsapp.ErrCodeStoryReactLimitHit)
 			}
 			existingReact.ClickCount++
 			existingReact.EmojiID = &req.EmojiID
@@ -154,7 +154,7 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 
 		exists, _ := s.repo.CheckEmojiExists(req.EmojiID)
 		if !exists {
-			return errors.New("mã hiệu ứng emoji không tồn tại trong hệ thống")
+			return errorsapp.New(errorsapp.ErrCodeStoryEmojiNotFound)
 		}
 
 		interact := &models.StoryInteract{
@@ -168,7 +168,7 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 	}
 
 	if req.Content == "" && req.Type == "reply" {
-		return errors.New("nội dung tin nhắn phản hồi không thể để trống")
+		return errorsapp.New(errorsapp.ErrCodeStoryReplyEmpty)
 	}
 
 	interact := &models.StoryInteract{
@@ -183,11 +183,11 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 func (s *storyService) GetAnalytics(storyID, userID string) (*dto.StoryAnalyticsResponse, error) {
 	story, err := s.repo.FindByID(storyID)
 	if err != nil {
-		return nil, errors.New("không tìm thấy bản tin")
+		return nil, errorsapp.New(errorsapp.ErrCodeStoryNotFound)
 	}
 
 	if story.UserID != userID {
-		return nil, errors.New("bạn không có quyền truy cập dữ liệu phân tích của story này")
+		return nil, errorsapp.New(errorsapp.ErrCodeStoryAnalyticsForbidden)
 	}
 
 	views, _ := s.repo.CountViews(storyID)

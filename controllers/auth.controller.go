@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"linkup/validations"
 )
@@ -22,18 +23,18 @@ func NewAuthController(authService *services.AuthService, validation *validation
 func (h *AuthController) Register(c *gin.Context) {
 	var input dto.RegisterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := h.validation.ValidateRegisterInput(input.DisplayName, input.Email, input.Password); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	response, err := h.authService.Register(c.Request.Context(), input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -43,12 +44,12 @@ func (h *AuthController) Register(c *gin.Context) {
 func (h *AuthController) Login(c *gin.Context) {
 	var input dto.LoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := h.validation.ValidateLoginInput(input.Email, input.Password); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -56,7 +57,7 @@ func (h *AuthController) Login(c *gin.Context) {
 
 	response, err := h.authService.Login(c.Request.Context(), input, deviceName, ipAddress, userAgent)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusUnauthorized, err)
 		return
 	}
 
@@ -66,17 +67,17 @@ func (h *AuthController) Login(c *gin.Context) {
 func (h *AuthController) GoogleLogin(c *gin.Context) {
 	var input dto.GoogleLoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 	if input.IDToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id_token không được để trống"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidIDToken))
 		return
 	}
 
 	response, err := h.authService.GoogleLogin(c.Request.Context(), input.IDToken)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusUnauthorized, err)
 		return
 	}
 
@@ -84,20 +85,20 @@ func (h *AuthController) GoogleLogin(c *gin.Context) {
 }
 
 func (h *AuthController) ChangePassword(c *gin.Context) {
-	userID := c.GetString("userID") //From JWT middlware
+	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	var input dto.ChangePasswordInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := h.authService.ChangePassword(c.Request.Context(), userID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -107,7 +108,7 @@ func (h *AuthController) ChangePassword(c *gin.Context) {
 func (h *AuthController) RefreshToken(c *gin.Context) {
 	var input dto.RefreshTokenInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -115,7 +116,7 @@ func (h *AuthController) RefreshToken(c *gin.Context) {
 
 	response, err := h.authService.RefreshToken(c.Request.Context(), input, deviceName, ipAddress, userAgent)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusUnauthorized, err)
 		return
 	}
 
@@ -140,12 +141,12 @@ func clientDeviceInfo(c *gin.Context) (deviceName, ipAddress, userAgent string) 
 func (h *AuthController) Logout(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	if err := h.authService.Logout(c.Request.Context(), userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "đăng xuất thất bại"})
+		errorsapp.RespondError(c, http.StatusInternalServerError, errorsapp.New(errorsapp.ErrCodeLogoutFailed))
 		return
 	}
 

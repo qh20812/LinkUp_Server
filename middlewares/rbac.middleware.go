@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"linkup/errors"
 	"linkup/models"
 	"linkup/services"
 	"net/http"
@@ -13,7 +14,7 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("userID")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeRbacAuthRequired))
 			c.Abort()
 			return
 		}
@@ -28,14 +29,13 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 			Scan(&roleNameStr).Error
 
 		if err != nil || roleNameStr == "" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied - Platform role not found"})
+			errors.RespondError(c, http.StatusForbidden, errors.New(errors.ErrCodeRbacRoleNotFound))
 			c.Abort()
 			return
 		}
 
 		userRole := models.RoleName(roleNameStr)
 
-		// Kiểm tra xem role của user có nằm trong danh sách được phép không
 		isAllowed := false
 		for _, role := range allowedRoles {
 			if userRole == role {
@@ -45,7 +45,7 @@ func RequireRoles(db *gorm.DB, allowedRoles ...models.RoleName) gin.HandlerFunc 
 		}
 
 		if isAllowed == false {
-			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to access this resource"})
+			errors.RespondError(c, http.StatusForbidden, errors.New(errors.ErrCodeRbacPermissionDenied))
 			c.Abort()
 			return
 		}
@@ -63,7 +63,7 @@ func RequireContributionLevel(db *gorm.DB, threshold int) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("userID")
 		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeRbacAuthRequired))
 			c.Abort()
 			return
 		}
@@ -71,7 +71,7 @@ func RequireContributionLevel(db *gorm.DB, threshold int) gin.HandlerFunc {
 
 		communityID := c.Param("communityID")
 		if communityID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing community ID"})
+			errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeRbacMissingCommunityID))
 			c.Abort()
 			return
 		}
@@ -82,13 +82,13 @@ func RequireContributionLevel(db *gorm.DB, threshold int) gin.HandlerFunc {
 			Where("community_id = ? AND user_id = ?", communityID, userID).
 			Scan(&score).Error
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check contribution level"})
+			errors.RespondError(c, http.StatusInternalServerError, errors.New(errors.ErrCodeRbacContributionCheckFailed))
 			c.Abort()
 			return
 		}
 
 		if score < threshold {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Điểm đóng góp chưa đủ để thực hiện hành động này"})
+			errors.RespondError(c, http.StatusForbidden, errors.New(errors.ErrCodeRbacContributionInsufficient))
 			c.Abort()
 			return
 		}
@@ -118,31 +118,28 @@ func CheckAdOwnership(db *gorm.DB, adService services.AdService) gin.HandlerFunc
 			userRole = models.RoleName(roleVal.(string))
 		}
 
-		// Nếu là ADMIN hoặc SUPER_ADMIN thì được quyền đi tiếp (Bypass)
 		if userRole == models.RoleSuperAdmin || userRole == models.RoleAdmin {
 			c.Next()
 			return
 		}
 
-		// Nếu là PARTNER, bắt đầu kiểm tra chủ sở hữu của bản ghi quảng cáo
 		if userRole == models.RolePartner {
 			adID := c.Param("id")
 			if adID == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Missing ad ID"})
+				errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeRbacMissingAdID))
 				c.Abort()
 				return
 			}
 
 			ad, err := adService.GetAdByID(adID)
 			if err != nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Advertisement not found"})
+				errors.RespondError(c, http.StatusNotFound, errors.New(errors.ErrCodeRbacAdNotFound))
 				c.Abort()
 				return
 			}
 
-			// Chống xem lén / sửa lén dữ liệu
 			if ad.PartnerID != userID {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Access denied. You do not own this advertisement"})
+				errors.RespondError(c, http.StatusForbidden, errors.New(errors.ErrCodeRbacAdAccessDenied))
 				c.Abort()
 				return
 			}

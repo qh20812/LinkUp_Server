@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/models"
 	"linkup/services"
@@ -22,7 +23,7 @@ func NewCommunityController(communityService *services.CommunityService, mediaSe
 func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 
@@ -31,7 +32,7 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	autoApprove := c.PostForm("auto_approve") == "true"
 
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
@@ -46,7 +47,7 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 				AspectRatio: "1:1",
 			}); err != nil {
 				src.Close()
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				errorsapp.Respond(c, http.StatusBadRequest, err)
 				return
 			}
 			src.Close()
@@ -54,11 +55,11 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 
 		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Tải ảnh đại diện thất bại"})
+			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed))
 			return
 		}
 		if media.Status == models.MediaStatusRejected {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Ảnh đại diện vi phạm tiêu chuẩn cộng đồng"})
+			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundRejected))
 			return
 		}
 		avatarURI = media.FileURI
@@ -66,7 +67,7 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 
 	community, groupChat, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, autoApprove)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -84,25 +85,27 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 func (ctrl *CommunityController) SetCommunityBackground(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 
 	communityID := c.Param("communityID")
 
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	file, err := c.FormFile("background")
 	if err != nil || file == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng chọn ảnh background"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.Newf(errorsapp.ErrCodeCommunityInvalidFormat, map[string]any{
+			"detail": "Vui lòng chọn ảnh background",
+		}))
 		return
 	}
 
 	if err := ctrl.communityService.SetCommunityBackground(c.Request.Context(), userID.(string), communityID, file); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -114,14 +117,14 @@ func (ctrl *CommunityController) SetCommunityBackground(c *gin.Context) {
 func (ctrl *CommunityController) RequestJoin(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
@@ -130,7 +133,7 @@ func (ctrl *CommunityController) RequestJoin(c *gin.Context) {
 
 	result, err := ctrl.communityService.RequestJoin(c.Request.Context(), userID, communityID, input.InviteCode, input.InvitationID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -149,20 +152,20 @@ func (ctrl *CommunityController) RequestJoin(c *gin.Context) {
 func (ctrl *CommunityController) ListPendingJoinRequests(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	adminID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
 	response, err := ctrl.communityService.ListPendingRequests(c.Request.Context(), adminID, communityID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -172,19 +175,19 @@ func (ctrl *CommunityController) ListPendingJoinRequests(c *gin.Context) {
 func (ctrl *CommunityController) ApproveJoinRequest(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	adminID := val.(string)
 
 	requestID := c.Param("requestID")
 	if requestID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "requestID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeJoinRequestNotFound))
 		return
 	}
 
 	if err := ctrl.communityService.ApproveJoinRequest(c.Request.Context(), adminID, requestID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -194,19 +197,19 @@ func (ctrl *CommunityController) ApproveJoinRequest(c *gin.Context) {
 func (ctrl *CommunityController) RejectJoinRequest(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	adminID := val.(string)
 
 	requestID := c.Param("requestID")
 	if requestID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "requestID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeJoinRequestNotFound))
 		return
 	}
 
 	if err := ctrl.communityService.RejectJoinRequest(c.Request.Context(), adminID, requestID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -216,7 +219,7 @@ func (ctrl *CommunityController) RejectJoinRequest(c *gin.Context) {
 func (ctrl *CommunityController) UpdateMemberRole(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	adminID := val.(string)
@@ -226,12 +229,12 @@ func (ctrl *CommunityController) UpdateMemberRole(c *gin.Context) {
 
 	var input dto.UpdateMemberRoleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	if err := ctrl.communityService.UpdateMemberRole(c.Request.Context(), adminID, communityID, memberID, input.Role); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -241,7 +244,7 @@ func (ctrl *CommunityController) UpdateMemberRole(c *gin.Context) {
 func (ctrl *CommunityController) KickMember(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	adminID := val.(string)
@@ -251,12 +254,12 @@ func (ctrl *CommunityController) KickMember(c *gin.Context) {
 
 	var input dto.KickMemberInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	if err := ctrl.communityService.KickMember(c.Request.Context(), adminID, communityID, memberID, input.Reason); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -268,7 +271,7 @@ func (ctrl *CommunityController) GetCommunityMembers(c *gin.Context) {
 
 	response, err := ctrl.communityService.GetCommunityMembers(c.Request.Context(), communityID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -278,25 +281,25 @@ func (ctrl *CommunityController) GetCommunityMembers(c *gin.Context) {
 func (ctrl *CommunityController) LeaveCommunity(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
 	var input dto.LeaveCommunityInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	if err := ctrl.communityService.LeaveCommunity(c.Request.Context(), userID, communityID, input.Quiet); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -306,56 +309,54 @@ func (ctrl *CommunityController) LeaveCommunity(c *gin.Context) {
 func (ctrl *CommunityController) TransferOwnership(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	requesterID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
 	var input dto.CommunityTransferOwnershipInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp target_user_id"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	if err := ctrl.communityService.TransferOwnership(c.Request.Context(), requesterID, communityID, input.TargetUserID, input.KeepAdmin); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Chuyển quyền sở hữu cộng đồng thành công!"})
 }
 
-// ── Invite code handlers ────────────────────────────────────────────────────
-
 func (ctrl *CommunityController) CreateInviteCode(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
 	var input dto.CreateInviteCodeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	result, err := ctrl.communityService.CreateInviteCode(c.Request.Context(), userID, communityID, input.MaxUses, input.ExpiresAt)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -365,20 +366,20 @@ func (ctrl *CommunityController) CreateInviteCode(c *gin.Context) {
 func (ctrl *CommunityController) ListInviteCodes(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
 	result, err := ctrl.communityService.ListInviteCodes(c.Request.Context(), userID, communityID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -388,50 +389,48 @@ func (ctrl *CommunityController) ListInviteCodes(c *gin.Context) {
 func (ctrl *CommunityController) DeactivateInviteCode(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	codeID := c.Param("codeID")
 	if codeID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "codeID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInviteCodeNotFound))
 		return
 	}
 
 	if err := ctrl.communityService.DeactivateInviteCode(c.Request.Context(), userID, codeID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Vô hiệu hóa mã mời thành công!"})
 }
 
-// ── Invitation handlers ─────────────────────────────────────────────────────
-
 func (ctrl *CommunityController) SendInvitation(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
 		return
 	}
 
 	var input dto.SendInvitationInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	result, err := ctrl.communityService.SendInvitation(c.Request.Context(), userID, communityID, input.InviteeID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -441,14 +440,14 @@ func (ctrl *CommunityController) SendInvitation(c *gin.Context) {
 func (ctrl *CommunityController) ListMyInvitations(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	result, err := ctrl.communityService.ListMyInvitations(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -458,25 +457,25 @@ func (ctrl *CommunityController) ListMyInvitations(c *gin.Context) {
 func (ctrl *CommunityController) RespondInvitation(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := val.(string)
 
 	invitationID := c.Param("invitationID")
 	if invitationID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invitationID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvitationNotFound))
 		return
 	}
 
 	var input dto.RespondInvitationInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	if err := ctrl.communityService.RespondInvitation(c.Request.Context(), userID, invitationID, input.Accept); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 

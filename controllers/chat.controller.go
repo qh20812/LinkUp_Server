@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/services"
-	"linkup/validations"
 	"linkup/ws"
 	"net/http"
 
@@ -38,14 +38,14 @@ var upgrader = websocket.Upgrader{
 func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "không thể nâng cấp kết nối websocket"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInternal))
 		return
 	}
 
@@ -61,13 +61,13 @@ func (ctrl *ChatController) CreateDirectChat(c *gin.Context) {
 
 	var input dto.DirectChatRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	chat, exists, err := ctrl.chatService.GetOrCreateDirectChat(c.Request.Context(), userID, input.TargetUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -87,13 +87,13 @@ func (ctrl *ChatController) CreateChatInvite(c *gin.Context) {
 
 	var input dto.ChatInviteRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	invite, err := ctrl.chatService.RequestChatInvite(c.Request.Context(), userID, input.TargetUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -108,13 +108,13 @@ func (ctrl *ChatController) ResponseChatInvite(c *gin.Context) {
 
 	var input dto.ChatInviteResponseRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invite_id và accept là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	chat, err := ctrl.chatService.ResponseChatInvite(c.Request.Context(), userID, input.InviteID, input.Accept)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -138,21 +138,16 @@ func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context) {
 	messageID := c.Param("messageID")
 
 	if messageID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "message_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	media, contentType, filename, data, err := ctrl.chatService.DownloadMessageMedia(c.Request.Context(), userID, messageID)
 	if err != nil {
-		switch {
-		case errors.Is(err, validations.ErrMessageNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "Tin nhắn không tồn tại"})
-		case errors.Is(err, validations.ErrMessageAccessDenied):
-			c.JSON(http.StatusForbidden, gin.H{"error": "Bạn không có quyền truy cập tin nhắn này"})
-		case errors.Is(err, validations.ErrMediaNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "Media không tồn tại"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
 		}
 		return
 	}
@@ -170,7 +165,7 @@ func (ctrl *ChatController) DeleteChat(c *gin.Context) {
 	chatID := c.Param("chatID")
 
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -178,9 +173,9 @@ func (ctrl *ChatController) DeleteChat(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrChatNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "không tìm thấy phòng chat"})
+			errorsapp.RespondError(c, http.StatusNotFound, errorsapp.New(errorsapp.ErrCodeNotFound))
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			errorsapp.Respond(c, http.StatusBadRequest, err)
 		}
 		return
 	}

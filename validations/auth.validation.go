@@ -1,30 +1,30 @@
 package validations
 
 import (
-	"errors"
+	errorsapp "linkup/errors"
 	"regexp"
 	"strings"
 	"unicode"
 )
 
 var (
-	ErrUsernameRequired       = errors.New("tên người dùng không được để trống")
-	ErrUsernameTooShort       = errors.New("tên người dùng phải có ít nhất 3 ký tự")
-	ErrUsernameTooLong        = errors.New("tên người dùng không được vượt quá 30 ký tự")
-	ErrUsernameInvalid        = errors.New("tên người dùng chỉ được chứa chữ cái, số, dấu gạch dưới và dấu chấm")
-	ErrEmailRequired          = errors.New("email không được để trống")
-	ErrEmailInvalid           = errors.New("định dạng email không hợp lệ")
-	ErrPasswordRequired       = errors.New("mật khẩu không được để trống")
-	ErrPasswordTooShort       = errors.New("mật khẩu phải có ít nhất 8 ký tự")
-	ErrPasswordTooLong        = errors.New("mật khẩu không được vượt quá 50 ký tự")
-	ErrPasswordMissingUpper   = errors.New("mật khẩu phải chứa ít nhất một chữ cái in hoa")
-	ErrPasswordMissingLower   = errors.New("mật khẩu phải chứa ít nhất một chữ cái in thường")
-	ErrPasswordMissingDigit   = errors.New("mật khẩu phải chứa ít nhất một chữ số")
-	ErrPasswordMissingSpecial = errors.New("mật khẩu phải chứa ít nhất một ký tự đặc biệt")
-	ErrDisplayNameRequired    = errors.New("tên hiển thị không được để trống")
-	ErrDisplayNameTooLong     = errors.New("tên hiển thị không được vượt quá 55 ký tự")
-	ErrDisplayNameTooShort    = errors.New("tên hiển thị phải có ít nhất 3 ký tự")
-	ErrPasswordSameAsOld      = errors.New("mật khẩu mới phải khác mật khẩu cũ")
+	ErrUsernameRequired       = errorsapp.New("auth.USERNAME_REQUIRED")
+	ErrUsernameTooShort       = errorsapp.Newf("auth.USERNAME_TOO_SHORT", map[string]any{"min": 3})
+	ErrUsernameTooLong        = errorsapp.Newf("auth.USERNAME_TOO_LONG", map[string]any{"max": 30})
+	ErrUsernameInvalid        = errorsapp.New("auth.USERNAME_INVALID")
+	ErrEmailRequired          = errorsapp.New("auth.EMAIL_REQUIRED")
+	ErrEmailInvalid           = errorsapp.New("auth.EMAIL_INVALID")
+	ErrPasswordRequired       = errorsapp.New("auth.PASSWORD_REQUIRED")
+	ErrPasswordTooShort       = errorsapp.Newf("auth.PASSWORD_TOO_SHORT", map[string]any{"min": 8})
+	ErrPasswordTooLong        = errorsapp.Newf("auth.PASSWORD_TOO_LONG", map[string]any{"max": 50})
+	ErrPasswordMissingUpper   = errorsapp.New("auth.PASSWORD_MISSING_UPPER")
+	ErrPasswordMissingLower   = errorsapp.New("auth.PASSWORD_MISSING_LOWER")
+	ErrPasswordMissingDigit   = errorsapp.New("auth.PASSWORD_MISSING_DIGIT")
+	ErrPasswordMissingSpecial = errorsapp.New("auth.PASSWORD_MISSING_SPECIAL")
+	ErrDisplayNameRequired    = errorsapp.New("auth.DISPLAY_NAME_REQUIRED")
+	ErrDisplayNameTooShort    = errorsapp.Newf("auth.DISPLAY_NAME_TOO_SHORT", map[string]any{"min": 3})
+	ErrDisplayNameTooLong     = errorsapp.Newf("auth.DISPLAY_NAME_TOO_LONG", map[string]any{"max": 55})
+	ErrPasswordSameAsOld      = errorsapp.New("auth.PASSWORD_SAME_AS_OLD")
 )
 
 type AuthValidation struct{}

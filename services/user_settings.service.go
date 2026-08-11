@@ -2,11 +2,11 @@ package services
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -96,7 +96,7 @@ func (s *UserSettingsService) Deactivate(ctx context.Context, userID, password s
 	}
 
 	if err := utils.ComparePassword(user.PasswordHash, password); err != nil {
-		return errors.New("mật khẩu hiện tại không đúng")
+		return errorsapp.New(errorsapp.ErrCodeSettingsWrongPassword)
 	}
 
 	if err := s.authRepo.Deactivate(ctx, userID); err != nil {
@@ -136,14 +136,14 @@ func (s *UserSettingsService) UpdateAppearance(ctx context.Context, userID strin
 	if input.Theme != nil {
 		theme := strings.ToLower(strings.TrimSpace(*input.Theme))
 		if theme != "light" && theme != "dark" {
-			return dto.AppearanceSettingsResponse{}, errors.New("chủ đề không hợp lệ")
+			return dto.AppearanceSettingsResponse{}, errorsapp.New(errorsapp.ErrCodeSettingsInvalidTheme)
 		}
 		setting.Theme = theme
 	}
 	if input.Language != nil {
 		language := strings.ToLower(strings.TrimSpace(*input.Language))
 		if language != "vi" && language != "en" {
-			return dto.AppearanceSettingsResponse{}, errors.New("ngôn ngữ không hợp lệ")
+			return dto.AppearanceSettingsResponse{}, errorsapp.New(errorsapp.ErrCodeSettingsInvalidLanguage)
 		}
 		setting.Language = language
 	}
@@ -191,7 +191,7 @@ func (s *UserSettingsService) RevokeSession(ctx context.Context, userID, session
 		return err
 	}
 	if !revoked {
-		return errors.New("phiên đăng nhập không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeSettingsSessionNotFound)
 	}
 	return nil
 }

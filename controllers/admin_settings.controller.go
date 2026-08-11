@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	"linkup/errors"
 	"linkup/services"
 	"net/http"
 
@@ -19,13 +20,13 @@ func NewAdminSettingsController(service *services.AdminSettingsService) *AdminSe
 func (ctrl *AdminSettingsController) GetSettings(c *gin.Context) {
 	adminID := c.GetString("userID")
 	if adminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	result, err := ctrl.service.GetSettings(c.Request.Context(), adminID)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusForbidden, err)
 		return
 	}
 
@@ -35,18 +36,18 @@ func (ctrl *AdminSettingsController) GetSettings(c *gin.Context) {
 func (ctrl *AdminSettingsController) UpdateSettings(c *gin.Context) {
 	adminID := c.GetString("userID")
 	if adminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	var input dto.AdminSettingsUpdateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	if err := ctrl.service.UpdateSettings(c.Request.Context(), adminID, &input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 

@@ -1,20 +1,20 @@
 package validations
 
 import (
-	"errors"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"strings"
 	"unicode/utf8"
 )
 
 var (
-	ErrRuleCategoryRequired = errors.New("danh mục nội quy không hợp lệ")
-	ErrRuleTitleRequired    = errors.New("tiêu đề nội quy không được để trống")
-	ErrRuleTitleMinLength   = errors.New("tiêu đề nội quy phải có ít nhất 5 ký tự")
-	ErrRuleTitleMaxLength   = errors.New("tiêu đề nội quy không được vượt quá 255 ký tự")
-	ErrRuleContentMaxLength = errors.New("nội dung nội quy không được vượt quá 2000 ký tự")
-	ErrRulePositionNegative = errors.New("vị trí không được âm")
-	ErrRuleTitleDuplicate   = errors.New("tiêu đề nội quy đã tồn tại trong danh mục này")
+	ErrRuleCategoryRequired = errorsapp.New(errorsapp.ErrCodeRuleCategoryRequired)
+	ErrRuleTitleRequired    = errorsapp.New(errorsapp.ErrCodeRuleTitleRequired)
+	ErrRuleTitleMinLength   = errorsapp.New(errorsapp.ErrCodeRuleTitleTooShort)
+	ErrRuleTitleMaxLength   = errorsapp.New(errorsapp.ErrCodeRuleTitleTooLong)
+	ErrRuleContentMaxLength = errorsapp.New(errorsapp.ErrCodeRuleContentTooLong)
+	ErrRulePositionNegative = errorsapp.New(errorsapp.ErrCodeRulePositionNegative)
+	ErrRuleTitleDuplicate   = errorsapp.New(errorsapp.ErrCodeRuleTitleDuplicate)
 )
 
 type CommunityRuleValidation struct{}

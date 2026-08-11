@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/services"
 	"net/http"
@@ -22,26 +23,26 @@ func NewFollowController(followService *services.FollowService) *FollowControlle
 func (crtl *FollowController) FollowToggle(c *gin.Context) {
 	targetUserID := c.Param("userID")
 	if targetUserID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "userID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "bạn cần đăng nhập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	followerID := val.(string)
 
 	action, err := crtl.followService.FollowToggle(c.Request.Context(), followerID, targetUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	stats, err := crtl.followService.GetFollowerStats(c.Request.Context(), targetUserID, &followerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "lỗi khi lấy thống kê"})
+		errorsapp.RespondError(c, http.StatusInternalServerError, errorsapp.New(errorsapp.ErrCodeInternal))
 		return
 	}
 
@@ -59,7 +60,7 @@ func (crtl *FollowController) FollowToggle(c *gin.Context) {
 func (crtl *FollowController) GetFollowStats(c *gin.Context) {
 	targetUserID := c.Param("userID")
 	if targetUserID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "userID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -71,7 +72,7 @@ func (crtl *FollowController) GetFollowStats(c *gin.Context) {
 
 	stats, err := crtl.followService.GetFollowerStats(c.Request.Context(), targetUserID, viewerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -90,7 +91,7 @@ func (crtl *FollowController) GetFollowStats(c *gin.Context) {
 func (crtl *FollowController) GetSuggestions(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "bạn cần đăng nhập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := val.(string)
@@ -100,7 +101,7 @@ func (crtl *FollowController) GetSuggestions(c *gin.Context) {
 
 	response, err := crtl.followService.GetSuggestions(c.Request.Context(), userID, page, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

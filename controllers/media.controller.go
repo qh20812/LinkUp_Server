@@ -1,9 +1,9 @@
 package controllers
 
 import (
-	"errors"
 	"fmt"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"linkup/validations"
 	"net/http"
@@ -26,36 +26,28 @@ func NewMediaController(service services.MediaService) *MediaController {
 func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	media, err := ctrl.service.UploadMedia(c.Request.Context(), userID, file)
 	if err != nil {
-		if err.Error() == validations.ErrFileTypeNotAllowed.Error() {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng file không được hỗ trợ"})
-			return
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			status := errorsapp.StatusCode(appErr.Code)
+			if appErr.Code == errorsapp.ErrCodeMediaInsufficientStorage {
+				status = http.StatusPaymentRequired
+			}
+			errorsapp.Respond(c, status, appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
 		}
-		if err.Error() == validations.ErrFileTooLarge.Error() {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "File quá lớn. Tối đa: Ảnh 50MB, Video 500MB",
-			})
-			return
-		}
-		if err.Error() == validations.ErrInsufficientStorage.Error() {
-			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error": "Dung lượng lưu trữ không đủ. Vui lòng mua thêm dung lượng",
-			})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -81,44 +73,43 @@ func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 func (crtl *MediaController) DeleteMedia(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"errors": "Không tìm thấy thông tin đăng nhập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	mediaID := c.Param("id")
 	if mediaID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu media id"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	err := crtl.service.DeleteMedia(c.Request.Context(), userID, mediaID)
-	switch {
-	case errors.Is(err, validations.ErrMediaNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "Media không tồn tại"})
-	case errors.Is(err, validations.ErrMediaForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": "Bạn không có quyền xóa media này"})
-	case err != nil:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	default:
-		c.JSON(http.StatusOK, gin.H{
-			"message":  "Xóa media thành công",
-			"media_id": mediaID,
-		})
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
+		}
+		return
 	}
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Xóa media thành công",
+		"media_id": mediaID,
+	})
 }
 
 func (ctrl *MediaController) GetStorageStatus(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	quota, used, available, err := ctrl.service.GetUserStorageStatus(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -137,14 +128,14 @@ func (ctrl *MediaController) GetStorageStatus(c *gin.Context) {
 func (ctrl *MediaController) GetUserMedia(c *gin.Context) {
 	userIDVal, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", userIDVal)
 
 	medias, err := ctrl.service.GetUserMedia(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

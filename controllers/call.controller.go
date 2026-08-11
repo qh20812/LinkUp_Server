@@ -7,6 +7,7 @@ import (
 
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/services"
 	"linkup/utils"
@@ -68,17 +69,17 @@ func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
 	if !exists {
 		tokenString := c.Query("token")
 		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+			errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 			return
 		}
 		token, err := utils.ParseToken(ctrl.env.JWTSecret, tokenString)
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "token không hợp lệ"})
+			errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 			return
 		}
 		claims := token.Claims.(*utils.TokenClaims)
 		if claims.TokenType != "access" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "token không hợp lệ"})
+			errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 			return
 		}
 		userID = claims.UserID
@@ -88,7 +89,7 @@ func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
 
 	conn, err := callUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "không thể nâng cấp kết nối websocket"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInternal))
 		return
 	}
 
@@ -144,7 +145,7 @@ func (ctrl *VoiceCallController) GetCallHistory(c *gin.Context) {
 
 	var query dto.CallHistoryQuery
 	if err := c.ShouldBindQuery(&query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 	// Enforce safe defaults after binding.
@@ -162,7 +163,7 @@ func (ctrl *VoiceCallController) GetCallHistory(c *gin.Context) {
 
 	items, total, err := ctrl.callService.GetCallHistoryFiltered(c.Request.Context(), userID, f)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -179,13 +180,13 @@ func (ctrl *VoiceCallController) GetCallDetail(c *gin.Context) {
 	callID := c.Param("callID")
 
 	if callID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	call, err := ctrl.callService.GetCallDetail(c.Request.Context(), userID, callID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -197,13 +198,13 @@ func (ctrl *VoiceCallController) InitiateCall(c *gin.Context) {
 
 	var req dto.CallInitiatePayload
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "callee_id và call_type là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	call, err := ctrl.callService.InitiateCall(c.Request.Context(), userID, req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	if call == nil {
@@ -219,12 +220,12 @@ func (ctrl *VoiceCallController) AcceptCall(c *gin.Context) {
 	callID := c.Param("callID")
 
 	if callID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.callService.AcceptCall(c.Request.Context(), userID, callID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -236,12 +237,12 @@ func (ctrl *VoiceCallController) RejectCall(c *gin.Context) {
 	callID := c.Param("callID")
 
 	if callID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.callService.RejectCall(c.Request.Context(), userID, callID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -253,18 +254,18 @@ func (ctrl *VoiceCallController) ToggleVideo(c *gin.Context) {
 	callID := c.Param("callID")
 
 	if callID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	var req dto.ToggleVideoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "video_enabled là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.callService.ToggleVideo(c.Request.Context(), userID, callID, req.VideoEnabled); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -276,18 +277,18 @@ func (ctrl *VoiceCallController) ToggleMute(c *gin.Context) {
 	callID := c.Param("callID")
 
 	if callID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	var req dto.ToggleMuteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "muted là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.callService.ToggleMute(c.Request.Context(), userID, callID, req.Muted); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -300,12 +301,12 @@ func (ctrl *VoiceCallController) HideCall(c *gin.Context) {
 	callID := c.Param("callID")
 
 	if callID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "call_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.callService.HideCallFromHistory(c.Request.Context(), userID, callID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -318,7 +319,7 @@ func (ctrl *VoiceCallController) GetMissedCallCount(c *gin.Context) {
 
 	count, err := ctrl.callService.GetMissedCallCount(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -330,7 +331,7 @@ func (ctrl *VoiceCallController) MarkMissedRead(c *gin.Context) {
 	userID := fmt.Sprintf("%v", c.GetString("userID"))
 
 	if err := ctrl.callService.MarkMissedAsRead(c.Request.Context(), userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

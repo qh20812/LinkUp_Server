@@ -13,6 +13,7 @@ import (
 
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -132,28 +133,29 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 	resetToken, err := s.resetRepo.FindByToken(ctx, input.Token)
 	if err != nil {
 		if errors.Is(err, repository.ErrResetTokenNotFound) {
-			return dto.ResetPasswordResponse{}, errors.New("token không hợp lệ")
+			return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetTokenNotFound)
 		}
 		return dto.ResetPasswordResponse{}, err
 	}
 
 	if resetToken.IsExpired() {
-		return dto.ResetPasswordResponse{}, errors.New("token đã hết hạn")
+		return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetTokenExpired)
 	}
 
 	if resetToken.IsUsed() {
-		return dto.ResetPasswordResponse{}, errors.New("token đã được sử dụng")
+		return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetTokenUsed)
 	}
 
 	if err := s.validation.ValidatePassword(input.NewPassword); err != nil {
 		return dto.ResetPasswordResponse{}, err
 	}
 
-	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
-		return dto.ResetPasswordResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+	minLen := s.getMinPasswordLength(ctx)
+	if len(input.NewPassword) < minLen {
+		return dto.ResetPasswordResponse{}, errorsapp.Newf(errorsapp.ErrCodeResetPasswordShort, map[string]any{"min": minLen})
 	}
 	if len(input.NewPassword) > 50 {
-		return dto.ResetPasswordResponse{}, errors.New("mật khẩu không được vượt quá 50 ký tự")
+		return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetPasswordLong)
 	}
 
 	hashedPassword, err := utils.HashPassword(input.NewPassword)

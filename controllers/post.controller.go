@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/services"
 	"linkup/validations"
@@ -22,34 +23,32 @@ func NewPostController(service services.PostService) *PostController {
 
 func (ctrl *PostController) CreatePost(c *gin.Context) {
 	var input dto.CreatePostInput
-	// Sử dụng ShouldBind để xử lý đồng thời text fields và file upload dạng form-data
 	if err := c.ShouldBind(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng dữ liệu form-data gửi lên không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostInvalidFormat))
 		return
 	}
 
-	// Lấy danh sách tệp đính kèm gửi lên qua form-data với key đặt tên là "media"
-		var files []*multipart.FileHeader
-		form, err := c.MultipartForm()
-		if err == nil && form != nil {
-			files = form.File["media"]
-		}
+	var files []*multipart.FileHeader
+	form, err := c.MultipartForm()
+	if err == nil && form != nil {
+		files = form.File["media"]
+	}
 
-		if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status, len(files) > 0); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+	if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status, len(files) > 0); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
 
-		val, exists := c.Get("userID")
-		if !exists {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin đăng nhập (Unauthorized)"})
-			return
-		}
-		userID := fmt.Sprintf("%v", val)
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+	userID := fmt.Sprintf("%v", val)
 
 	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -70,7 +69,7 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 
 	posts, nextCursor, err := ctrl.service.GetPostList(c.Request.Context(), cursor, pageSize, userIDStr, filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -86,21 +85,20 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 	})
 }
 
-// Lấy danh sách bài viết đã lưu (Bookmark) của người dùng hiện tại
 func (ctrl *PostController) GetSavedPosts(c *gin.Context) {
 	cursor := c.Query("cursor")
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để xem bài viết đã lưu"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := fmt.Sprintf("%v", val)
 
 	posts, nextCursor, err := ctrl.service.GetSavedPosts(c.Request.Context(), userID, cursor, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -119,13 +117,13 @@ func (ctrl *PostController) GetSavedPosts(c *gin.Context) {
 func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 	postID := c.Param("id")
 	if postID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID bài viết không được trống"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
 		return
 	}
 
 	post, err := ctrl.service.GetPostDetail(c.Request.Context(), postID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusNotFound, err)
 		return
 	}
 
@@ -135,26 +133,26 @@ func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 func (ctrl *PostController) ReactPost(c *gin.Context) {
 	postID := c.Param("id")
 	if postID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID bài viết không được trống"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
 		return
 	}
 
 	var input dto.ReactPostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Thiếu hoặc sai định dạng emoji_id"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeEmojiRequired))
 		return
 	}
 
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để thực hiện tính năng này"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := fmt.Sprintf("%v", val)
 
 	action, emojiCode, err := ctrl.service.ReactPost(c.Request.Context(), userID, postID, input.EmojiID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi xử lý hệ thống: " + err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -174,31 +172,31 @@ func (ctrl *PostController) ReactPost(c *gin.Context) {
 func (ctrl *PostController) CreateComment(c *gin.Context) {
 	postID := c.Param("id")
 	if postID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID bài viết không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
 		return
 	}
 
 	var input dto.CreateCommentInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Định dạng JSON gửi lên không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostInvalidFormat))
 		return
 	}
 
 	if err := validations.ValidateCreateComment(input.Content); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Bạn cần đăng nhập để bình luận"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	userID := fmt.Sprintf("%v", val)
 
 	comments, err := ctrl.service.CreateComment(c.Request.Context(), userID, postID, input.ParentID, input.Content)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -215,7 +213,7 @@ func (ctrl *PostController) GetComments(c *gin.Context) {
 
 	comments, total, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -234,12 +232,12 @@ func (ctrl *PostController) SharePost(c *gin.Context) {
 
 	var input dto.SharePostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		input.Content = "" // Nếu không viết Caption thì mặc định rỗng
+		input.Content = ""
 	}
 
 	err := ctrl.service.SharePost(c.Request.Context(), userID, postID, input.Content)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -253,7 +251,7 @@ func (ctrl *PostController) SavePost(c *gin.Context) {
 
 	action, err := ctrl.service.SavePost(c.Request.Context(), userID, postID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -264,21 +262,19 @@ func (ctrl *PostController) SavePost(c *gin.Context) {
 	}
 }
 
-// Xóa bài viết
 func (ctrl *PostController) DeletePost(c *gin.Context) {
 	postID := c.Param("id")
 	val, _ := c.Get("userID")
 	userID := fmt.Sprintf("%v", val)
 
 	if err := ctrl.service.DeletePost(c.Request.Context(), userID, postID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Đã xóa bài viết và cập nhật dữ liệu liên kết thành công!"})
 }
 
-// Lấy danh sách bài viết theo thẻ Hashtag
 func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 	name := c.Param("name")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -286,7 +282,7 @@ func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 
 	posts, err := ctrl.service.GetPostsByHashtag(c.Request.Context(), name, page, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -301,7 +297,7 @@ func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 func (ctrl *PostController) GetEmojis(c *gin.Context) {
 	emojis, err := ctrl.service.ListEmojis(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": emojis})

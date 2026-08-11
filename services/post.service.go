@@ -2,8 +2,8 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -55,7 +55,7 @@ func (s *postService) SetMediaService(mediaService MediaService) {
 func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error) {
 	if communityID != nil {
 		if s.contributionService == nil {
-			return nil, errors.New("dịch vụ contribution chưa được khởi tạo")
+			return nil, errorsapp.New(errorsapp.ErrCodePostContributionNotInit)
 		}
 		if err := s.contributionService.RequireMember(ctx, *communityID, userID); err != nil {
 			return nil, err
@@ -351,11 +351,11 @@ func (s *postService) GetSavedPosts(ctx context.Context, userID string, cursor s
 func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models.Post, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil {
-		return nil, errors.New("bài viết không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodePostNotFound)
 	}
 
 	if post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return nil, errors.New("bài viết đã bị ẩn hoặc ở chế độ riêng tư")
+		return nil, errorsapp.New(errorsapp.ErrCodePostHiddenOrPrivate)
 	}
 
 	_ = s.repo.IncrementViewsCount(ctx, postID)
@@ -380,7 +380,7 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 
 	emoji, err := s.repo.FindEmojiByID(ctx, emojiID)
 	if err != nil {
-		return "", "", errors.New("emoji không tồn tại")
+		return "", "", errorsapp.New(errorsapp.ErrCodeEmojiNotFound)
 	}
 
 	existingReaction, err := s.repo.FindReaction(ctx, userID, postID, emojiID)
@@ -437,20 +437,20 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil {
-		return nil, errors.New("bài viết không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodePostNotFound)
 	}
 
 	if post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return nil, errors.New("không thể bình luận vào bài viết đã bị ẩn hoặc ở chế độ riêng tư")
+		return nil, errorsapp.New(errorsapp.ErrCodeCommentHiddenPrivate)
 	}
 
 	if parentID != nil && *parentID != "" {
 		parentComment, err := s.repo.FindCommentByID(ctx, *parentID)
 		if err != nil || parentComment == nil {
-			return nil, errors.New("bình luận cấp trên không tồn tại hoặc đã bị xóa")
+			return nil, errorsapp.New(errorsapp.ErrCodeCommentNotFound)
 		}
 		if parentComment.PostID != postID {
-			return nil, errors.New("bình luận gốc không thuộc bài viết này")
+			return nil, errorsapp.New(errorsapp.ErrCodeCommentWrongPost)
 		}
 	} else {
 		parentID = nil
@@ -503,7 +503,7 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 func (s *postService) GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, int64, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return nil, 0, errors.New("bài viết không tồn tại hoặc không thể truy cập")
+		return nil, 0, errorsapp.New(errorsapp.ErrCodePostNotAccessible)
 	}
 
 	page, pageSize = s.validation.NormalizePagination(page, pageSize)
@@ -525,16 +525,16 @@ func (s *postService) GetCommentList(ctx context.Context, postID string, page, p
 func (s *postService) SharePost(ctx context.Context, userID, postID, content string) error {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return errors.New("bài viết không tồn tại hoặc không cho phép chia sẻ")
+		return errorsapp.New(errorsapp.ErrCodePostNotShareable)
 	}
 
 	if post.UserID == userID {
-		return errors.New("bạn không thể chia sẻ bài viết của chính mình")
+		return errorsapp.New(errorsapp.ErrCodePostCannotShareOwn)
 	}
 
 	existing, err := s.repo.FindShareByUser(ctx, userID, postID)
 	if err == nil && existing != nil {
-		return errors.New("bạn đã chia sẻ bài viết này rồi")
+		return errorsapp.New(errorsapp.ErrCodePostAlreadyShared)
 	}
 
 	share := models.NewPostShare(userID, postID, content)
@@ -556,11 +556,11 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 func (s *postService) SavePost(ctx context.Context, userID, postID string) (string, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return "", errors.New("bài viết không tồn tại hoặc đã bị ẩn")
+		return "", errorsapp.New(errorsapp.ErrCodePostNotFound)
 	}
 
 	if post.UserID == userID {
-		return "", errors.New("bạn không thể lưu bài viết của chính mình")
+		return "", errorsapp.New(errorsapp.ErrCodePostCannotSaveOwn)
 	}
 
 	existingBookmark, err := s.repo.FindBookmark(ctx, userID, postID)
@@ -590,11 +590,11 @@ func (s *postService) SavePost(ctx context.Context, userID, postID string) (stri
 func (s *postService) DeletePost(ctx context.Context, userID, postID string) error {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil {
-		return errors.New("bài viết không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodePostNotFound)
 	}
 
 	if post.UserID != userID {
-		return errors.New("bạn không có quyền thực hiện xóa bài viết của người khác")
+		return errorsapp.New(errorsapp.ErrCodePostCannotDeleteOthers)
 	}
 
 	bookmarkedUserIDs, err := s.repo.DeletePostWithAssociations(ctx, postID)

@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"linkup/validations"
 )
@@ -25,13 +26,13 @@ func NewEmailVerificationController(service *services.EmailVerificationService, 
 func (ctrl *EmailVerificationController) VerifyEmail(c *gin.Context) {
 	var input dto.VerifyEmailInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "token là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	response, err := ctrl.service.VerifyEmail(c.Request.Context(), input.Token)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -46,18 +47,18 @@ func (ctrl *EmailVerificationController) VerifyEmail(c *gin.Context) {
 func (ctrl *EmailVerificationController) ResendVerification(c *gin.Context) {
 	var input dto.ResendVerificationInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.validation.ValidateEmail(input.Email); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	response, err := ctrl.service.ResendVerification(c.Request.Context(), input.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

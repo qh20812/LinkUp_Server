@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"linkup/models"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
@@ -75,7 +76,7 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 		return nil, err
 	}
 	if err := s.validation.ValidateStorageQuota(available, file.Size); err != nil {
-		return nil, validations.ErrInsufficientStorage
+		return nil, err
 	}
 
 	// 3. Mở file
@@ -116,13 +117,13 @@ func (s *mediaService) DeleteMedia(ctx context.Context, userID string, mediaID s
 	media, err := s.repo.GetByID(ctx, mediaID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return validations.ErrMediaNotFound
+			return errorsapp.New(errorsapp.ErrCodeMediaNotFound)
 		}
 		return fmt.Errorf("get media by id: %w", err)
 	}
 
 	if media.UserID != userID {
-		return validations.ErrMediaForbidden
+		return errorsapp.New(errorsapp.ErrCodeMediaForbidden)
 	}
 
 	if s.cloudinary != nil {

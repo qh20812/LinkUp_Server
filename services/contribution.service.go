@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -12,15 +13,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-)
-
-var (
-	ErrChallengeNotFound            = errors.New("challenge không tồn tại")
-	ErrChallengeInactive            = errors.New("challenge không còn hoạt động")
-	ErrChallengeNotStarted          = errors.New("challenge chưa bắt đầu")
-	ErrChallengeEnded               = errors.New("challenge đã kết thúc")
-	ErrChallengeAlreadyJoined       = errors.New("bạn đã tham gia challenge này")
-	ErrChallengeParticipantLimitHit = errors.New("challenge đã đủ số lượng người tham gia")
 )
 
 type ContributionService struct {
@@ -224,9 +216,8 @@ func (s *ContributionService) GetActiveChallengeResponses(ctx context.Context, c
 }
 
 func (s *ContributionService) GetChallengeParticipants(ctx context.Context, challengeID string) ([]dto.ChallengeParticipantItem, error) {
-	// Verify challenge exists so missing challenges return 404, not empty list.
 	if _, err := s.contributionRepo.GetChallengeByID(ctx, challengeID); err != nil {
-		return nil, ErrChallengeNotFound
+		return nil, errorsapp.New(errorsapp.ErrCodeContribChallengeNotFound)
 	}
 	return s.contributionRepo.GetChallengeParticipants(ctx, challengeID)
 }
@@ -264,10 +255,10 @@ func (s *ContributionService) CreateChallenge(ctx context.Context, adminID, comm
 func (s *ContributionService) JoinChallenge(ctx context.Context, userID, challengeID string) error {
 	challenge, err := s.contributionRepo.GetChallengeByID(ctx, challengeID)
 	if err != nil {
-		return ErrChallengeNotFound
+		return errorsapp.New(errorsapp.ErrCodeContribChallengeNotFound)
 	}
 	if challenge.Status != models.ChallengeStatusActive {
-		return ErrChallengeInactive
+		return errorsapp.New(errorsapp.ErrCodeContribChallengeInactive)
 	}
 
 	if err := s.groupRole.RequireRole(ctx, challenge.CommunityID, userID, models.GroupRoleMember); err != nil {
@@ -276,10 +267,10 @@ func (s *ContributionService) JoinChallenge(ctx context.Context, userID, challen
 
 	now := time.Now().UTC()
 	if now.Before(challenge.StartDate) {
-		return ErrChallengeNotStarted
+		return errorsapp.New(errorsapp.ErrCodeContribChallengeNotStarted)
 	}
 	if now.After(challenge.EndDate) {
-		return ErrChallengeEnded
+		return errorsapp.New(errorsapp.ErrCodeContribChallengeEnded)
 	}
 
 	err = s.contributionRepo.JoinChallengeAtomic(ctx, &models.ChallengeParticipant{
@@ -289,10 +280,10 @@ func (s *ContributionService) JoinChallenge(ctx context.Context, userID, challen
 	}, challenge.MaxParticipants)
 	if err != nil {
 		if errors.Is(err, repository.ErrRepoChallengeAlreadyJoined) {
-			return ErrChallengeAlreadyJoined
+			return errorsapp.New(errorsapp.ErrCodeContribAlreadyJoined)
 		}
 		if errors.Is(err, repository.ErrRepoChallengeParticipantLimitHit) {
-			return ErrChallengeParticipantLimitHit
+			return errorsapp.New(errorsapp.ErrCodeContribParticipantLimitHit)
 		}
 		return err
 	}

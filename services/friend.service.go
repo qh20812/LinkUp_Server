@@ -2,11 +2,11 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -38,11 +38,11 @@ func (s *FriendService) ToggleFriendRequest(ctx context.Context, userID, targetU
 
 	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
 	if err != nil {
-		return dto.FriendRequestResponse{}, fmt.Errorf("người dùng không tồn tại")
+		return dto.FriendRequestResponse{}, errorsapp.New(errorsapp.ErrCodeFriendUserNotFound)
 	}
 
 	if !targetUser.IsActive() {
-		return dto.FriendRequestResponse{}, fmt.Errorf("không thể gửi lời mời kết bạn đến người dùng này")
+		return dto.FriendRequestResponse{}, errorsapp.New(errorsapp.ErrCodeFriendUserInactive)
 	}
 
 	isAdmin, err := s.authRepo.HasRole(ctx, targetUserID, models.RoleAdmin)
@@ -54,7 +54,7 @@ func (s *FriendService) ToggleFriendRequest(ctx context.Context, userID, targetU
 		return dto.FriendRequestResponse{}, fmt.Errorf("toggle friend request: %w", err)
 	}
 	if isAdmin || isSuperAdmin {
-		return dto.FriendRequestResponse{}, errors.New("không thể gửi lời mời kết bạn đến admin hoặc super admin")
+		return dto.FriendRequestResponse{}, errorsapp.New(errorsapp.ErrCodeFriendAdminRestricted)
 	}
 
 	existing, err := s.friendRepo.FindBySenderAndReceiver(ctx, userID, targetUserID)
@@ -64,7 +64,7 @@ func (s *FriendService) ToggleFriendRequest(ctx context.Context, userID, targetU
 
 	if existing != nil {
 		if existing.Status != models.FriendStatusPending {
-			return dto.FriendRequestResponse{}, errors.New("không thể thực hiện hành động này trên lời mời đã xử lý")
+			return dto.FriendRequestResponse{}, errorsapp.New(errorsapp.ErrCodeFriendRequestHandled)
 		}
 		if err := s.friendRepo.Delete(ctx, existing.ID); err != nil {
 			return dto.FriendRequestResponse{}, fmt.Errorf("toggle friend request: %w", err)
@@ -151,13 +151,13 @@ func (s *FriendService) AcceptFriendRequest(ctx context.Context, userID, request
 		return dto.FriendActionResponse{}, fmt.Errorf("lỗi khi tìm lời mời: %w", err)
 	}
 	if friend == nil {
-		return dto.FriendActionResponse{}, fmt.Errorf("lời mời kết bạn không tồn tại")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendNotFound)
 	}
 	if friend.ReceiverID != userID {
-		return dto.FriendActionResponse{}, fmt.Errorf("bạn không có quyền chấp nhận lời mời này")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendNotAuthorized)
 	}
 	if friend.Status != models.FriendStatusPending {
-		return dto.FriendActionResponse{}, fmt.Errorf("lời mời đã được xử lý trước đó")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendAlreadyProcessed)
 	}
 
 	if err := s.friendRepo.UpdateStatus(ctx, requestID, models.FriendStatusAccepted); err != nil {
@@ -178,13 +178,13 @@ func (s *FriendService) RejectFriendRequest(ctx context.Context, userID, request
 		return dto.FriendActionResponse{}, fmt.Errorf("lỗi khi tìm lời mời: %w", err)
 	}
 	if friend == nil {
-		return dto.FriendActionResponse{}, fmt.Errorf("lời mời kết bạn không tồn tại")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendNotFound)
 	}
 	if friend.ReceiverID != userID {
-		return dto.FriendActionResponse{}, fmt.Errorf("bạn không có quyền từ chối lời mời này")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendNotAuthorized)
 	}
 	if friend.Status != models.FriendStatusPending {
-		return dto.FriendActionResponse{}, fmt.Errorf("lời mời đã được xử lý trước đó")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendAlreadyProcessed)
 	}
 
 	if err := s.friendRepo.Delete(ctx, requestID); err != nil {
@@ -221,10 +221,10 @@ func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pag
 
 func (s *FriendService) Unfriend(ctx context.Context, userID, targetUserID string) (dto.FriendActionResponse, error) {
 	if targetUserID == "" {
-		return dto.FriendActionResponse{}, fmt.Errorf("userID là bắt buộc")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendTargetRequiredUnfriend)
 	}
 	if userID == targetUserID {
-		return dto.FriendActionResponse{}, fmt.Errorf("không thể tự hủy kết bạn với chính mình")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendSelfUnfriend)
 	}
 
 	friend, err := s.friendRepo.FindPair(ctx, userID, targetUserID)
@@ -232,7 +232,7 @@ func (s *FriendService) Unfriend(ctx context.Context, userID, targetUserID strin
 		return dto.FriendActionResponse{}, fmt.Errorf("lỗi khi tìm quan hệ bạn bè: %w", err)
 	}
 	if friend == nil || friend.Status != models.FriendStatusAccepted {
-		return dto.FriendActionResponse{}, fmt.Errorf("hai người không phải là bạn bè")
+		return dto.FriendActionResponse{}, errorsapp.New(errorsapp.ErrCodeFriendNotFriends)
 	}
 
 	if err := s.friendRepo.DeletePair(ctx, userID, targetUserID); err != nil {

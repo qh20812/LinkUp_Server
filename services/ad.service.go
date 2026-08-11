@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 
@@ -48,20 +49,20 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		return nil, err
 	}
 	if sub == nil {
-		return nil, fmt.Errorf("bạn cần đăng ký gói quảng cáo trước khi tạo chiến dịch")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
 	}
 
 	if sub.SlotsUsed >= sub.Package.MaxSlots {
-		return nil, fmt.Errorf("bạn đã dùng hết %d/%d slot. Vui lòng nâng cấp gói", sub.SlotsUsed, sub.Package.MaxSlots)
+		return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
 	}
 
 	// 2. Kiểm tra Format có được gói hỗ trợ không
 	adFormat := models.AdFormat(input.Format)
 	if adFormat == models.AdFormatVideo && !sub.Package.SupportsVideo {
-		return nil, fmt.Errorf("gói hiện tại của bạn không hỗ trợ quảng cáo định dạng Video")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotVideo)
 	}
 	if adFormat == models.AdFormatCarousel && !sub.Package.SupportsCarousel {
-		return nil, fmt.Errorf("gói hiện tại của bạn không hỗ trợ quảng cáo định dạng Carousel")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotCarousel)
 	}
 
 	// 3. Khởi tạo Quảng cáo
@@ -119,7 +120,7 @@ func (s *adServiceImpl) GetAdByID(id string) (*models.Ad, error) {
 func (s *adServiceImpl) UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error) {
 	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
 	if err != nil || !isOwner {
-		return nil, fmt.Errorf("bạn không có quyền thay đổi quảng cáo này")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 	}
 
 	ad, err := s.repo.FindByID(id)
@@ -137,7 +138,7 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 	if partnerID != "" {
 		isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
 		if err != nil || !isOwner {
-			return nil, fmt.Errorf("bạn không có quyền xem báo cáo của quảng cáo này")
+			return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 		}
 	}
 

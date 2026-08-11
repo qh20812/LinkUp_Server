@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	"linkup/errors"
 	"linkup/services"
 	"net/http"
 
@@ -17,23 +18,21 @@ func NewAdminController(adminService *services.AdminService) *AdminController {
 }
 
 func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
-	// Lấy ID Admin từ Middleware Auth
 	adminID := c.GetString("userID")
 	if adminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	var input dto.AdminAnalyticsFilterInput
-	// Bind query params
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn bộ lọc không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	result, err := ctrl.adminService.GetDashboardAnalytics(c.Request.Context(), adminID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -43,19 +42,19 @@ func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 func (ctrl *AdminController) ListUsers(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	var input dto.AdminUserFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	result, err := ctrl.adminService.ListUsers(c.Request.Context(), userID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -65,24 +64,24 @@ func (ctrl *AdminController) ListUsers(c *gin.Context) {
 func (ctrl *AdminController) UpdateUserStatus(c *gin.Context) {
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	targetUserID := c.Param("userID")
 	if targetUserID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "userID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminUserUpdateStatusInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	if err := ctrl.adminService.UpdateUserStatus(c.Request.Context(), superAdminID, targetUserID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"Error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -92,25 +91,25 @@ func (ctrl *AdminController) UpdateUserStatus(c *gin.Context) {
 func (ctrl *AdminController) BanUser(c *gin.Context) {
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	targetUserID := c.Param("userID")
 	if targetUserID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "userID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminUserBanInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	result, err := ctrl.adminService.BanUser(c.Request.Context(), superAdminID, targetUserID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -120,19 +119,19 @@ func (ctrl *AdminController) BanUser(c *gin.Context) {
 func (ctrl *AdminController) ListPosts(c *gin.Context) {
 	var input dto.AdminPostFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	result, err := ctrl.adminService.ListPosts(c.Request.Context(), superAdminID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -142,24 +141,24 @@ func (ctrl *AdminController) ListPosts(c *gin.Context) {
 func (ctrl *AdminController) HidePost(c *gin.Context) {
 	postID := c.Param("postID")
 	if postID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "postID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminHidePostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	if err := ctrl.adminService.HidePost(c.Request.Context(), superAdminID, postID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -169,24 +168,24 @@ func (ctrl *AdminController) HidePost(c *gin.Context) {
 func (ctrl *AdminController) ChangePostStatus(c *gin.Context) {
 	postID := c.Param("postID")
 	if postID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "postID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminUpdatePostStatusInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	if err := ctrl.adminService.ChangePostStatus(c.Request.Context(), superAdminID, postID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -196,19 +195,19 @@ func (ctrl *AdminController) ChangePostStatus(c *gin.Context) {
 func (ctrl *AdminController) ListComments(c *gin.Context) {
 	var input dto.AdminCommentFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	adminID := c.GetString("userID")
 	if adminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	result, err := ctrl.adminService.ListComments(c.Request.Context(), adminID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -218,24 +217,24 @@ func (ctrl *AdminController) ListComments(c *gin.Context) {
 func (ctrl *AdminController) HideComment(c *gin.Context) {
 	commentID := c.Param("commentID")
 	if commentID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "commentID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminHidePostInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	if err := ctrl.adminService.HideComment(c.Request.Context(), superAdminID, commentID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -245,18 +244,18 @@ func (ctrl *AdminController) HideComment(c *gin.Context) {
 func (ctrl *AdminController) RevealComment(c *gin.Context) {
 	commentID := c.Param("commentID")
 	if commentID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "commentID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	if superAdminID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	if err := ctrl.adminService.RevealComment(c.Request.Context(), superAdminID, commentID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -266,14 +265,14 @@ func (ctrl *AdminController) RevealComment(c *gin.Context) {
 func (ctrl *AdminController) ListReports(c *gin.Context) {
 	var input dto.AdminReportFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	result, err := ctrl.adminService.ListReports(c.Request.Context(), superAdminID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -282,14 +281,14 @@ func (ctrl *AdminController) ListReports(c *gin.Context) {
 func (ctrl *AdminController) GetReportDetail(c *gin.Context) {
 	reportID := c.Param("reportID")
 	if reportID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reportID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	result, err := ctrl.adminService.GetReportDetail(c.Request.Context(), superAdminID, reportID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -300,14 +299,14 @@ func (ctrl *AdminController) GetReportDetail(c *gin.Context) {
 func (ctrl *AdminController) ListGroups(c *gin.Context) {
 	var input dto.AdminGroupFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.ListGroups(c.Request.Context(), userID, input)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusForbidden, err)
 		return
 	}
 
@@ -317,14 +316,14 @@ func (ctrl *AdminController) ListGroups(c *gin.Context) {
 func (ctrl *AdminController) GetGroupDetail(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.GetGroupDetail(c.Request.Context(), userID, chatID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -334,14 +333,14 @@ func (ctrl *AdminController) GetGroupDetail(c *gin.Context) {
 func (ctrl *AdminController) ListGroupMembers(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.ListGroupMembers(c.Request.Context(), userID, chatID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -351,20 +350,20 @@ func (ctrl *AdminController) ListGroupMembers(c *gin.Context) {
 func (ctrl *AdminController) GetGroupModerationLogs(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminGroupFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.GetGroupModerationLogs(c.Request.Context(), userID, chatID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -374,19 +373,19 @@ func (ctrl *AdminController) GetGroupModerationLogs(c *gin.Context) {
 func (ctrl *AdminController) HideGroup(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminModerateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp lý do"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminReasonRequired))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.HideGroup(c.Request.Context(), userID, chatID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -396,13 +395,13 @@ func (ctrl *AdminController) HideGroup(c *gin.Context) {
 func (ctrl *AdminController) UnhideGroup(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.UnhideGroup(c.Request.Context(), userID, chatID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -412,19 +411,19 @@ func (ctrl *AdminController) UnhideGroup(c *gin.Context) {
 func (ctrl *AdminController) ArchiveGroup(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminModerateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp lý do"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminReasonRequired))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.ArchiveGroup(c.Request.Context(), userID, chatID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -434,19 +433,19 @@ func (ctrl *AdminController) ArchiveGroup(c *gin.Context) {
 func (ctrl *AdminController) WarnGroup(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminWarnInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp reason và message"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.WarnGroup(c.Request.Context(), userID, chatID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -458,14 +457,14 @@ func (ctrl *AdminController) WarnGroup(c *gin.Context) {
 func (ctrl *AdminController) ListCommunities(c *gin.Context) {
 	var input dto.AdminCommunityFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.ListCommunities(c.Request.Context(), userID, input)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusForbidden, err)
 		return
 	}
 
@@ -475,14 +474,14 @@ func (ctrl *AdminController) ListCommunities(c *gin.Context) {
 func (ctrl *AdminController) GetCommunityDetail(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.GetCommunityDetail(c.Request.Context(), userID, communityID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -492,14 +491,14 @@ func (ctrl *AdminController) GetCommunityDetail(c *gin.Context) {
 func (ctrl *AdminController) ListCommunityMembers(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.ListCommunityMembers(c.Request.Context(), userID, communityID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -509,20 +508,20 @@ func (ctrl *AdminController) ListCommunityMembers(c *gin.Context) {
 func (ctrl *AdminController) GetCommunityModerationLogs(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminGroupFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	userID := c.GetString("userID")
 	result, err := ctrl.adminService.GetCommunityModerationLogs(c.Request.Context(), userID, communityID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -532,19 +531,19 @@ func (ctrl *AdminController) GetCommunityModerationLogs(c *gin.Context) {
 func (ctrl *AdminController) HideCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminModerateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp lý do"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminReasonRequired))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.HideCommunity(c.Request.Context(), userID, communityID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -554,13 +553,13 @@ func (ctrl *AdminController) HideCommunity(c *gin.Context) {
 func (ctrl *AdminController) UnhideCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.UnhideCommunity(c.Request.Context(), userID, communityID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -570,13 +569,13 @@ func (ctrl *AdminController) UnhideCommunity(c *gin.Context) {
 func (ctrl *AdminController) UnarchiveCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.UnarchiveCommunity(c.Request.Context(), userID, communityID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -586,19 +585,19 @@ func (ctrl *AdminController) UnarchiveCommunity(c *gin.Context) {
 func (ctrl *AdminController) ArchiveCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminModerateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp lý do"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminReasonRequired))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.ArchiveCommunity(c.Request.Context(), userID, communityID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -608,19 +607,19 @@ func (ctrl *AdminController) ArchiveCommunity(c *gin.Context) {
 func (ctrl *AdminController) WarnCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminWarnInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp reason và message"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.WarnCommunity(c.Request.Context(), userID, communityID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -630,19 +629,19 @@ func (ctrl *AdminController) WarnCommunity(c *gin.Context) {
 func (ctrl *AdminController) DeleteGroup(c *gin.Context) {
 	chatID := c.Param("chatID")
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chatID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminModerateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp lý do"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminReasonRequired))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.DeleteGroup(c.Request.Context(), userID, chatID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -652,19 +651,19 @@ func (ctrl *AdminController) DeleteGroup(c *gin.Context) {
 func (ctrl *AdminController) DeleteCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminModerateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp lý do"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminReasonRequired))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.DeleteCommunity(c.Request.Context(), userID, communityID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -674,19 +673,19 @@ func (ctrl *AdminController) DeleteCommunity(c *gin.Context) {
 func (ctrl *AdminController) ReviewReport(c *gin.Context) {
 	reportID := c.Param("reportID")
 	if reportID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reportID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminReportReviewInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	superAdminID := c.GetString("userID")
 	if err := ctrl.adminService.ReviewReport(c.Request.Context(), superAdminID, reportID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -700,13 +699,13 @@ func (ctrl *AdminController) ListFlaggedMedia(c *gin.Context) {
 
 	var input dto.AdminMediaFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	result, err := ctrl.adminService.ListFlaggedMedia(c.Request.Context(), adminID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -718,12 +717,12 @@ func (ctrl *AdminController) ReviewMedia(c *gin.Context) {
 
 	var input dto.AdminReviewMediaInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	if err := ctrl.adminService.ReviewMedia(c.Request.Context(), adminID, mediaID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Xử lý media thành công"})
@@ -734,7 +733,7 @@ func (ctrl *AdminController) CleanupRejectedMedia(c *gin.Context) {
 
 	cleaned, err := ctrl.adminService.CleanupRejectedMedia(c.Request.Context(), adminID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Dọn dẹp media thành công", "cleaned": cleaned})
@@ -745,13 +744,13 @@ func (ctrl *AdminController) ListMediaGroupedByUser(c *gin.Context) {
 
 	var input dto.AdminMediaGroupFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	result, err := ctrl.adminService.ListMediaGroupedByUser(c.Request.Context(), adminID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -762,19 +761,19 @@ func (ctrl *AdminController) ListMediaGroupedByUser(c *gin.Context) {
 func (ctrl *AdminController) ListAds(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
 		return
 	}
 
 	var input dto.AdminAdFilterInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
 		return
 	}
 
 	result, err := ctrl.adminService.ListAds(c.Request.Context(), userID, input)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusForbidden, err)
 		return
 	}
 
@@ -784,19 +783,19 @@ func (ctrl *AdminController) ListAds(c *gin.Context) {
 func (ctrl *AdminController) UpdateAdStatus(c *gin.Context) {
 	adID := c.Param("id")
 	if adID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "adID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	var input dto.AdminAdStatusInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.UpdateAdStatus(c.Request.Context(), userID, adID, input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -806,13 +805,13 @@ func (ctrl *AdminController) UpdateAdStatus(c *gin.Context) {
 func (ctrl *AdminController) DeleteAd(c *gin.Context) {
 	adID := c.Param("id")
 	if adID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "adID không hợp lệ"})
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
 		return
 	}
 
 	userID := c.GetString("userID")
 	if err := ctrl.adminService.DeleteAd(c.Request.Context(), userID, adID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errors.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 

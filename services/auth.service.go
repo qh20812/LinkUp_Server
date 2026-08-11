@@ -3,13 +3,13 @@ package services
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -136,7 +136,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 	if cfg != nil && cfg.Value == "false" {
-		return dto.AuthResponse{}, errors.New("đăng ký đã bị tắt bởi quản trị viên")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeRegistrationDisabled)
 	}
 
 	maint, err := s.isMaintenanceMode(ctx)
@@ -144,20 +144,20 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 	if maint {
-		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeMaintenanceMode)
 	}
 
 	if len(input.Password) < s.getMinPasswordLength(ctx) {
-		return dto.AuthResponse{}, fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+		return dto.AuthResponse{}, errorsapp.Newf(errorsapp.ErrCodePasswordTooShort, map[string]any{"min": s.getMinPasswordLength(ctx)})
 	}
 	if len(input.Password) > 50 {
-		return dto.AuthResponse{}, errors.New("mật khẩu không được vượt quá 50 ký tự")
+		return dto.AuthResponse{}, errorsapp.Newf(errorsapp.ErrCodePasswordTooLong, map[string]any{"max": 50})
 	}
 
 	email := normalizeEmail(input.Email)
 
 	if _, err := s.authRepo.FindByEmail(ctx, email); err == nil {
-		return dto.AuthResponse{}, errors.New("email đã tồn tại")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeEmailExists)
 	} else if !errors.Is(err, repository.ErrUserNotFound) {
 		return dto.AuthResponse{}, err
 	}
@@ -226,7 +226,7 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 
 func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.AuthResponse, error) {
 	if s.googleVerifier == nil {
-		return dto.AuthResponse{}, errors.New("đăng nhập google chưa được cấu hình")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeGoogleNotConfigured)
 	}
 
 	claims, err := s.googleVerifier.Verify(ctx, idToken)
@@ -258,14 +258,14 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 			}
 			user.GoogleID = &claims.GoogleID
 		} else if *user.GoogleID != claims.GoogleID {
-			return dto.AuthResponse{}, errors.New("tài khoản google không khớp với tài khoản hiện tại")
+			return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeGoogleAccountMismatch)
 		}
 
 		if err := s.ensureBanStatus(ctx, user); err != nil {
 			return dto.AuthResponse{}, err
 		}
 		if !user.IsActive() {
-			return dto.AuthResponse{}, errors.New("tài khoản không hoạt động")
+			return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 		}
 	}
 
@@ -278,7 +278,7 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 		return dto.AuthResponse{}, err
 	}
 	if maint && role != string(models.RoleSuperAdmin) && role != string(models.RoleAdmin) {
-		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeMaintenanceMode)
 	}
 
 	accessToken, refreshToken, err := s.generateTokens(ctx, user, role, "")
@@ -288,14 +288,14 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 	return buildAuthResponse(*user, accessToken, refreshToken, s.accessTTL(ctx), s.refreshTTL(ctx), false), nil
 }
 
-// createUserFromGoogle tạo tài khoản mới từ thông tin Google đã xác thực.
+// createUserFromGoogle creates a new account from verified Google info.
 func (s *AuthService) createUserFromGoogle(ctx context.Context, claims *GoogleClaims, email string) (*models.User, error) {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "allow_registration")
 	if err != nil {
 		return nil, err
 	}
 	if cfg != nil && cfg.Value == "false" {
-		return nil, errors.New("đăng ký đã bị tắt bởi quản trị viên")
+		return nil, errorsapp.New(errorsapp.ErrCodeRegistrationDisabled)
 	}
 
 	username, err := utils.GenerateUsername(email, func(u string) (bool, error) {
@@ -347,7 +347,7 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceNam
 	user, err := s.authRepo.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
-			return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
+			return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeInvalidCredentials)
 		}
 		return dto.AuthResponse{}, err
 	}
@@ -359,7 +359,7 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceNam
 	// Self-deactivated accounts may log in again (which reactivates them).
 	// Admin suspensions (status=suspended without self_deactivated_at) stay blocked.
 	if !user.IsActive() && !(user.Status == models.UserStatusSuspended && user.SelfDeactivatedAt != nil) {
-		return dto.AuthResponse{}, fmt.Errorf("tài khoản chưa được kích hoạt")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
 	role, err := s.authRepo.GetUserRole(ctx, user.ID)
@@ -369,7 +369,7 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceNam
 	isPrivileged := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
 	if !isPrivileged && user.IsLocked() {
-		return dto.AuthResponse{}, errors.New("tài khoản tạm thời bị khóa do nhập sai nhiều lần, vui lòng thử lại sau 15 phút")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeAccountLocked)
 	}
 
 	if err := utils.ComparePassword(user.PasswordHash, input.Password); err != nil {
@@ -380,11 +380,11 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceNam
 			}
 			remaining := maxAttempts - user.LoginAttempts - 1
 			if remaining > 0 {
-				return dto.AuthResponse{}, fmt.Errorf("email hoặc mật khẩu không hợp lệ. Bạn còn %d lần thử", remaining)
+				return dto.AuthResponse{}, errorsapp.Newf(errorsapp.ErrCodeLoginAttemptsRemaining, map[string]any{"remaining": remaining})
 			}
-			return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ. Tài khoản của bạn đã bị khóa tạm thời")
+			return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeAccountLocked)
 		}
-		return dto.AuthResponse{}, errors.New("email hoặc mật khẩu không hợp lệ")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeInvalidCredentials)
 	}
 
 	if err := s.authRepo.ResetLoginAttempts(ctx, user.ID); err != nil {
@@ -405,13 +405,13 @@ func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceNam
 		return dto.AuthResponse{}, err
 	}
 	if maint && role != string(models.RoleSuperAdmin) && role != string(models.RoleAdmin) {
-		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeMaintenanceMode)
 	}
 
 	// Check email verification if required
 	if cfg, err := s.adminSettingsRepo.GetByKey(ctx, "require_email_verify"); err == nil && cfg != nil && cfg.Value == "true" {
 		if !user.IsEmailVerified() {
-			return dto.AuthResponse{}, errors.New("vui lòng xác thực email trước khi đăng nhập")
+			return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeEmailNotVerified)
 		}
 	}
 
@@ -501,7 +501,7 @@ func buildAuthResponse(user models.User, accessToken, refreshToken string, acces
 			ExpiresIn:    int64(accessTTL.Seconds()),
 			RefreshTTLIn: int64(refreshTTL.Seconds()),
 		},
-		Storage:     dto.StorageInfo{
+		Storage: dto.StorageInfo{
 			QuotaBytes: user.StorageQuotaBytes,
 			UsedBytes:  user.StorageUsedBytes,
 			AvailBytes: user.AvailableStorageBytes(),
@@ -516,26 +516,26 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 	}
 
 	if len(input.NewPassword) < s.getMinPasswordLength(ctx) {
-		return fmt.Errorf("mật khẩu phải có ít nhất %d ký tự", s.getMinPasswordLength(ctx))
+		return errorsapp.Newf(errorsapp.ErrCodePasswordTooShort, map[string]any{"min": s.getMinPasswordLength(ctx)})
 	}
 	if len(input.NewPassword) > 50 {
-		return errors.New("mật khẩu không được vượt quá 50 ký tự")
+		return errorsapp.Newf(errorsapp.ErrCodePasswordTooLong, map[string]any{"max": 50})
 	}
 
 	user, err := s.authRepo.FindByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
-			return errors.New("không tìm thấy người dùng")
+			return errorsapp.New(errorsapp.ErrCodeUserNotFound)
 		}
 		return err
 	}
 
 	if err := utils.ComparePassword(user.PasswordHash, input.OldPassword); err != nil {
-		return errors.New("mật khẩu hiện tại không đúng")
+		return errorsapp.New(errorsapp.ErrCodeInvalidCredentials)
 	}
 
 	if input.OldPassword == input.NewPassword {
-		return validations.ErrPasswordSameAsOld
+		return errorsapp.New(errorsapp.ErrCodePasswordSameAsOld)
 	}
 
 	histories, err := s.authRepo.GetPasswordHistoryByUserID(ctx, userID)
@@ -545,7 +545,7 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 
 	for _, history := range histories {
 		if err := utils.ComparePassword(history.PasswordHash, input.NewPassword); err == nil {
-			return errors.New("không thể sử dụng lại mật khẩu trước đó")
+			return errorsapp.New(errorsapp.ErrCodePasswordSameAsOld)
 		}
 	}
 
@@ -569,22 +569,22 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenInput, deviceName, ipAddress, userAgent string) (dto.TokenResponse, error) {
 	token, err := utils.ParseToken(s.env.JWTSecret, input.RefreshToken)
 	if err != nil || !token.Valid {
-		return dto.TokenResponse{}, errors.New("refresh token không hợp lệ hoặc đã hết hạn")
+		return dto.TokenResponse{}, errorsapp.New(errorsapp.ErrCodeInvalidRefreshToken)
 	}
 
 	claims, ok := token.Claims.(*utils.TokenClaims)
 	if !ok {
-		return dto.TokenResponse{}, errors.New("refresh token không hợp lệ")
+		return dto.TokenResponse{}, errorsapp.New(errorsapp.ErrCodeTokenClaimsInvalid)
 	}
 
 	if claims.TokenType != "refresh" {
-		return dto.TokenResponse{}, errors.New("token không phải refresh token")
+		return dto.TokenResponse{}, errorsapp.New(errorsapp.ErrCodeTokenNotRefresh)
 	}
 
 	user, err := s.authRepo.FindByID(ctx, claims.UserID)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
-			return dto.TokenResponse{}, errors.New("người dùng không tồn tại")
+			return dto.TokenResponse{}, errorsapp.New(errorsapp.ErrCodeUserNotFound)
 		}
 		return dto.TokenResponse{}, err
 	}
@@ -594,13 +594,13 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 	}
 
 	if !user.IsActive() {
-		return dto.TokenResponse{}, errors.New("tài khoản chưa được kích hoạt")
+		return dto.TokenResponse{}, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
 	// Reject refresh tokens issued before the latest token_version bump (e.g.
 	// after logout or password change), mirroring the middleware for access tokens.
 	if claims.TokenVersion != user.TokenVersion {
-		return dto.TokenResponse{}, errors.New("phiên đăng nhập đã hết hạn")
+		return dto.TokenResponse{}, errorsapp.New(errorsapp.ErrCodeSessionExpired)
 	}
 
 	role, err := s.authRepo.GetUserRole(ctx, user.ID)
@@ -639,10 +639,7 @@ func (s *AuthService) ensureBanStatus(ctx context.Context, user *models.User) er
 
 	ban, err := s.banRepo.GetLatestBanByUserID(ctx, user.ID)
 	if err != nil {
-		if errors.Is(err, repository.ErrBanNotFound) {
-			return fmt.Errorf("tài khoản đang bị ban")
-		}
-		return err
+		return errorsapp.New(errorsapp.ErrCodeAccountBanned)
 	}
 
 	if ban.ExpiresAt != nil && ban.ExpiresAt.Before(time.Now().UTC()) {
@@ -654,10 +651,10 @@ func (s *AuthService) ensureBanStatus(ctx context.Context, user *models.User) er
 	}
 
 	if ban.ExpiresAt != nil {
-		return fmt.Errorf("tài khoản đang bị ban đến %s", ban.ExpiresAt.Format("2006-01-02 15:04:05"))
+		return errorsapp.Newf(errorsapp.ErrCodeAccountBannedWithExpiry, map[string]any{"expiry": ban.ExpiresAt.Format("2006-01-02 15:04:05")})
 	}
 
-	return errors.New("tài khoản bị ban vô thời hạn")
+	return errorsapp.New(errorsapp.ErrCodeAccountBannedPermanent)
 }
 
 func clamp(value, min, max int) int {

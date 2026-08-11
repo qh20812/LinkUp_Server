@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 )
 
@@ -20,13 +21,13 @@ func NewUserSettingsController(service *services.UserSettingsService) *UserSetti
 func (h *UserSettingsController) GetPrivacy(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	privacy, err := h.service.GetPrivacy(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -36,24 +37,24 @@ func (h *UserSettingsController) GetPrivacy(c *gin.Context) {
 func (h *UserSettingsController) UpdatePrivacy(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	var input dto.UpdatePrivacyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if input.DiscoverableInSearch == nil && input.AllowStrangerMessages == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cần ít nhất một trường để cập nhật"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	privacy, err := h.service.UpdatePrivacy(c.Request.Context(), userID, input)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -63,13 +64,13 @@ func (h *UserSettingsController) UpdatePrivacy(c *gin.Context) {
 func (h *UserSettingsController) GetStorage(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	storage, err := h.service.GetStorage(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -79,18 +80,18 @@ func (h *UserSettingsController) GetStorage(c *gin.Context) {
 func (h *UserSettingsController) Deactivate(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	var input dto.DeactivateInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := h.service.Deactivate(c.Request.Context(), userID, input.Password); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -100,13 +101,13 @@ func (h *UserSettingsController) Deactivate(c *gin.Context) {
 func (h *UserSettingsController) GetAppearance(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	appearance, err := h.service.GetAppearance(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -116,24 +117,24 @@ func (h *UserSettingsController) GetAppearance(c *gin.Context) {
 func (h *UserSettingsController) UpdateAppearance(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	var input dto.UpdateAppearanceInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if input.Theme == nil && input.Language == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cần ít nhất một trường để cập nhật"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	appearance, err := h.service.UpdateAppearance(c.Request.Context(), userID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -143,13 +144,13 @@ func (h *UserSettingsController) UpdateAppearance(c *gin.Context) {
 func (h *UserSettingsController) ListSessions(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	sessions, err := h.service.ListSessions(c.Request.Context(), userID, c.GetString("sessionID"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -159,18 +160,18 @@ func (h *UserSettingsController) ListSessions(c *gin.Context) {
 func (h *UserSettingsController) RevokeSession(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := h.service.RevokeSession(c.Request.Context(), userID, sessionID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -180,12 +181,12 @@ func (h *UserSettingsController) RevokeSession(c *gin.Context) {
 func (h *UserSettingsController) RevokeOtherSessions(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	if err := h.service.RevokeOtherSessions(c.Request.Context(), userID, c.GetString("sessionID")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

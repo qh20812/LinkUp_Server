@@ -2,10 +2,10 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"linkup/models"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
@@ -44,7 +44,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 		return err
 	}
 	if !ok {
-		return errors.New("bạn không có quyền tham gia chat này")
+		return errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
 	}
 	return nil
 }
@@ -78,7 +78,7 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, err
 	}
 	if !participant {
-		return nil, errors.New("bạn không phải thành viên của chat này")
+		return nil, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
 	}
 
 	if emojiID != nil && *emojiID != "" {
@@ -87,34 +87,33 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 			return nil, fmt.Errorf("check emoji: %w", err)
 		}
 		if !ok {
-			return nil, errors.New("emoji không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCEmojiNotFound)
 		}
 	}
 
 	if mediaID != nil && *mediaID != "" {
 		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
 		if err != nil {
-			return nil, errors.New("media không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotFound)
 		}
 		if media.UserID != userID {
-			return nil, errors.New("media không thuộc về bạn")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotYours)
 		}
 	}
 
 	if replyToMessageID != nil && *replyToMessageID != "" {
 		parentMsg, err := s.chatRepo.FindMessageByID(ctx, *replyToMessageID)
 		if err != nil {
-			return nil, errors.New("tin nhắn gốc không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCReplyNotFound)
 		}
 		if parentMsg.ChatID != chatID {
-			return nil, errors.New("tin nhắn gốc không thuộc phòng chat này")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCReplyWrongChat)
 		}
 	}
 
-	// ===== ENCRYPTION =====
 	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	if err != nil {
-		return nil, fmt.Errorf("get encryption key: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
 	}
 
 	encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
@@ -197,7 +196,7 @@ func (s *ChatService) ensureDirectChat(ctx context.Context, userID, targetUserID
 			return nil, false, err
 		}
 		if !isFriend {
-			return nil, false, errors.New("chưa là bạn, vui lòng gửi yêu cầu chat")
+			return nil, false, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
 		}
 	}
 
@@ -238,7 +237,7 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 		return nil, err
 	}
 	if isFriend {
-		return nil, errors.New("đã là bạn, vui lòng mở chat trực tiếp")
+		return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyFriends)
 	}
 
 	pending, err := s.inviteRepo.FindPendingBetween(ctx, userID, targetUserID)
@@ -246,7 +245,7 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 		return nil, err
 	}
 	if pending != nil {
-		return nil, errors.New("lời mời chat đang chờ phản hồi")
+		return nil, errorsapp.New(errorsapp.ErrCodeChatInvitePending)
 	}
 
 	existing, err := s.inviteRepo.FindActiveBetween(ctx, userID, targetUserID)
@@ -256,9 +255,9 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 	if existing != nil {
 		switch existing.Status {
 		case models.ChatInviteStatusPending:
-			return nil, errors.New("lời mời đang chờ phản hổi")
+			return nil, errorsapp.New(errorsapp.ErrCodeChatInvitePending)
 		case models.ChatInviteStatusAccepted:
-			return nil, errors.New("đã có lời mời được chấp nhận, không thể gửi")
+			return nil, errorsapp.New(errorsapp.ErrCodeChatInviteAccepted)
 		}
 	}
 
@@ -327,7 +326,7 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 
 	if deleteForAll {
 		if msg.DeletedForSender || msg.DeletedForReceiver || msg.DeletedAt != nil {
-			return nil, errors.New("tin nhắn đã bị thu hồi")
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
 		}
 		deletedAt := time.Now().UTC()
 		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
@@ -335,13 +334,13 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 
 	if msg.SenderID == userID {
 		if msg.DeletedForSender {
-			return nil, errors.New("tin nhắn đã bị xóa")
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
 		}
 		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
 	}
 
 	if msg.DeletedForReceiver {
-		return nil, errors.New("tin nhắn đã bị xóa")
+		return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
 	}
 	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, false, true, nil)
 }
@@ -366,7 +365,7 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 func (s *ChatService) DownloadMessageMedia(ctx context.Context, userID, messageID string) (*models.Media, string, string, []byte, error) {
 	message, err := s.chatRepo.FindMessageByID(ctx, messageID)
 	if err != nil {
-		return nil, "", "", nil, validations.ErrMessageNotFound
+		return nil, "", "", nil, errorsapp.New(errorsapp.ErrCodeChatMessageNotFound)
 	}
 
 	isParticipant, err := s.chatRepo.IsUserParticipant(ctx, message.ChatID, userID)
@@ -374,16 +373,16 @@ func (s *ChatService) DownloadMessageMedia(ctx context.Context, userID, messageI
 		return nil, "", "", nil, err
 	}
 	if !isParticipant {
-		return nil, "", "", nil, validations.ErrMessageAccessDenied
+		return nil, "", "", nil, errorsapp.New(errorsapp.ErrCodeChatAccessDenied)
 	}
 
 	if message.MediaID == nil || *message.MediaID == "" {
-		return nil, "", "", nil, validations.ErrMediaNotFound
+		return nil, "", "", nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotFound)
 	}
 
 	media, err := s.mediaRepo.GetByID(ctx, *message.MediaID)
 	if err != nil {
-		return nil, "", "", nil, validations.ErrMediaNotFound
+		return nil, "", "", nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotFound)
 	}
 
 	resp, err := http.Get(media.FileURI)
@@ -446,7 +445,7 @@ func (s *ChatService) DeleteChat(ctx context.Context, userID, chatID string) err
 		return err
 	}
 	if !participant {
-		return errors.New("bạn không phải là thành viên của chat này")
+		return errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
 	}
 
 	return s.chatRepo.DeleteChat(ctx, chatID)

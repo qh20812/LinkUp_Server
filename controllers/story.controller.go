@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"net/http"
 
@@ -26,7 +27,7 @@ func (ctrl *StoryController) CreateStory(c *gin.Context) {
 
 	res, err := ctrl.service.CreateStory(c.Request.Context(), userID.(string), file, caption)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -37,7 +38,7 @@ func (ctrl *StoryController) CreateStory(c *gin.Context) {
 func (ctrl *StoryController) GetHomeFeed(c *gin.Context) {
 	res, err := ctrl.service.GetHomeStories()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -50,7 +51,7 @@ func (ctrl *StoryController) ViewStory(c *gin.Context) {
 
 	story, err := ctrl.service.ViewStory(storyID, viewerID.(string))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusNotFound, err)
 		return
 	}
 	c.JSON(http.StatusOK, story)
@@ -63,13 +64,13 @@ func (ctrl *StoryController) Interact(c *gin.Context) {
 
 	var req dto.InteractStoryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu tương tác không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	err := ctrl.service.InteractWithStory(storyID, userID.(string), req)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -83,7 +84,7 @@ func (ctrl *StoryController) GetAnalytics(c *gin.Context) {
 
 	analytics, err := ctrl.service.GetAnalytics(storyID, userID.(string))
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusForbidden, err)
 		return
 	}
 

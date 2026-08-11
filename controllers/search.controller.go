@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"net/http"
 
@@ -21,7 +22,7 @@ func NewSearchController(searchService *services.SearchService) *SearchControlle
 func (h *SearchController) GetTrending(c *gin.Context) {
 	hashtags, err := h.searchService.GetTrendingHashtags(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": hashtags})
@@ -30,13 +31,17 @@ func (h *SearchController) GetTrending(c *gin.Context) {
 func (h *SearchController) Search(c *gin.Context) {
 	var input dto.SearchInput
 	if err := c.ShouldBindQuery(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tham số truy vấn không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	response, err := h.searchService.Search(c.Request.Context(), input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
 		return
 	}
 

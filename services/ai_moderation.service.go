@@ -2,9 +2,8 @@ package services
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"linkup/models"
+	errorsapp "linkup/errors"
 	"linkup/utils"
 	"mime/multipart"
 
@@ -46,7 +45,7 @@ func (s *cloudinaryModerationService) Moderate(
 	ctx context.Context, src multipart.File, fileType string,
 ) (*AIModerationResult, error) {
 	if s.cld == nil {
-		return nil, errors.New("cloudinary chưa được khởi tạo")
+		return nil, errorsapp.New(errorsapp.ErrCodeModCloudinaryNotInit)
 	}
 
 	uploadResult, err := s.cld.Upload.Upload(ctx, src, uploader.UploadParams{
@@ -55,7 +54,7 @@ func (s *cloudinaryModerationService) Moderate(
 		Moderation:   "aws_rek",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("tải lên + kiểm duyệt thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeModUploadFailed, err)
 	}
 
 	// Trường hợp moderation không được cấu hình (thiếu quyền AWS Rekognition)

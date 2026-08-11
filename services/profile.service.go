@@ -1,106 +1,107 @@
 package services
 
 import (
-    "context"
-    "fmt"
-    "linkup/dto"
-    "linkup/models"
-    "linkup/repository"
-    "time"
+	"context"
+	"fmt"
+	"linkup/dto"
+	errorsapp "linkup/errors"
+	"linkup/models"
+	"linkup/repository"
+	"time"
 )
 
 type ProfileService struct {
-    profileRepository *repository.ProfileRepository
+	profileRepository *repository.ProfileRepository
 }
 
 func NewProfileService(profileRepository *repository.ProfileRepository) *ProfileService {
-    return &ProfileService{
-        profileRepository: profileRepository,
-    }
+	return &ProfileService{
+		profileRepository: profileRepository,
+	}
 }
 
 func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*models.Profile, error) {
-    profile, err := s.profileRepository.FindByUserID(ctx, userID)
-    if err != nil {
-        return nil, fmt.Errorf("view profile: %w", err)
-    }
-    if profile == nil {
-        return nil, fmt.Errorf("profile not found")
-    }
-    return profile, nil
+	profile, err := s.profileRepository.FindByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("view profile: %w", err)
+	}
+	if profile == nil {
+		return nil, errorsapp.New(errorsapp.ErrCodeProfileNotFound)
+	}
+	return profile, nil
 }
 
 func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, targetUserID string) (*models.Profile, error) {
-    profile, err := s.profileRepository.FindByUserID(ctx, targetUserID)
-    if err != nil {
+	profile, err := s.profileRepository.FindByUserID(ctx, targetUserID)
+	if err != nil {
 		return nil, fmt.Errorf("view profile: %w", err)
-    }
-    if profile == nil {
-        return nil, fmt.Errorf("không tìm thấy hồ sơ")
-    }
+	}
+	if profile == nil {
+		return nil, errorsapp.New(errorsapp.ErrCodeProfileNotFound)
+	}
 
-    if viewerID == targetUserID {
-        return profile, nil
-    }
+	if viewerID == targetUserID {
+		return profile, nil
+	}
 
-    if profile.IsPrivateProfile {
-		return nil, fmt.Errorf("hồ sơ này ở chế độ riêng tư")
-    }
+	if profile.IsPrivateProfile {
+		return nil, errorsapp.New(errorsapp.ErrCodeProfilePrivate)
+	}
 
-    return profile, nil
+	return profile, nil
 }
 
 func (s *ProfileService) EditProfile(ctx context.Context, userID string, input dto.EditProfileInput) (*models.Profile, error) {
-    existingProfile, err := s.profileRepository.FindByUserID(ctx, userID)
-    if err != nil {
-        return nil, fmt.Errorf("edit profile: %w", err)
-    }
-    if existingProfile == nil {
-        return nil, fmt.Errorf("profile not found")
-    }
+	existingProfile, err := s.profileRepository.FindByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("edit profile: %w", err)
+	}
+	if existingProfile == nil {
+		return nil, errorsapp.New(errorsapp.ErrCodeProfileNotFound)
+	}
 
-    if input.PhoneNumber != nil && *input.PhoneNumber != "" {
-        existingPhone, err := s.profileRepository.FindByPhoneNumber(ctx, *input.PhoneNumber, userID)
-        if err != nil {
-            return nil, fmt.Errorf("edit profile: %w", err)
-        }
-        if existingPhone != nil {
-		return nil, fmt.Errorf("số điện thoại đã tồn tại")
-        }
-    }
+	if input.PhoneNumber != nil && *input.PhoneNumber != "" {
+		existingPhone, err := s.profileRepository.FindByPhoneNumber(ctx, *input.PhoneNumber, userID)
+		if err != nil {
+			return nil, fmt.Errorf("edit profile: %w", err)
+		}
+		if existingPhone != nil {
+			return nil, errorsapp.New(errorsapp.ErrCodePhoneExists)
+		}
+	}
 
-    if input.DisplayName != nil && *input.DisplayName != "" {
-        existingProfile.DisplayName = *input.DisplayName
-    }
-    if input.PhoneNumber != nil {
-        existingProfile.PhoneNumber = *input.PhoneNumber
-    }
-    if input.DateOfBirth != nil {
-        existingProfile.DateOfBirth = input.DateOfBirth
-    }
-    if input.AvatarURI != nil {
-        existingProfile.AvatarURI = *input.AvatarURI
-    }
-    if input.Bio != nil {
-        existingProfile.Bio = *input.Bio
-    }
-    if input.IsPrivateProfile != nil {
-        existingProfile.IsPrivateProfile = *input.IsPrivateProfile
-    }
-    if input.IsPrivatePosts != nil {
-        existingProfile.IsPrivatePosts = *input.IsPrivatePosts
-    }
-    if input.AllowStrangerFriendRequest != nil {
-        existingProfile.AllowStrangerFriendRequest = *input.AllowStrangerFriendRequest
-    }
+	if input.DisplayName != nil && *input.DisplayName != "" {
+		existingProfile.DisplayName = *input.DisplayName
+	}
+	if input.PhoneNumber != nil {
+		existingProfile.PhoneNumber = *input.PhoneNumber
+	}
+	if input.DateOfBirth != nil {
+		existingProfile.DateOfBirth = input.DateOfBirth
+	}
+	if input.AvatarURI != nil {
+		existingProfile.AvatarURI = *input.AvatarURI
+	}
+	if input.Bio != nil {
+		existingProfile.Bio = *input.Bio
+	}
+	if input.IsPrivateProfile != nil {
+		existingProfile.IsPrivateProfile = *input.IsPrivateProfile
+	}
+	if input.IsPrivatePosts != nil {
+		existingProfile.IsPrivatePosts = *input.IsPrivatePosts
+	}
+	if input.AllowStrangerFriendRequest != nil {
+		existingProfile.AllowStrangerFriendRequest = *input.AllowStrangerFriendRequest
+	}
 
-    now := time.Now().Truncate(0)
-    existingProfile.UpdatedAt = &now
+	now := time.Now().Truncate(0)
+	existingProfile.UpdatedAt = &now
 
-    result, err := s.profileRepository.Update(ctx, userID, existingProfile)
-    if err != nil {
-        return nil, fmt.Errorf("edit profile: %w", err)
-    }
+	result, err := s.profileRepository.Update(ctx, userID, existingProfile)
+	if err != nil {
+		return nil, fmt.Errorf("edit profile: %w", err)
+	}
 
-    return result, nil
+	return result, nil
 }

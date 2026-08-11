@@ -2,9 +2,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -34,17 +34,16 @@ func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *re
 
 func (s *GroupChatService) CreateGroup(ctx context.Context, userID string, name, avatarURI string, memberIDs []string) (*models.Chat, error) {
 	if len(name) < 3 || len(name) > 50 {
-		return nil, errors.New("tên nhóm chat phải từ 3 đến 50 ký tự")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCInvalidName)
 	}
 
 	group := models.NewChat(models.ChatTypeGroup, name, avatarURI)
 	group.ID = utils.GenerateUUID()
 	group.CreatedAt = time.Now().UTC()
 
-	// Khởi tạo khóa mã hóa cho Group Chat
 	encKey, err := utils.GenerateEncryptionKey()
 	if err != nil {
-		return nil, fmt.Errorf("không thể khởi tạo khóa bảo mật cho nhóm: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyFailed, err)
 	}
 	group.EncryptionKey = encKey
 
@@ -78,7 +77,7 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID, leave
 		return err
 	}
 	if !isMember {
-		return errors.New("bạn không phải là thành viên của nhóm này")
+		return errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 
 	leaveMode = strings.ToLower(strings.TrimSpace(leaveMode))
@@ -92,10 +91,10 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID, leave
 	}
 
 	if leaveMode != "silent" && leaveMode != "public" {
-		return errors.New("leave_mode không hợp lệ")
+		return errorsapp.New(errorsapp.ErrCodeGCInvalidLeaveMode)
 	}
 	if historyMode != "keep" && historyMode != "anonymize" {
-		return errors.New("history_mode không hợp lệ")
+		return errorsapp.New(errorsapp.ErrCodeGCInvalidHistoryMode)
 	}
 
 	if historyMode == "anonymize" {
@@ -149,25 +148,23 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID, leave
 // 2. CHỨC NĂNG: BAN THÀNH VIÊN (CHẶN QUAY LẠI)
 func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targetUserID string) error {
 	if adminID == targetUserID {
-		return errors.New("bạn không thể tự chặn chính mình")
+		return errorsapp.New(errorsapp.ErrCodeGCSelfBan)
 	}
 
-	// Kiểm tra quyền CHAT_ADMIN
 	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, adminID)
 	if err != nil {
 		return err
 	}
 	if !isAdmin {
-		return errors.New("chỉ quản trị viên (CHAT_ADMIN) mới có quyền chặn thành viên")
+		return errorsapp.New(errorsapp.ErrCodeGCAdminOnly)
 	}
 
-	// Kiểm tra xem mục tiêu đã bị ban trước đó chưa
 	isBanned, err := s.groupRepo.IsUserBanned(ctx, chatID, targetUserID)
 	if err != nil {
 		return err
 	}
 	if isBanned {
-		return errors.New("người dùng này đã bị chặn từ trước")
+		return errorsapp.New(errorsapp.ErrCodeGCAlreadyBanned)
 	}
 
 	banData := &models.GroupChatBan{
@@ -184,7 +181,7 @@ func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targe
 // 3. CẬP NHẬT CHỨC NĂNG: THÊM THÀNH VIÊN (TÍCH HỢP KIỂM TRA BAN REJOIN)
 func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, requesterID, newMemberID string) (string, error) {
 	if requesterID == newMemberID {
-		return "", errors.New("không thể tự mời chính mình")
+		return "", errorsapp.New(errorsapp.ErrCodeGCSelfInvite)
 	}
 
 	isRequesterMember, err := s.groupRepo.IsUserMember(ctx, chatID, requesterID)
@@ -192,7 +189,7 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		return "", err
 	}
 	if !isRequesterMember {
-		return "", errors.New("bạn không phải thành viên của nhóm này nên không có quyền mời người khác")
+		return "", errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 
 	groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
@@ -206,7 +203,7 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 			return "", err
 		}
 		if !isAdmin {
-			return "", errors.New("admin đã tắt quyền thêm thành viên; chỉ có admin mới có thể mời")
+			return "", errorsapp.New(errorsapp.ErrCodeGCNotAdminInvite)
 		}
 	}
 
@@ -215,7 +212,7 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		return "", err
 	}
 	if isBanned {
-		return "", errors.New("người dùng này đã bị chặn bởi Admin và không thể tham gia lại nhóm")
+		return "", errorsapp.New(errorsapp.ErrCodeGCBanned)
 	}
 
 	isTargetMember, err := s.groupRepo.IsUserMember(ctx, chatID, newMemberID)
@@ -223,7 +220,7 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		return "", err
 	}
 	if isTargetMember {
-		return "", errors.New("người dùng này đã là thành viên của nhóm từ trước")
+		return "", errorsapp.New(errorsapp.ErrCodeGCAlreadyMember)
 	}
 
 	pendingReq, err := s.groupRepo.FindPendingMemberRequest(ctx, chatID, newMemberID)
@@ -231,7 +228,7 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		return "", err
 	}
 	if pendingReq != nil {
-		return "", errors.New("đã có lời mời đang chờ phản hồi cho người dùng này")
+		return "", errorsapp.New(errorsapp.ErrCodeGCPendingRequest)
 	}
 
 	req := &models.GroupChatMemberRequest{
@@ -278,7 +275,7 @@ func (s *GroupChatService) GetSettings(ctx context.Context, chatID, userID strin
 		return nil, err
 	}
 	if !isMember {
-		return nil, errors.New("bạn không phải là thành viên của nhóm")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 
 	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
@@ -313,7 +310,7 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 		return nil, err
 	}
 	if !isMember {
-		return nil, errors.New("bạn không phải là thành viên của nhóm")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 
 	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, requestID)
@@ -334,24 +331,24 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 
 	if input.Name != nil {
 		if !isAdmin {
-			return nil, errors.New("chỉ admin mới có quyền đổi tên nhóm")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCAdminOnlyName)
 		}
 		if utf8.RuneCountInString(*input.Name) < 3 || utf8.RuneCountInString(*input.Name) > 50 {
-			return nil, errors.New("tên nhóm phải từ 3 đến 50 ký tự")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCInvalidGroupName)
 		}
 	}
 
 	if input.AvatarURI != nil && !isAdmin {
-		return nil, errors.New("chỉ admin mới có quyền đổi avatar nhóm")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCAdminOnlyAvatar)
 	}
 
 	if input.AllowMemberAdd != nil && !isAdmin {
-		return nil, errors.New("chỉ admin mới có quyền cấu hình quyền thêm thành viên")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCAdminOnlyConfig)
 	}
 
 	if input.AllowMemberAdd != nil || input.Name != nil || input.AvatarURI != nil {
 		if !isAdmin {
-			return nil, errors.New("chỉ admin mới có quyền cập nhật cài đặt toàn nhóm")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCAdminOnlyUpdate)
 		}
 
 		groupSettings, err := s.groupRepo.GetSettings(ctx, chatID)
@@ -389,7 +386,7 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 
 func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID, targetUserID string) error {
 	if requestID == targetUserID {
-		return errors.New("không thể chuyển quyền cho chính mình")
+		return errorsapp.New(errorsapp.ErrCodeGCTransferToSelf)
 	}
 
 	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, requestID)
@@ -397,7 +394,7 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 		return err
 	}
 	if !isAdmin {
-		return errors.New("chỉ admin mới có thể chuyển quyền quản trị")
+		return errorsapp.New(errorsapp.ErrCodeGCAdminOnly)
 	}
 
 	isTargetMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
@@ -405,7 +402,7 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 		return err
 	}
 	if !isTargetMember {
-		return errors.New("người nhận phải là thành viên của nhóm")
+		return errorsapp.New(errorsapp.ErrCodeGCTargetNotMember)
 	}
 
 	settings, err := s.groupRepo.GetSettings(ctx, chatID)
@@ -413,9 +410,11 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 		return err
 	}
 	if settings.LastAdminTransferAt != nil {
-		nextAllowed := settings.LastAdminTransferAt.AddDate(0, 1, 0) // +1 month
+		nextAllowed := settings.LastAdminTransferAt.AddDate(0, 1, 0)
 		if time.Now().UTC().Before(nextAllowed) {
-			return fmt.Errorf("quyền admin chỉ có thể chuyển 1 lần mỗi tháng; lần chuyển trước: %s", settings.LastAdminTransferAt.UTC().Format(time.RFC3339))
+			return errorsapp.Newf(errorsapp.ErrCodeGCAdminCooldown, map[string]any{
+				"previous_at": settings.LastAdminTransferAt.UTC().Format(time.RFC3339),
+			})
 		}
 	}
 
@@ -424,7 +423,7 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 
 func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, requesterID, targetUserID string, keepAdmin bool) error {
 	if requesterID == targetUserID {
-		return errors.New("không thể chuyển quyền sở hữu cho chính mình")
+		return errorsapp.New(errorsapp.ErrCodeGCTransferToSelf)
 	}
 
 	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
@@ -433,11 +432,11 @@ func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, reques
 	}
 
 	if chat.CreatorID == nil || *chat.CreatorID != requesterID {
-		return errors.New("chỉ người tạo nhóm mới có thể chuyển quyền sở hữu")
+		return errorsapp.New(errorsapp.ErrCodeGCOnlyCreatorTransfer)
 	}
 
 	if chat.Type != models.ChatTypeGroup {
-		return errors.New("chỉ hỗ trợ chuyển quyền sở hữu cho nhóm chat")
+		return errorsapp.New(errorsapp.ErrCodeGCNotGroupTransfer)
 	}
 
 	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
@@ -445,7 +444,7 @@ func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, reques
 		return err
 	}
 	if !isMember {
-		return errors.New("người nhận phải là thành viên của nhóm")
+		return errorsapp.New(errorsapp.ErrCodeGCTargetNotMember)
 	}
 
 	return s.groupRepo.TransferOwnership(ctx, chatID, requesterID, targetUserID, keepAdmin, time.Now().UTC())
@@ -453,7 +452,7 @@ func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, reques
 
 func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targetUserID, reason string, durationMinutes int) (*models.GroupChatMute, error) {
 	if adminID == targetUserID {
-		return nil, errors.New("Không thể mute chính mình")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCSelfMute)
 	}
 
 	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, adminID)
@@ -461,7 +460,7 @@ func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targ
 		return nil, err
 	}
 	if !isAdmin {
-		return nil, errors.New("chỉ admin mới có quyền tắt tiếng thành viên")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCAdminOnly)
 	}
 
 	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
@@ -469,7 +468,7 @@ func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targ
 		return nil, err
 	}
 	if !isMember {
-		return nil, errors.New("Người dùng không phải thành viên của nhóm")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotMemberMute)
 	}
 
 	if err := s.validation.ValidateMuteInput(reason, durationMinutes); err != nil {
@@ -493,10 +492,9 @@ func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targ
 	}
 
 	if err := s.groupRepo.MuteUser(ctx, mute); err != nil {
-		return nil, fmt.Errorf("lưu meta: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCMuted, err)
 	}
 
-	// thông báo cho user bị mute
 	var expiresStr string
 	if expiresAt == nil {
 		expiresStr = "vĩnh viễn"
@@ -510,17 +508,16 @@ func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targ
 }
 
 func (s *GroupChatService) UnmuteMember(ctx context.Context, chatID, adminID, targetUserID string) error {
-	// quyền admin
 	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, adminID)
 	if err != nil {
 		return err
 	}
 	if !isAdmin {
-		return errors.New("chỉ admin mới có quyền mở tắt tiếng")
+		return errorsapp.New(errorsapp.ErrCodeGCAdminOnly)
 	}
 
 	if err := s.groupRepo.UnmuteUser(ctx, chatID, targetUserID); err != nil {
-		return fmt.Errorf("unmute: %w", err)
+		return errorsapp.Wrap(errorsapp.ErrCodeGCMuted, err)
 	}
 
 	content := "Quyền gửi tin nhắn đã được mở lại trong nhóm."
@@ -535,13 +532,13 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 	}
 
 	if req.ChatID != chatID {
-		return errors.New("yêu cầu không thuộc nhóm này")
+		return errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
 	}
 	if req.TargetUserID != targetUserID {
-		return errors.New("bạn không phải người được mời")
+		return errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
 	}
 	if req.Status != models.GroupChatMemberRequestPending {
-		return errors.New("yêu cầu này đã được xử lý")
+		return errorsapp.New(errorsapp.ErrCodeGCRequestAlreadyHandled)
 	}
 
 	isBanned, err := s.groupRepo.IsUserBanned(ctx, chatID, targetUserID)
@@ -549,7 +546,7 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 		return err
 	}
 	if isBanned {
-		return errors.New("bạn đã bị chặn khỏi nhóm này")
+		return errorsapp.New(errorsapp.ErrCodeGCBanned)
 	}
 
 	isTargetMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
@@ -557,7 +554,7 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 		return err
 	}
 	if isTargetMember {
-		return errors.New("người dùng này đã là thành viên của nhóm")
+		return errorsapp.New(errorsapp.ErrCodeGCAlreadyMember)
 	}
 
 	if err := s.groupRepo.ApproveMemberRequest(ctx, requestID); err != nil {
@@ -587,13 +584,13 @@ func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targ
 	}
 
 	if req.ChatID != chatID {
-		return errors.New("yêu cầu không thuộc nhóm này")
+		return errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
 	}
 	if req.TargetUserID != targetUserID {
-		return errors.New("bạn không phải người được mời")
+		return errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
 	}
 	if req.Status != models.GroupChatMemberRequestPending {
-		return errors.New("yêu cầu này đã được xử lý")
+		return errorsapp.New(errorsapp.ErrCodeGCRequestAlreadyHandled)
 	}
 
 	now := time.Now().UTC()
@@ -606,10 +603,10 @@ func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targ
 func (s *GroupChatService) EnsureGroupMember(ctx context.Context, chatID, userID string) error {
 	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, userID)
 	if err != nil {
-		return fmt.Errorf("kiểm tra thành viên nhóm thất bại: %w", err)
+		return errorsapp.Wrap(errorsapp.ErrCodeGCNotMember, err)
 	}
 	if !isMember {
-		return errors.New("bạn không phải thành viên của nhóm này")
+		return errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 	return nil
 }

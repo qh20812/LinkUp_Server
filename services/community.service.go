@@ -2,8 +2,8 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
@@ -44,27 +44,27 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 
 	isAdmin, err := s.authRepo.HasRole(ctx, creatorID, models.RoleAdmin)
 	if err != nil {
-		return nil, nil, errors.New("lỗi khi kiểm tra quyền người dùng")
+		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	isSuperAdmin, err := s.authRepo.HasRole(ctx, creatorID, models.RoleSuperAdmin)
 	if err != nil {
-		return nil, nil, errors.New("lỗi khi kiểm tra quyền người dùng")
+		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	if isAdmin || isSuperAdmin {
-		return nil, nil, errors.New("quản trị viên không được tạo cộng đồng")
+		return nil, nil, errorsapp.New(errorsapp.ErrCodeAdminCannotCreate)
 	}
 
 	creator, err := s.authRepo.FindByID(ctx, creatorID)
 	if err != nil {
-		return nil, nil, errors.New("người dùng không tồn tại")
+		return nil, nil, errorsapp.New(errorsapp.ErrCodeUserNotFound)
 	}
 	if !creator.IsActive() {
-		return nil, nil, errors.New("tài khoản chưa được kích hoạt, không thể tạo cộng đồng")
+		return nil, nil, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
 	taken, err := s.repo.IsNameTaken(ctx, name)
 	if err != nil {
-		return nil, nil, errors.New("lỗi khi kiểm tra tên cộng đồng")
+		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	if taken {
 		return nil, nil, validations.ErrCommunityNameExists
@@ -99,7 +99,7 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 
 	encKey, err := utils.GenerateEncryptionKey()
 	if err != nil {
-		return nil, nil, errors.New("lỗi khi tạo mã khóa mã hóa cho group chat")
+		return nil, nil, errorsapp.New(errorsapp.ErrCodeEncryptionKeyFailed)
 	}
 
 	chat := models.NewChat(models.ChatTypeGroup, community.Name, community.AvatarURI)
@@ -131,20 +131,20 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 
 	community, err := s.repo.FindByID(ctx, communityID)
 	if err != nil {
-		return errors.New("cộng đồng không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
 	}
 
 	user, err := s.authRepo.FindByID(ctx, userID)
 	if err != nil {
-		return errors.New("người dùng không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeUserNotFound)
 	}
 	if !user.IsActive() {
-		return errors.New("tài khoản chưa được kích hoạt")
+		return errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
 	src, err := file.Open()
 	if err != nil {
-		return errors.New("không thể đọc file ảnh")
+		return errorsapp.New(errorsapp.ErrCodeImageReadFailed)
 	}
 	if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
 		MinWidth:  800,
@@ -159,11 +159,11 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 
 	media, err := s.mediaService.UploadMedia(ctx, userID, file)
 	if err != nil {
-		return errors.New("tải ảnh background thất bại")
+		return errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed)
 	}
 
 	if media.Status == models.MediaStatusRejected {
-		return errors.New("ảnh background vi phạm tiêu chuẩn cộng đồng")
+		return errorsapp.New(errorsapp.ErrCodeBackgroundRejected)
 	}
 
 	if err := s.validation.ValidateBackgroundURI(media.FileURI); err != nil {
@@ -171,7 +171,7 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 	}
 
 	if err := s.repo.UpdateBackground(ctx, community.ID, media.FileURI); err != nil {
-		return errors.New("cập nhật background cộng đồng thất bại")
+		return errorsapp.New(errorsapp.ErrCodeBackgroundUpdateFailed)
 	}
 
 	return nil
@@ -180,10 +180,10 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID, inviteCode, invitationID string) (*dto.JoinResult, error) {
 	user, err := s.authRepo.FindByID(ctx, userID)
 	if err != nil {
-		return nil, errors.New("người dùng không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodeUserNotFound)
 	}
 	if !user.IsActive() {
-		return nil, errors.New("tài khoản chưa được kích hoạt")
+		return nil, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
 	community, err := s.repo.FindByID(ctx, communityID)
@@ -193,7 +193,7 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID,
 
 	isMember, err := s.repo.IsUserMember(ctx, communityID, userID)
 	if err != nil {
-		return nil, errors.New("lỗi khi kiểm tra thành viên")
+		return nil, errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if isMember {
 		return nil, validations.ErrAlreadyMember
@@ -220,7 +220,7 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 	if community.AutoApprove {
 		groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, community.ID)
 		if err != nil {
-			return nil, errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+			return nil, errorsapp.New(errorsapp.ErrCodeGroupChatNotFound)
 		}
 
 		if err := s.repo.AddCommunityMemberAndGroupChat(ctx, community.ID, userID, groupChat.ID); err != nil {
@@ -248,7 +248,7 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 	joinReq.CreatedAt = now
 
 	if err := s.repo.CreateJoinRequest(ctx, &joinReq); err != nil {
-		return nil, errors.New("gửi yêu cầu tham gia thất bại")
+		return nil, errorsapp.New(errorsapp.ErrCodeJoinRequestFailed)
 	}
 
 	s.notifService.Create(ctx, community.CreatorID, &userID, models.NotificationTypeCommunityJoinRequest, "đã gửi yêu cầu tham gia cộng đồng", nil, &userID, nil)
@@ -258,7 +258,7 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 
 func (s *CommunityService) joinByCode(ctx context.Context, userID string, community *models.Community, code string) (*dto.JoinResult, error) {
 	if code == "" {
-		return nil, errors.New("mã mời là bắt buộc")
+		return nil, errorsapp.New(errorsapp.ErrCodeInviteCodeRequired)
 	}
 
 	inviteCode, err := s.repo.FindInviteCodeByCode(ctx, code)
@@ -272,7 +272,7 @@ func (s *CommunityService) joinByCode(ctx context.Context, userID string, commun
 
 	groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, community.ID)
 	if err != nil {
-		return nil, errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+		return nil, errorsapp.New(errorsapp.ErrCodeGroupChatNotFound)
 	}
 
 	if err := s.repo.AddCommunityMemberAndGroupChat(ctx, community.ID, userID, groupChat.ID); err != nil {
@@ -291,7 +291,7 @@ func (s *CommunityService) joinByCode(ctx context.Context, userID string, commun
 
 func (s *CommunityService) joinByInvitation(ctx context.Context, userID string, community *models.Community, invitationID string) (*dto.JoinResult, error) {
 	if invitationID == "" {
-		return nil, errors.New("lời mời là bắt buộc")
+		return nil, errorsapp.New(errorsapp.ErrCodeInvitationRequired)
 	}
 
 	invitation, err := s.repo.FindInvitationByID(ctx, invitationID)
@@ -309,7 +309,7 @@ func (s *CommunityService) joinByInvitation(ctx context.Context, userID string, 
 
 	groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, community.ID)
 	if err != nil {
-		return nil, errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+		return nil, errorsapp.New(errorsapp.ErrCodeGroupChatNotFound)
 	}
 
 	if err := s.repo.AddCommunityMemberAndGroupChat(ctx, community.ID, userID, groupChat.ID); err != nil {
@@ -333,7 +333,7 @@ func (s *CommunityService) ListPendingRequests(ctx context.Context, adminID, com
 
 	requests, err := s.repo.FindPendingJoinRequestsByCommunity(ctx, communityID)
 	if err != nil {
-		return dto.JoinRequestListResponse{}, errors.New("lỗi khi lấy danh sách yêu cầu")
+		return dto.JoinRequestListResponse{}, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	items := make([]dto.JoinRequestItem, 0, len(requests))
@@ -373,7 +373,7 @@ func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requ
 
 	groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, req.CommunityID)
 	if err != nil {
-		return errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+		return errorsapp.New(errorsapp.ErrCodeGroupChatNotFound)
 	}
 
 	if err := s.repo.ApproveJoinRequest(ctx, requestID, &groupChat.ID); err != nil {
@@ -434,7 +434,7 @@ func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, commun
 
 	isCreator, err := s.repo.IsUserCreator(ctx, communityID, memberID)
 	if err != nil {
-		return errors.New("lỗi khi kiểm tra thông tin thành viên")
+		return errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if isCreator {
 		return validations.ErrCannotTargetAdmin
@@ -442,7 +442,7 @@ func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, commun
 
 	newRoleName := models.RoleName(newRole)
 	if err := s.repo.UpdateUserRole(ctx, communityID, memberID, newRoleName); err != nil {
-		return errors.New("cập nhật vai trò thất bại")
+		return errorsapp.New(errorsapp.ErrCodeRoleUpdateFailed)
 	}
 
 	s.notifService.Create(ctx, memberID, &adminID, models.NotificationTypeCommunityRoleChanged, "đã thay đổi vai trò của bạn trong cộng đồng", nil, &adminID, nil)
@@ -482,7 +482,7 @@ func (s *CommunityService) KickMember(ctx context.Context, adminID, communityID,
 
 	isCreator, err := s.repo.IsUserCreator(ctx, communityID, memberID)
 	if err != nil {
-		return errors.New("lỗi khi kiểm tra thông tin thành viên")
+		return errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if isCreator {
 		return validations.ErrCannotKickCreator
@@ -490,14 +490,14 @@ func (s *CommunityService) KickMember(ctx context.Context, adminID, communityID,
 
 	isAdmin, err := s.repo.IsUserAdmin(ctx, communityID, memberID)
 	if err != nil {
-		return errors.New("lỗi khi kiểm tra quyền thành viên")
+		return errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if isAdmin && adminID != community.CreatorID {
 		return validations.ErrCannotKickAdmin
 	}
 
 	if err := s.repo.RemoveMember(ctx, communityID, memberID); err != nil {
-		return errors.New("đuổi thành viên thất bại")
+		return errorsapp.New(errorsapp.ErrCodeKickFailed)
 	}
 
 	content := fmt.Sprintf("bạn đã bị đuổi khỏi cộng đồng %s với lý do: %s", community.Name, reason)
@@ -527,7 +527,7 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 
 	isMember, err := s.repo.IsUserMember(ctx, communityID, userID)
 	if err != nil {
-		return errors.New("lỗi khi kiểm tra thành viên")
+		return errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if !isMember {
 		return validations.ErrMemberNotFound
@@ -535,7 +535,7 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 
 	isCreator, err := s.repo.IsUserCreator(ctx, communityID, userID)
 	if err != nil {
-		return errors.New("lỗi khi kiểm tra thông tin thành viên")
+		return errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if isCreator {
 		return validations.ErrCreatorCannotLeave
@@ -570,7 +570,7 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 
 func (s *CommunityService) TransferOwnership(ctx context.Context, requesterID, communityID, targetUserID string, keepAdmin bool) error {
 	if requesterID == targetUserID {
-		return errors.New("không thể chuyển quyền sở hữu cho chính mình")
+		return errorsapp.New(errorsapp.ErrCodeTransferOwnToSelf)
 	}
 
 	community, err := s.repo.FindByID(ctx, communityID)
@@ -579,19 +579,19 @@ func (s *CommunityService) TransferOwnership(ctx context.Context, requesterID, c
 	}
 
 	if community.CreatorID != requesterID {
-		return errors.New("chỉ người tạo cộng đồng mới có thể chuyển quyền sở hữu")
+		return errorsapp.New(errorsapp.ErrCodeOnlyCreatorCanTransfer)
 	}
 
 	isMember, err := s.repo.IsUserMember(ctx, communityID, targetUserID)
 	if err != nil {
-		return errors.New("lỗi khi kiểm tra thành viên")
+		return errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if !isMember {
 		return validations.ErrMemberNotFound
 	}
 
 	if err := s.repo.TransferCommunityOwnership(ctx, communityID, requesterID, targetUserID, keepAdmin); err != nil {
-		return errors.New("chuyển quyền sở hữu thất bại")
+		return errorsapp.New(errorsapp.ErrCodeTransferFailed)
 	}
 
 	s.notifService.Create(ctx, targetUserID, &requesterID,
@@ -611,7 +611,7 @@ func (s *CommunityService) CreateInviteCode(ctx context.Context, adminID, commun
 
 	code, err := utils.GenerateInviteCode()
 	if err != nil {
-		return nil, errors.New("tạo mã mời thất bại")
+		return nil, errorsapp.New(errorsapp.ErrCodeInviteCodeCreateFail)
 	}
 
 	now := time.Now().UTC()
@@ -627,7 +627,7 @@ func (s *CommunityService) CreateInviteCode(ctx context.Context, adminID, commun
 	}
 
 	if err := s.repo.CreateInviteCode(ctx, inviteCode); err != nil {
-		return nil, errors.New("lưu mã mời thất bại")
+		return nil, errorsapp.New(errorsapp.ErrCodeInviteCodeSaveFail)
 	}
 
 	return &dto.InviteCodeResponse{
@@ -648,7 +648,7 @@ func (s *CommunityService) ListInviteCodes(ctx context.Context, adminID, communi
 
 	codes, err := s.repo.ListInviteCodesByCommunity(ctx, communityID)
 	if err != nil {
-		return nil, errors.New("lấy danh sách mã mời thất bại")
+		return nil, errorsapp.New(errorsapp.ErrCodeInviteCodeListFail)
 	}
 
 	items := make([]dto.InviteCodeResponse, 0, len(codes))
@@ -677,7 +677,7 @@ func (s *CommunityService) DeactivateInviteCode(ctx context.Context, adminID, co
 	}
 
 	if err := s.repo.DeactivateInviteCode(ctx, inviteCode.ID); err != nil {
-		return errors.New("vô hiệu hóa mã mời thất bại")
+		return errorsapp.New(errorsapp.ErrCodeInviteCodeDeactFail)
 	}
 
 	return nil
@@ -696,7 +696,7 @@ func (s *CommunityService) SendInvitation(ctx context.Context, inviterID, commun
 
 	isMember, err := s.repo.IsUserMember(ctx, communityID, inviteeID)
 	if err != nil {
-		return nil, errors.New("lỗi khi kiểm tra thành viên")
+		return nil, errorsapp.New(errorsapp.ErrCodeMemberCheckFailed)
 	}
 	if isMember {
 		return nil, validations.ErrAlreadyMember
@@ -718,7 +718,7 @@ func (s *CommunityService) SendInvitation(ctx context.Context, inviterID, commun
 	}
 
 	if err := s.repo.CreateInvitation(ctx, invitation); err != nil {
-		return nil, errors.New("gửi lời mời thất bại")
+		return nil, errorsapp.New(errorsapp.ErrCodeInvitationSendFailed)
 	}
 
 	community, err := s.repo.FindByID(ctx, communityID)
@@ -745,7 +745,7 @@ func (s *CommunityService) SendInvitation(ctx context.Context, inviterID, commun
 func (s *CommunityService) ListMyInvitations(ctx context.Context, userID string) ([]dto.InvitationItem, error) {
 	invites, err := s.repo.ListPendingInvitationsByInvitee(ctx, userID)
 	if err != nil {
-		return nil, errors.New("lấy danh sách lời mời thất bại")
+		return nil, errorsapp.New(errorsapp.ErrCodeInvitationListFailed)
 	}
 
 	items := make([]dto.InvitationItem, 0, len(invites))
@@ -779,7 +779,7 @@ func (s *CommunityService) RespondInvitation(ctx context.Context, userID, invita
 	if accept {
 		groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, invitation.CommunityID)
 		if err != nil {
-			return errors.New("lỗi khi tìm group chat mặc định của cộng đồng")
+			return errorsapp.New(errorsapp.ErrCodeGroupChatNotFound)
 		}
 
 		if err := s.repo.AddCommunityMemberAndGroupChat(ctx, invitation.CommunityID, userID, groupChat.ID); err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -70,7 +71,7 @@ func (s *EmailVerificationService) VerifyEmail(ctx context.Context, tokenStr str
 	if err != nil {
 		if errors.Is(err, repository.ErrVerificationTokenNotFound) {
 			return &dto.VerifyEmailResponse{
-				Message:  "Token xác thực không hợp lệ",
+				Message:  errorsapp.New(errorsapp.ErrCodeVerifyTokenNotFound).Message,
 				Verified: false,
 			}, nil
 		}
@@ -79,14 +80,14 @@ func (s *EmailVerificationService) VerifyEmail(ctx context.Context, tokenStr str
 
 	if vt.IsExpired() {
 		return &dto.VerifyEmailResponse{
-			Message:  "Token xác thực đã hết hạn",
+			Message:  errorsapp.New(errorsapp.ErrCodeVerifyTokenExpired).Message,
 			Verified: false,
 		}, nil
 	}
 
 	if vt.IsUsed() {
 		return &dto.VerifyEmailResponse{
-			Message:  "Token xác thực đã được sử dụng",
+			Message:  errorsapp.New(errorsapp.ErrCodeVerifyTokenUsed).Message,
 			Verified: false,
 		}, nil
 	}
@@ -145,7 +146,7 @@ func (s *EmailVerificationService) ResendVerification(ctx context.Context, email
 
 	if user.IsEmailVerified() {
 		return &dto.ResendVerificationResponse{
-			Message: "Email đã được xác thực trước đó",
+			Message: errorsapp.New(errorsapp.ErrCodeVerifyAlreadyDone).Message,
 		}, nil
 	}
 
@@ -154,8 +155,9 @@ func (s *EmailVerificationService) ResendVerification(ctx context.Context, email
 		return nil, err
 	}
 	if last != nil && time.Since(last.CreatedAt) < 60*time.Second {
+		remaining := 60 - int(time.Since(last.CreatedAt).Seconds())
 		return &dto.ResendVerificationResponse{
-			Message: "Vui lòng đợi 60 giây trước khi yêu cầu gửi lại email xác thực",
+			Message: errorsapp.Newf(errorsapp.ErrCodeVerifyRateLimited, map[string]any{"seconds": remaining}).Message,
 		}, nil
 	}
 

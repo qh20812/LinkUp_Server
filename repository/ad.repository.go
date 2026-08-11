@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 
 	"gorm.io/gorm"
@@ -61,7 +62,7 @@ func (r *adRepositoryImpl) FindByID(id string) (*models.Ad, error) {
 	err := r.db.Preload("MediaList").Where("id = ?", id).First(&ad).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("không tìm thấy quảng cáo")
+			return nil, errorsapp.New(errorsapp.ErrCodeAdNotFound)
 		}
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func (r *adRepositoryImpl) Update(ad *models.Ad) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("không tìm thấy quảng cáo để cập nhật")
+		return errorsapp.New(errorsapp.ErrCodeAdNotUpdated)
 	}
 	return nil
 }
@@ -85,7 +86,7 @@ func (r *adRepositoryImpl) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("delete ad: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("quảng cáo không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdNotDeleted)
 	}
 	return nil
 }

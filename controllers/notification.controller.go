@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/services"
 )
@@ -37,7 +38,7 @@ func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
 
 	notifications, total, err := ctrl.service.GetList(c.Request.Context(), userID.(string), page, pageSize, unreadOnly)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -53,7 +54,7 @@ func (ctrl *NotificationController) MarkAsRead(c *gin.Context) {
 	notifID := c.Param("id")
 
 	if err := ctrl.service.MarkAsRead(c.Request.Context(), userID.(string), notifID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -64,7 +65,7 @@ func (ctrl *NotificationController) MarkAllAsRead(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
 	if err := ctrl.service.MarkAllAsRead(c.Request.Context(), userID.(string)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -76,7 +77,7 @@ func (ctrl *NotificationController) GetUnreadCount(c *gin.Context) {
 
 	count, err := ctrl.service.GetUnreadCount(c.Request.Context(), userID.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -88,7 +89,7 @@ func (ctrl *NotificationController) GetPreferences(c *gin.Context) {
 
 	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -100,12 +101,12 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 
 	var input UpdatePreferencesInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil && input.CommunityEnabled == nil && input.VoiceCallEnabled == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "không có trường nào để cập nhật"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -135,7 +136,7 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 	}
 
 	if err := ctrl.service.UpdatePreferences(c.Request.Context(), pref); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

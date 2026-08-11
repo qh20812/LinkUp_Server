@@ -1,134 +1,131 @@
 package controllers
 
 import (
-    "linkup/dto"
-    "linkup/services"
-    "net/http"
+	"linkup/dto"
+	errorsapp "linkup/errors"
+	"linkup/services"
+	"net/http"
 
-    "github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
 )
 
 type ProfileController struct {
-    profileService *services.ProfileService
+	profileService *services.ProfileService
 }
 
 func NewProfileController(profileService *services.ProfileService) *ProfileController {
-    return &ProfileController{
-        profileService: profileService,
-    }
+	return &ProfileController{
+		profileService: profileService,
+	}
 }
 
 func (h *ProfileController) ViewProfile(c *gin.Context) {
-    userID, exists := c.Get("userID")
-    if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
-        return
-    }
+	userID, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
 
-    profile, err := h.profileService.ViewProfile(c.Request.Context(), userID.(string))
-    if err != nil {
-        c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-        return
-    }
+	profile, err := h.profileService.ViewProfile(c.Request.Context(), userID.(string))
+	if err != nil {
+		errorsapp.Respond(c, http.StatusNotFound, err)
+		return
+	}
 
-    response := dto.ViewProfileResponse{
-        DisplayName:                profile.DisplayName,
-        PhoneNumber:                profile.PhoneNumber,
-        DateOfBirth:                profile.DateOfBirth,
-        AvatarURI:                  profile.AvatarURI,
-        Bio:                        profile.Bio,
-        IsPrivateProfile:           profile.IsPrivateProfile,
-        IsPrivatePosts:             profile.IsPrivatePosts,
-        AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
-        UpdatedAt:                  profile.UpdatedAt,
-    }
+	response := dto.ViewProfileResponse{
+		DisplayName:                profile.DisplayName,
+		PhoneNumber:                profile.PhoneNumber,
+		DateOfBirth:                profile.DateOfBirth,
+		AvatarURI:                  profile.AvatarURI,
+		Bio:                        profile.Bio,
+		IsPrivateProfile:           profile.IsPrivateProfile,
+		IsPrivatePosts:             profile.IsPrivatePosts,
+		AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
+		UpdatedAt:                  profile.UpdatedAt,
+	}
 
-    c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ProfileController) ViewProfileByID(c *gin.Context) {
-    targetUserID := c.Param("userID")
-    if targetUserID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id là bắt buộc"})
-        return
-    }
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
 
-    viewerID := ""
-    if val, exists := c.Get("userID"); exists {
-        viewerID = val.(string)
-    }
+	viewerID := ""
+	if val, exists := c.Get("userID"); exists {
+		viewerID = val.(string)
+	}
 
-    profile, err := h.profileService.ViewProfileByID(c.Request.Context(), viewerID, targetUserID)
-    if err != nil {
-		if err.Error() == "hồ sơ này ở chế độ riêng tư" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "hồ sơ này ở chế độ riêng tư"})
-            return
-        }
-        c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-        return
-    }
+	profile, err := h.profileService.ViewProfileByID(c.Request.Context(), viewerID, targetUserID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusNotFound, err)
+		return
+	}
 
-    response := dto.ViewProfileResponse{
-        DisplayName:                profile.DisplayName,
-        PhoneNumber:                profile.PhoneNumber,
-        DateOfBirth:                profile.DateOfBirth,
-        AvatarURI:                  profile.AvatarURI,
-        Bio:                        profile.Bio,
-        IsPrivateProfile:           profile.IsPrivateProfile,
-        IsPrivatePosts:             profile.IsPrivatePosts,
-        AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
-        UpdatedAt:                  profile.UpdatedAt,
-    }
+	response := dto.ViewProfileResponse{
+		DisplayName:                profile.DisplayName,
+		PhoneNumber:                profile.PhoneNumber,
+		DateOfBirth:                profile.DateOfBirth,
+		AvatarURI:                  profile.AvatarURI,
+		Bio:                        profile.Bio,
+		IsPrivateProfile:           profile.IsPrivateProfile,
+		IsPrivatePosts:             profile.IsPrivatePosts,
+		AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
+		UpdatedAt:                  profile.UpdatedAt,
+	}
 
-    c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *ProfileController) EditProfile(c *gin.Context) {
-    userID, exists := c.Get("userID")
-    if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
-        return
-    }
+	userID, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
 
-    var input dto.EditProfileInput
-    if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
-        return
-    }
+	var input dto.EditProfileInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
 
-    if input.DisplayName == nil && input.PhoneNumber == nil &&
-        input.DateOfBirth == nil && input.AvatarURI == nil &&
-        input.Bio == nil && input.IsPrivateProfile == nil &&
-        input.IsPrivatePosts == nil && input.AllowStrangerFriendRequest == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cần ít nhất một trường để cập nhật"})
-        return
-    }
+	if input.DisplayName == nil && input.PhoneNumber == nil &&
+		input.DateOfBirth == nil && input.AvatarURI == nil &&
+		input.Bio == nil && input.IsPrivateProfile == nil &&
+		input.IsPrivatePosts == nil && input.AllowStrangerFriendRequest == nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
 
-    if input.DisplayName != nil && *input.DisplayName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "tên hiển thị không được để trống"})
-        return
-    }
+	if input.DisplayName != nil && *input.DisplayName == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
 
-    updatedProfile, err := h.profileService.EditProfile(c.Request.Context(), userID.(string), input)
-    if err != nil {
-        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-        return
-    }
+	updatedProfile, err := h.profileService.EditProfile(c.Request.Context(), userID.(string), input)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
 
-    response := dto.EditProfileResponse{
-	Message: "Cập nhật hồ sơ thành công",
-        Data: dto.ViewProfileResponse{
-            DisplayName:                updatedProfile.DisplayName,
-            PhoneNumber:                updatedProfile.PhoneNumber,
-            DateOfBirth:                updatedProfile.DateOfBirth,
-            AvatarURI:                  updatedProfile.AvatarURI,
-            Bio:                        updatedProfile.Bio,
-            IsPrivateProfile:           updatedProfile.IsPrivateProfile,
-            IsPrivatePosts:             updatedProfile.IsPrivatePosts,
-            AllowStrangerFriendRequest: updatedProfile.AllowStrangerFriendRequest,
-            UpdatedAt:                  updatedProfile.UpdatedAt,
-        },
-    }
+	response := dto.EditProfileResponse{
+		Message: "Cập nhật hồ sơ thành công",
+		Data: dto.ViewProfileResponse{
+			DisplayName:                updatedProfile.DisplayName,
+			PhoneNumber:                updatedProfile.PhoneNumber,
+			DateOfBirth:                updatedProfile.DateOfBirth,
+			AvatarURI:                  updatedProfile.AvatarURI,
+			Bio:                        updatedProfile.Bio,
+			IsPrivateProfile:           updatedProfile.IsPrivateProfile,
+			IsPrivatePosts:             updatedProfile.IsPrivatePosts,
+			AllowStrangerFriendRequest: updatedProfile.AllowStrangerFriendRequest,
+			UpdatedAt:                  updatedProfile.UpdatedAt,
+		},
+	}
 
-    c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }

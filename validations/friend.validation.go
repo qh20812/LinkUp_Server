@@ -1,13 +1,8 @@
 package validations
 
 import (
-	"errors"
+	errorsapp "linkup/errors"
 	"strings"
-)
-
-var (
-	ErrFriendTargetRequired = errors.New("người dùng mục tiêu là bắt buộc")
-	ErrSelfFriendRequest    = errors.New("không thể gửi lời mời kết bạn cho chính mình")
 )
 
 type FriendValidation struct{}
@@ -18,10 +13,10 @@ func NewFriendValidation() *FriendValidation {
 
 func (v *FriendValidation) ValidateToggleFriendRequest(userID, targetUserID string) error {
 	if strings.TrimSpace(targetUserID) == "" {
-		return ErrFriendTargetRequired
+		return errorsapp.New(errorsapp.ErrCodeFriendTargetRequired)
 	}
 	if userID == targetUserID {
-		return ErrSelfFriendRequest
+		return errorsapp.New(errorsapp.ErrCodeFriendSelfRequest)
 	}
 	return nil
 }

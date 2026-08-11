@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"net/http"
 	"strconv"
@@ -21,7 +22,7 @@ func NewAdController(service services.AdService) *AdController {
 func (ctrl *AdController) CreateAd(c *gin.Context) {
 	err := c.Request.ParseMultipartForm(500 << 20)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Không thể parse dữ liệu form upload"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -71,7 +72,11 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 	currentUserID := c.GetString("userID")
 	ad, err := ctrl.service.CreateAdWithMedia(c, input, files, currentUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
 		return
 	}
 
@@ -84,13 +89,17 @@ func (ctrl *AdController) UpdateStatus(c *gin.Context) {
 
 	var input dto.UpdateAdStatusInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
 	ad, err := ctrl.service.UpdateStatus(id, input.Status, partnerID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Status updated successfully", "data": ad})
@@ -102,7 +111,11 @@ func (ctrl *AdController) GetAnalytics(c *gin.Context) {
 
 	report, err := ctrl.service.GetAdPerformance(id, partnerID)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+		errorsapp.Respond(c, http.StatusForbidden, err)
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": report})
@@ -111,7 +124,7 @@ func (ctrl *AdController) GetAnalytics(c *gin.Context) {
 func (ctrl *AdController) GetAdminList(c *gin.Context) {
 	list, err := ctrl.service.GetDashboardList()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": list})
@@ -120,7 +133,7 @@ func (ctrl *AdController) GetAdminList(c *gin.Context) {
 func (ctrl *AdController) GetUserFeed(c *gin.Context) {
 	ads, err := ctrl.service.GetAdsForUserFeed()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": ads})
@@ -130,7 +143,7 @@ func (ctrl *AdController) TrackAction(c *gin.Context) {
 	adID := c.Param("id")
 	var input dto.TrackActionInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -144,7 +157,11 @@ func (ctrl *AdController) TrackAction(c *gin.Context) {
 	ipAddress := c.ClientIP()
 	err := ctrl.service.TrackUserAction(adID, userIDPtr, input.ActionType, ipAddress)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+		errorsapp.Respond(c, http.StatusNotFound, err)
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "recorded"})

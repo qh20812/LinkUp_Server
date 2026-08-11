@@ -2,9 +2,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"linkup/models"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
@@ -44,23 +44,23 @@ func (s *GroupMessageService) ensureGroupMember(ctx context.Context, userID, cha
 	}
 
 	if chat.Type != models.ChatTypeGroup {
-		return nil, errors.New("chat này không phải nhóm chat")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotGroupChat)
 	}
 
 	banned, err := s.groupRepo.IsUserBanned(ctx, chatID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("kiểm tra danh sách chặn thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCBanned, err)
 	}
 	if banned {
-		return nil, errors.New("bạn đã bị chặn khỏi nhóm này")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCBanned)
 	}
 
 	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("kiểm tra thành viên thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCNotMember, err)
 	}
 	if !isMember {
-		return nil, errors.New("bạn không phải thành viên của nhóm này")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 
 	return chat, nil
@@ -103,36 +103,36 @@ func (s *GroupMessageService) SendMessage(
 	if emojiID != nil && *emojiID != "" {
 		ok, err := s.chatRepo.IsEmojiExists(ctx, *emojiID)
 		if err != nil {
-			return nil, fmt.Errorf("check emoji: %w", err)
+			return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEmojiNotFound, err)
 		}
 		if !ok {
-			return nil, errors.New("emoji không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCEmojiNotFound)
 		}
 	}
 
 	if mediaID != nil && *mediaID != "" {
 		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
 		if err != nil {
-			return nil, errors.New("media không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotFound)
 		}
 		if media.UserID != userID {
-			return nil, errors.New("media không thuộc về bạn")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotYours)
 		}
 	}
 
 	if replyToMessageID != nil && *replyToMessageID != "" {
 		parentMsg, err := s.chatRepo.FindMessageByID(ctx, *replyToMessageID)
 		if err != nil {
-			return nil, errors.New("tin nhắn gốc không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCReplyNotFound)
 		}
 		if parentMsg.ChatID != chatID {
-			return nil, errors.New("tin nhắn gốc không thuộc phòng chat này")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCReplyWrongChat)
 		}
 	}
 
 	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	if err != nil {
-		return nil, fmt.Errorf("lấy khóa mã hóa thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
 	}
 
 	encryptedContent, err := utils.EncryptMessage(content, encryptionKey)

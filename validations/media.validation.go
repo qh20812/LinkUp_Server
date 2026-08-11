@@ -1,7 +1,6 @@
 package validations
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -11,24 +10,10 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
+
+	errorsapp "linkup/errors"
 )
 
-var (
-	ErrFileRequired         = errors.New("file là bắt buộc")
-	ErrFileTypeNotAllowed   = errors.New("định dạng file không được hỗ trợ")
-	ErrFileTooLarge         = errors.New("file vượt quá giới hạn kích thước")
-	ErrInsufficientStorage  = errors.New("dung lượng lưu trữ không đủ")
-	ErrStorageQuotaExceeded = errors.New("dung lượng lưu trữ đã đầy, vui lòng mua thêm dung lượng")
-	ErrMediaNotFound        = errors.New("media không tồn tại")
-	ErrMediaForbidden       = errors.New("Bạn không có quyền xóa media này")
-	ErrImageDecode          = errors.New("không thể đọc thông tin ảnh, file có thể bị hỏng")
-	ErrImageTooSmall        = errors.New("ảnh quá nhỏ")
-	ErrImageTooLarge        = errors.New("ảnh quá lớn")
-	ErrInvalidAspectRatio   = errors.New("tỉ lệ khung hình không hợp lệ")
-)
-
-// DimensionConstraint định nghĩa ràng buộc kích thước cho ảnh upload.
-// AspectRatio: "1:1" (vuông) hoặc "" (không kiểm tra).
 type DimensionConstraint struct {
 	MinWidth    int
 	MinHeight   int
@@ -59,14 +44,14 @@ func (v *MediaValidation) ValidateFile(filename string, fileSize int64, contentT
 	isVideo := contains(v.AllowedVideoTypes, ext)
 
 	if !isImage && !isVideo {
-		return ErrFileTypeNotAllowed
+		return errorsapp.New(errorsapp.ErrCodeMediaFileTypeNotAllowed)
 	}
 
 	if isImage && fileSize > v.MaxImageSize {
-		return ErrFileTooLarge
+		return errorsapp.New(errorsapp.ErrCodeMediaFileTooLarge)
 	}
 	if isVideo && fileSize > v.MaxVideoSize {
-		return ErrFileTooLarge
+		return errorsapp.New(errorsapp.ErrCodeMediaFileTooLarge)
 	}
 
 	return nil
@@ -74,7 +59,7 @@ func (v *MediaValidation) ValidateFile(filename string, fileSize int64, contentT
 
 func (v *MediaValidation) ValidateStorageQuota(availableBytes float64, requestedBytes int64) error {
 	if float64(requestedBytes) > availableBytes {
-		return ErrInsufficientStorage
+		return errorsapp.New(errorsapp.ErrCodeMediaInsufficientStorage)
 	}
 	return nil
 }
@@ -88,28 +73,26 @@ func contains(arr []string, str string) bool {
 	return false
 }
 
-// ValidateImageDimensions đọc kích thước ảnh từ reader và kiểm tra ràng buộc.
-// Hỗ trợ JPEG, PNG, GIF, WebP.
 func ValidateImageDimensions(r io.Reader, c DimensionConstraint) (width, height int, err error) {
 	config, _, err := image.DecodeConfig(r)
 	if err != nil {
-		return 0, 0, ErrImageDecode
+		return 0, 0, errorsapp.New(errorsapp.ErrCodeMediaImageDecode)
 	}
 
 	w, h := config.Width, config.Height
 
 	if w < c.MinWidth || h < c.MinHeight {
-		return w, h, fmt.Errorf("%w: yêu cầu tối thiểu %dx%d, nhận được %dx%d", ErrImageTooSmall, c.MinWidth, c.MinHeight, w, h)
+		return w, h, fmt.Errorf("%w: yêu cầu tối thiểu %dx%d, nhận được %dx%d", errorsapp.New(errorsapp.ErrCodeMediaImageTooSmall), c.MinWidth, c.MinHeight, w, h)
 	}
 	if w > c.MaxWidth || h > c.MaxHeight {
-		return w, h, fmt.Errorf("%w: yêu cầu tối đa %dx%d, nhận được %dx%d", ErrImageTooLarge, c.MaxWidth, c.MaxHeight, w, h)
+		return w, h, fmt.Errorf("%w: yêu cầu tối đa %dx%d, nhận được %dx%d", errorsapp.New(errorsapp.ErrCodeMediaImageTooLarge), c.MaxWidth, c.MaxHeight, w, h)
 	}
 
 	if c.AspectRatio == "1:1" {
 		diff := math.Abs(float64(w - h))
 		maxDim := math.Max(float64(w), float64(h))
 		if maxDim > 0 && diff/maxDim > 0.05 {
-			return w, h, ErrInvalidAspectRatio
+			return w, h, errorsapp.New(errorsapp.ErrCodeMediaInvalidAspectRatio)
 		}
 	}
 

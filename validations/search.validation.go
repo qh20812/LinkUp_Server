@@ -1,13 +1,8 @@
 package validations
 
 import (
-	"errors"
+	errorsapp "linkup/errors"
 	"strings"
-)
-
-var (
-	ErrKeywordTooShort = errors.New("từ khóa tìm kiếm phải có ít nhất 2 ký tự")
-	ErrSearchTypeInvalid = errors.New("loại tìm kiếm phải là 'all', 'users', 'posts' hoặc 'hashtags'")
 )
 
 type SearchValidation struct{}
@@ -18,11 +13,11 @@ func NewSearchValidation() *SearchValidation {
 
 func (v *SearchValidation) ValidateSearch(keyword, searchType string) error {
 	if len(strings.TrimSpace(keyword)) < 2 {
-		return ErrKeywordTooShort
+		return errorsapp.New(errorsapp.ErrCodeSearchKeywordTooShort)
 	}
 
 	if searchType != "" && searchType != "all" && searchType != "users" && searchType != "posts" && searchType != "hashtags" {
-		return ErrSearchTypeInvalid
+		return errorsapp.New(errorsapp.ErrCodeSearchTypeInvalid)
 	}
 
 	return nil
