@@ -209,7 +209,7 @@ func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *
 
 func isNotificationEnabled(pref *models.NotificationPreference, notifType models.NotificationType) bool {
 	switch notifType {
-	case models.NotificationTypeLike:
+	case models.NotificationTypeLike, models.NotificationTypeShare:
 		return pref.LikeEnabled
 	case models.NotificationTypeComment:
 		return pref.CommentEnabled

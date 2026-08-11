@@ -25,12 +25,14 @@ type StoryService interface {
 type storyService struct {
 	repo         repository.StoryRepository
 	mediaService MediaService // Inject MediaService
+	notifService *NotificationService
 }
 
-func NewStoryService(repo repository.StoryRepository, mediaService MediaService) StoryService {
+func NewStoryService(repo repository.StoryRepository, mediaService MediaService, notifService *NotificationService) StoryService {
 	return &storyService{
 		repo:         repo,
 		mediaService: mediaService,
+		notifService: notifService,
 	}
 }
 
@@ -132,9 +134,17 @@ func (s *storyService) ViewStory(storyID, viewerID string) (*models.Story, error
 }
 
 func (s *storyService) InteractWithStory(storyID string, userID string, req dto.InteractStoryRequest) error {
-	_, err := s.repo.FindByID(storyID)
+	story, err := s.repo.FindByID(storyID)
 	if err != nil {
 		return errors.New("không tìm thấy bản tin để tương tác")
+	}
+
+	notifyOwner := func(notifType models.NotificationType, content string) {
+		if s.notifService == nil || story.UserID == userID {
+			return
+		}
+		senderID := userID
+		s.notifService.Create(context.Background(), story.UserID, &senderID, notifType, content, nil, nil, nil)
 	}
 
 	if req.Type == "react" {
@@ -164,7 +174,11 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 			EmojiID:    &req.EmojiID,
 			ClickCount: 1,
 		}
-		return s.repo.CreateInteract(interact)
+		if err := s.repo.CreateInteract(interact); err != nil {
+			return err
+		}
+		notifyOwner(models.NotificationTypeLike, "đã bày tỏ cảm xúc với story của bạn")
+		return nil
 	}
 
 	if req.Content == "" && req.Type == "reply" {
@@ -177,7 +191,18 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 		Type:    req.Type,
 		Content: req.Content,
 	}
-	return s.repo.CreateInteract(interact)
+	if err := s.repo.CreateInteract(interact); err != nil {
+		return err
+	}
+
+	notifType := models.NotificationTypeShare
+	content := "đã chia sẻ story của bạn"
+	if req.Type == "reply" {
+		notifType = models.NotificationTypeComment
+		content = "đã trả lời story của bạn"
+	}
+	notifyOwner(notifType, content)
+	return nil
 }
 
 func (s *storyService) GetAnalytics(storyID, userID string) (*dto.StoryAnalyticsResponse, error) {
