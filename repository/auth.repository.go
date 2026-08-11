@@ -355,3 +355,37 @@ func (r *AuthRepository) LinkGoogleAccount(ctx context.Context, userID string, g
 	}
 	return nil
 }
+
+// Deactivate marks the account as self-deactivated: status = suspended,
+// self_deactivated_at = now, and invalidates all existing tokens.
+func (r *AuthRepository) Deactivate(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"status":              models.UserStatusSuspended,
+			"self_deactivated_at": time.Now().UTC(),
+			"token_version":       gorm.Expr("token_version + 1"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("deactivate user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// Reactivate restores a self-deactivated account (status = active, clears the
+// self-deactivation marker). Only valid for accounts with self_deactivated_at set.
+func (r *AuthRepository) Reactivate(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ? AND self_deactivated_at IS NOT NULL", userID).
+		Updates(map[string]interface{}{
+			"status":              models.UserStatusActive,
+			"self_deactivated_at": nil,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("reactivate user: %w", result.Error)
+	}
+	return nil
+}

@@ -962,9 +962,6 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add users.email_verified_at: %w", err)
 	}
 
-	// Self deactivation column (user deactivates own account; reactivates on login)
-	if err := addColumnIfMissing(database, "users", "self_deactivated_at", "DATETIME NULL"); err != nil {
-		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)}
 	// Google OAuth column
 	if err := addColumnIfMissing(database, "users", "google_id", "VARCHAR(255) NULL"); err != nil {
 		return fmt.Errorf("schema: add users.google_id: %w", err)
@@ -972,6 +969,10 @@ func Run(env config.Env) error {
 	if err := addIndexIfMissing(database, "users", "idx_users_google_id",
 		"UNIQUE INDEX idx_users_google_id (google_id)"); err != nil {
 		return fmt.Errorf("schema: add users.google_id index: %w", err)
+	}
+	// Self deactivation column (user deactivates own account; reactivates on login)
+	if err := addColumnIfMissing(database, "users", "self_deactivated_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)
 	}
 
 	return nil

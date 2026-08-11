@@ -23,6 +23,7 @@ type AuthService struct {
 	adminSettingsRepo  *repository.AdminSettingsRepository
 	emailVerifyService *EmailVerificationService
 	googleVerifier     GoogleIDTokenVerifier
+	sessionRepo        *repository.UserSessionRepository
 	env                config.Env
 }
 
@@ -40,6 +41,9 @@ func (s *AuthService) SetEmailVerificationService(svc *EmailVerificationService)
 	s.emailVerifyService = svc
 }
 
+func (s *AuthService) SetGoogleIDTokenVerifier(v GoogleIDTokenVerifier) {
+	s.googleVerifier = v
+}
 
 func (s *AuthService) SetSessionRepository(sessionRepo *repository.UserSessionRepository) {
 	s.sessionRepo = sessionRepo
@@ -276,7 +280,7 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 		return dto.AuthResponse{}, errors.New("hệ thống đang bảo trì")
 	}
 
-	accessToken, refreshToken, err := s.generateTokens(ctx, user, role)
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role, "")
 	if err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -311,7 +315,7 @@ func (s *AuthService) createUserFromGoogle(ctx context.Context, claims *GoogleCl
 		ID:                utils.GenerateUUID(),
 		Username:          username,
 		Email:             email,
-		PasswordHash:      "", // không có mật khẩu -> không dùng được Login truyền thống
+		PasswordHash:      "",
 		Status:            models.UserStatusActive,
 		StorageQuotaBytes: models.DefaultStorageQuotaBytes,
 		EmailVerifiedAt:   &now,
@@ -337,7 +341,7 @@ func (s *AuthService) createUserFromGoogle(ctx context.Context, claims *GoogleCl
 	return createdUser, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, input dto.LoginInput) (dto.AuthResponse, error) {
+func (s *AuthService) Login(ctx context.Context, input dto.LoginInput, deviceName, ipAddress, userAgent string) (dto.AuthResponse, error) {
 	email := normalizeEmail(input.Email)
 	user, err := s.authRepo.FindByEmail(ctx, email)
 	if err != nil {
