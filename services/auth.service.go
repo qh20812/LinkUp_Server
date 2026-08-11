@@ -50,6 +50,7 @@ func (s *AuthService) SetSessionRepository(sessionRepo *repository.UserSessionRe
 }
 
 func (s *AuthService) isMaintenanceMode(ctx context.Context) (bool, error) {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "maintenance_mode")
 	if err != nil {
 		return false, err
 	}
