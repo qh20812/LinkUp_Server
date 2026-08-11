@@ -8,6 +8,7 @@ import (
 	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/services"
+	"linkup/utils"
 	"linkup/ws"
 	"net/http"
 
@@ -36,12 +37,23 @@ var upgrader = websocket.Upgrader{
 }
 
 func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
-	userIDVal, exists := c.Get("userID")
-	if !exists {
-		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+	tokenString := c.Query("token")
+	if tokenString == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
-	userID := fmt.Sprintf("%v", userIDVal)
+
+	token, err := utils.ParseToken(ctrl.env.JWTSecret, tokenString)
+	if err != nil || !token.Valid {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeInvalidToken))
+		return
+	}
+
+	claims := token.Claims.(*utils.TokenClaims)
+	if claims.TokenType != "access" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeInvalidToken))
+		return
+	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -49,11 +61,23 @@ func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
 		return
 	}
 
-	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, userID)
+	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, claims.UserID)
 	ctrl.hub.RegisterClient(client)
 
 	go client.WritePump()
 	client.ReadPump()
+}
+
+func (ctrl *ChatController) ListChats(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	chats, err := ctrl.chatService.ListUserChats(c.Request.Context(), userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.ChatListResponse{Data: chats})
 }
 
 func (ctrl *ChatController) CreateDirectChat(c *gin.Context) {

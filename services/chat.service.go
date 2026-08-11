@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"linkup/dto"
 	"linkup/models"
 	errorsapp "linkup/errors"
 	"linkup/repository"
@@ -433,6 +434,29 @@ func extensionFromContentType(contentType string) string {
 	default:
 		return ".bin"
 	}
+}
+
+func (s *ChatService) ListUserChats(ctx context.Context, userID string) ([]dto.ChatConversationDTO, error) {
+	chats, err := s.chatRepo.ListUserChats(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range chats {
+		if chats[i].LastMessage == nil || chats[i].LastMessage.Content == "" {
+			continue
+		}
+		key, keyErr := s.chatRepo.GetEncryptionKey(ctx, chats[i].ChatID)
+		if keyErr != nil {
+			continue
+		}
+		decrypted, decErr := utils.DecryptMessage(chats[i].LastMessage.Content, key)
+		if decErr == nil {
+			chats[i].LastMessage.Content = decrypted
+		}
+	}
+
+	return chats, nil
 }
 
 func (s *ChatService) DeleteChat(ctx context.Context, userID, chatID string) error {

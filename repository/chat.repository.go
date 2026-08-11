@@ -349,6 +349,84 @@ func (r *ChatRepository) GetGroupMembers(ctx context.Context, chatID string) ([]
 	return items, nil
 }
 
+// ListUserChats trả về danh sách chat trực tiếp của người dùng (cùng đối phương
+// và tin nhắn cuối). Tin nhắn cuối trả về ở dạng mã hóa — service sẽ giải mã.
+func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dto.ChatConversationDTO, error) {
+	rows := []struct {
+		ChatID             string     `gorm:"column:chat_id"`
+		PartnerUserID      string     `gorm:"column:partner_user_id"`
+		PartnerDisplayName string     `gorm:"column:partner_display_name"`
+		PartnerAvatarURI   string     `gorm:"column:partner_avatar_uri"`
+		LastMessageID      *string    `gorm:"column:last_message_id"`
+		LastContent        *string    `gorm:"column:last_content"`
+		LastSenderID       *string    `gorm:"column:last_sender_id"`
+		LastCreatedAt      *time.Time `gorm:"column:last_created_at"`
+		UpdatedAt          time.Time  `gorm:"column:updated_at"`
+	}{}
+
+	err := r.db.WithContext(ctx).
+		Table("chats").
+		Select(`chats.id AS chat_id,
+			partner.user_id AS partner_user_id,
+			COALESCE(profiles.display_name, '') AS partner_display_name,
+			COALESCE(profiles.avatar_uri, '') AS partner_avatar_uri,
+			lm.id AS last_message_id,
+			lm.content AS last_content,
+			lm.sender_id AS last_sender_id,
+			lm.created_at AS last_created_at,
+			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
+		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
+		Joins("JOIN chat_participants AS partner ON partner.chat_id = chats.id AND partner.user_id <> ?", userID).
+		Joins("LEFT JOIN profiles ON profiles.user_id = partner.user_id").
+		Joins(`LEFT JOIN messages AS lm ON lm.id = (
+			SELECT m2.id FROM messages m2
+			WHERE m2.chat_id = chats.id
+				AND ((m2.sender_id = ? AND m2.deleted_for_sender = false)
+					OR (m2.sender_id <> ? AND m2.deleted_for_receiver = false))
+			ORDER BY m2.created_at DESC
+			LIMIT 1
+		)`, userID, userID).
+		Where("chats.type = ?", models.ChatTypeDirect).
+		Order("COALESCE(lm.created_at, chats.created_at) DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list user chats: %w", err)
+	}
+
+	items := make([]dto.ChatConversationDTO, 0, len(rows))
+	for _, row := range rows {
+		conv := dto.ChatConversationDTO{
+			ChatID: row.ChatID,
+			Partner: dto.ChatPartnerDTO{
+				UserID:      row.PartnerUserID,
+				DisplayName: row.PartnerDisplayName,
+				AvatarURI:   row.PartnerAvatarURI,
+			},
+			UpdatedAt: row.UpdatedAt,
+		}
+
+		if row.LastMessageID != nil && row.LastContent != nil && row.LastCreatedAt != nil {
+			conv.LastMessage = &dto.MessagePayload{
+				ID:        *row.LastMessageID,
+				ChatID:    row.ChatID,
+				SenderID:  derefString(row.LastSenderID),
+				Content:   *row.LastContent,
+				CreatedAt: *row.LastCreatedAt,
+			}
+		}
+
+		items = append(items, conv)
+	}
+	return items, nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func (r *ChatRepository) GetUserMute(ctx context.Context, chatID, userID string) (*models.GroupChatMute, error) {
     var mute models.GroupChatMute
     err := r.db.WithContext(ctx).Where("chat_id = ? AND user_id = ?", chatID, userID).First(&mute).Error

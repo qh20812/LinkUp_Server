@@ -88,3 +88,20 @@ type SearchMessageResultPayload struct {
 	Keyword  string           `json:"keyword"`
 	Messages []MessagePayload `json:"messages"`
 }
+
+type ChatPartnerDTO struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+}
+
+type ChatConversationDTO struct {
+	ChatID      string          `json:"chat_id"`
+	Partner     ChatPartnerDTO  `json:"partner"`
+	LastMessage *MessagePayload `json:"last_message,omitempty"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type ChatListResponse struct {
+	Data []ChatConversationDTO `json:"data"`
+}
