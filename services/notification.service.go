@@ -56,9 +56,11 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 		return nil, fmt.Errorf("create notification: %w", err)
 	}
 
+	senderMap := s.loadSenderProfiles(ctx, senderID)
+	resp := dto.ToNotificationResponseList([]models.Notification{*notification}, senderMap)[0]
 	s.hub.SendToUser(receiverID, ws.OutgoingMessage{
 		Type: "notification",
-		Data: notification,
+		Data: &resp,
 	})
 
 	return notification, nil
@@ -103,10 +105,12 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 		return nil, fmt.Errorf("create notifications bulk: %w", err)
 	}
 
+	senderMap := s.loadSenderProfiles(ctx, senderID)
 	for i := range notifications {
+		resp := dto.ToNotificationResponseList([]models.Notification{notifications[i]}, senderMap)[0]
 		s.hub.SendToUser(notifications[i].ReceiverID, ws.OutgoingMessage{
 			Type: "notification",
-			Data: &notifications[i],
+			Data: &resp,
 		})
 	}
 
@@ -177,6 +181,30 @@ func (s *NotificationService) GetPreferences(ctx context.Context, userID string)
 
 func (s *NotificationService) UpdatePreferences(ctx context.Context, pref *models.NotificationPreference) error {
 	return s.prefRepo.Upsert(ctx, pref)
+}
+
+func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *string) map[string]dto.SenderProfile {
+	if senderID == nil {
+		return nil
+	}
+
+	profiles, err := s.profileRepo.FindByIDs(ctx, []string{*senderID})
+	if err != nil {
+		return nil
+	}
+
+	senderMap := make(map[string]dto.SenderProfile, len(profiles))
+	for _, p := range profiles {
+		name := p.DisplayName
+		if name == "" {
+			name = "User"
+		}
+		senderMap[p.UserID] = dto.SenderProfile{
+			DisplayName: name,
+			AvatarURI:   p.AvatarURI,
+		}
+	}
+	return senderMap
 }
 
 func isNotificationEnabled(pref *models.NotificationPreference, notifType models.NotificationType) bool {
