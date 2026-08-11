@@ -211,7 +211,7 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
 		storyRepository := repository.NewStoryRepository(gormDB)
-		storyService := services.NewStoryService(storyRepository, mediaService)
+		storyService := services.NewStoryService(storyRepository, mediaService, notificationService)
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
@@ -310,7 +310,7 @@ func main() {
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)
-		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, hub)
+		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, notificationService, hub)
 		callController := controllers.NewVoiceCallController(hub, callService, env)
 		routes.RegisterCallRoutes(router, callController, env, gormDB)
 

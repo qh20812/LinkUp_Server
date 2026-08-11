@@ -15,18 +15,20 @@ import (
 )
 
 type VoiceCallService struct {
-	callRepo   *repository.CallRepository
-	friendRepo *repository.FriendRepository
-	profileRepo *repository.ProfileRepository
-	hub        *ws.Hub
+	callRepo     *repository.CallRepository
+	friendRepo   *repository.FriendRepository
+	profileRepo  *repository.ProfileRepository
+	notifService *NotificationService
+	hub          *ws.Hub
 }
 
-func NewVoiceCallService(callRepo *repository.CallRepository, friendRepo *repository.FriendRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub) *VoiceCallService {
+func NewVoiceCallService(callRepo *repository.CallRepository, friendRepo *repository.FriendRepository, profileRepo *repository.ProfileRepository, notifService *NotificationService, hub *ws.Hub) *VoiceCallService {
 	return &VoiceCallService{
-		callRepo:    callRepo,
-		friendRepo:  friendRepo,
-		profileRepo: profileRepo,
-		hub:         hub,
+		callRepo:     callRepo,
+		friendRepo:   friendRepo,
+		profileRepo:  profileRepo,
+		notifService: notifService,
+		hub:          hub,
 	}
 }
 
@@ -220,6 +222,10 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 				Timestamp: now.UnixMilli(),
 			},
 		})
+		if s.notifService != nil {
+			senderID := call.CallerID
+			s.notifService.Create(ctx, call.CalleeID, &senderID, models.NotificationTypeVoiceCall, "đã gọi nhỡ cho bạn", nil, &call.CallerID, nil)
+		}
 	case models.CallStatusCancelled:
 		// Caller cancelled before answer — notify callee of cancelled call.
 		s.hub.SendToUser(call.CalleeID, ws.OutgoingMessage{

@@ -110,8 +110,23 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
-	pref := &models.NotificationPreference{
-		UserID: userID.(string),
+	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if pref == nil {
+		// No row yet = all types enabled (matches Create's nil-pref behavior).
+		pref = &models.NotificationPreference{
+			UserID:               userID.(string),
+			LikeEnabled:          true,
+			CommentEnabled:       true,
+			FollowEnabled:        true,
+			MessageEnabled:       true,
+			FriendRequestEnabled: true,
+			CommunityEnabled:     true,
+			VoiceCallEnabled:     true,
+		}
 	}
 	if input.LikeEnabled != nil {
 		pref.LikeEnabled = *input.LikeEnabled

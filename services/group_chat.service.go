@@ -68,6 +68,20 @@ func (s *GroupChatService) CreateGroup(ctx context.Context, userID string, name,
 	if err := s.groupRepo.CreateGroup(ctx, &group, participants); err != nil {
 		return nil, err
 	}
+
+	if s.notifService != nil {
+		var addedIDs []string
+		for _, memberID := range memberIDs {
+			if memberID == userID || memberID == "" {
+				continue
+			}
+			addedIDs = append(addedIDs, memberID)
+		}
+		if len(addedIDs) > 0 {
+			_, _ = s.notifService.CreateBulk(ctx, addedIDs, &userID, models.NotificationTypeMessage, "đã thêm bạn vào nhóm "+group.Name, nil, &userID, &group.ID)
+		}
+	}
+
 	return &group, nil
 }
 
@@ -175,7 +189,15 @@ func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targe
 		CreatedAt: time.Now().UTC(),
 	}
 
-	return s.groupRepo.BanUser(ctx, banData)
+	if err := s.groupRepo.BanUser(ctx, banData); err != nil {
+		return err
+	}
+
+	if s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, "bạn đã bị chặn khỏi nhóm chat", nil, &adminID, &chatID)
+	}
+
+	return nil
 }
 
 // 3. CẬP NHẬT CHỨC NĂNG: THÊM THÀNH VIÊN (TÍCH HỢP KIỂM TRA BAN REJOIN)
@@ -418,7 +440,15 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 		}
 	}
 
-	return s.groupRepo.TransferAdmin(ctx, chatID, requestID, targetUserID, time.Now().UTC())
+	if err := s.groupRepo.TransferAdmin(ctx, chatID, requestID, targetUserID, time.Now().UTC()); err != nil {
+		return err
+	}
+
+	if s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, targetUserID, &requestID, models.NotificationTypeMessage, "bạn đã được chuyển quyền quản trị nhóm", nil, &requestID, &chatID)
+	}
+
+	return nil
 }
 
 func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, requesterID, targetUserID string, keepAdmin bool) error {
@@ -447,7 +477,15 @@ func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, reques
 		return errorsapp.New(errorsapp.ErrCodeGCTargetNotMember)
 	}
 
-	return s.groupRepo.TransferOwnership(ctx, chatID, requesterID, targetUserID, keepAdmin, time.Now().UTC())
+	if err := s.groupRepo.TransferOwnership(ctx, chatID, requesterID, targetUserID, keepAdmin, time.Now().UTC()); err != nil {
+		return err
+	}
+
+	if s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, targetUserID, &requesterID, models.NotificationTypeMessage, "bạn đã được chuyển quyền sở hữu nhóm", nil, &requesterID, &chatID)
+	}
+
+	return nil
 }
 
 func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targetUserID, reason string, durationMinutes int) (*models.GroupChatMute, error) {
@@ -597,7 +635,15 @@ func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targ
 	req.Status = models.GroupChatMemberRequestRejected
 	req.RespondedAt = &now
 
-	return s.groupRepo.RejectMemberRequest(ctx, requestID)
+	if err := s.groupRepo.RejectMemberRequest(ctx, requestID); err != nil {
+		return err
+	}
+
+	if s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, req.RequesterID, &targetUserID, models.NotificationTypeMessage, "lời mời tham gia nhóm của bạn đã bị từ chối", nil, &targetUserID, &chatID)
+	}
+
+	return nil
 }
 
 func (s *GroupChatService) EnsureGroupMember(ctx context.Context, chatID, userID string) error {

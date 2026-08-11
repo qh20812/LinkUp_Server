@@ -444,8 +444,9 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 		return nil, errorsapp.New(errorsapp.ErrCodeCommentHiddenPrivate)
 	}
 
+	var parentComment *models.Comment
 	if parentID != nil && *parentID != "" {
-		parentComment, err := s.repo.FindCommentByID(ctx, *parentID)
+		parentComment, err = s.repo.FindCommentByID(ctx, *parentID)
 		if err != nil || parentComment == nil {
 			return nil, errorsapp.New(errorsapp.ErrCodeCommentNotFound)
 		}
@@ -477,24 +478,15 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 	}
 
 	if post.UserID != userID {
-		senderIDPtr := userID
 		postIDPtr := postID
 		commentIDPtr := comment.ID
+		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeComment, "đã bình luận bài viết của bạn", &postIDPtr, nil, &commentIDPtr)
+	}
 
-		notification := models.NewNotification(
-			post.UserID,
-			&senderIDPtr,
-			models.NotificationTypeComment,
-			"Bạn vừa có 1 comment mới trên bài viết của mình.",
-		)
-
-		notification.ID = utils.GenerateUUID()
-		notification.RedirectPostID = &postIDPtr
-		notification.RedirectCommentID = &commentIDPtr
-		notification.IsRead = false
-		notification.CreatedAt = time.Now()
-
-		_ = s.repo.CreateNotification(ctx, notification)
+	if parentComment != nil && parentComment.UserID != userID && parentComment.UserID != post.UserID {
+		postIDPtr := postID
+		commentIDPtr := comment.ID
+		s.notifService.Create(ctx, parentComment.UserID, &userID, models.NotificationTypeComment, "đã trả lời bình luận của bạn", &postIDPtr, nil, &commentIDPtr)
 	}
 
 	return s.repo.FindCommentsByPostID(ctx, postID)
