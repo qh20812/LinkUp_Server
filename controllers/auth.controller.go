@@ -8,6 +8,7 @@ import (
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/services"
+	"linkup/utils"
 	"linkup/validations"
 )
 
@@ -128,12 +129,8 @@ func clientDeviceInfo(c *gin.Context) (deviceName, ipAddress, userAgent string) 
 	userAgent = c.GetHeader("User-Agent")
 	ipAddress = c.ClientIP()
 	deviceName = "Web"
-	if userAgent != "" {
-		if len(userAgent) > 64 {
-			deviceName = userAgent[:64]
-		} else {
-			deviceName = userAgent
-		}
+	if name := utils.FriendlyDeviceName(userAgent); name != "" {
+		deviceName = name
 	}
 	return deviceName, ipAddress, userAgent
 }
