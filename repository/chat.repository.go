@@ -7,7 +7,6 @@ import (
 	"linkup/dto"
 	"linkup/models"
 	"linkup/utils"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -165,21 +164,6 @@ func (r *ChatRepository) GetParticipantIDs(ctx context.Context, chatID string) (
 		return nil, fmt.Errorf("get participants: %w", err)
 	}
 	return userIDs, nil
-}
-
-func (r *ChatRepository) SearchMessages(ctx context.Context, chatID, userID, keyword string) ([]models.Message, error) {
-	var messages []models.Message
-	pattern := "%" + strings.ToLower(keyword) + "%"
-	err := r.db.WithContext(ctx).
-		Where("chat_id = ?", chatID).
-		Where("(sender_id = ? AND deleted_for_sender = false) OR (sender_id <> ? AND deleted_for_receiver = false)", userID, userID).
-		Where("LOWER(content) LIKE ?", pattern).
-		Order("created_at DESC").
-		Find(&messages).Error
-	if err != nil {
-		return nil, fmt.Errorf("search messages: %w", err)
-	}
-	return messages, nil
 }
 
 func (r *ChatRepository) IsEmojiExists(ctx context.Context, emojiID string) (bool, error) {

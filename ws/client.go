@@ -96,7 +96,7 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
-			history, err := c.service.GetAllMessages(c.ctx, c.userID, payload.ChatID)
+			history, err := c.service.GetAllMessagesDecrypted(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
 				c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
 				continue
@@ -124,11 +124,17 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			content, err := c.service.DecryptMessage(c.ctx, msg.ChatID, msg.Content)
+			if err != nil {
+				c.sendError("giải mã tin nhắn thất bại")
+				continue
+			}
+
 			messagePayload := dto.MessagePayload{
 				ID:               msg.ID,
 				ChatID:           msg.ChatID,
 				SenderID:         msg.SenderID,
-				Content:          msg.Content,
+				Content:          content,
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
 				ReplyToMessageID: msg.ReplyToMessageID,

@@ -360,7 +360,28 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 	if err := s.JoinChat(ctx, userID, chatID); err != nil {
 		return nil, err
 	}
-	return s.chatRepo.SearchMessages(ctx, chatID, userID, keyword)
+
+	messages, err := s.GetAllMessagesDecrypted(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	needle := strings.ToLower(keyword)
+	results := make([]models.Message, 0, len(messages))
+	for _, msg := range messages {
+		if strings.Contains(strings.ToLower(msg.Content), needle) {
+			results = append(results, msg)
+		}
+	}
+	return results, nil
+}
+
+func (s *ChatService) DecryptMessage(ctx context.Context, chatID, encryptedContent string) (string, error) {
+	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
+	if err != nil {
+		return "", err
+	}
+	return utils.DecryptMessage(encryptedContent, encryptionKey)
 }
 
 func (s *ChatService) DownloadMessageMedia(ctx context.Context, userID, messageID string) (*models.Media, string, string, []byte, error) {
