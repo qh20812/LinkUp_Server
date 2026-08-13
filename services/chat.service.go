@@ -316,7 +316,7 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 		return nil, err
 	}
 
-	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, msg.DeletedForSender, msg.DeletedForReceiver); err != nil {
+	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, mode); err != nil {
 		return nil, err
 	}
 	if err := s.validation.ValidateDeleteMode(mode); err != nil {
@@ -326,13 +326,14 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 	deleteForAll := strings.EqualFold(mode, "all")
 
 	if deleteForAll {
-		if msg.DeletedForSender || msg.DeletedForReceiver || msg.DeletedAt != nil {
+		if msg.DeletedAt != nil {
 			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
 		}
 		deletedAt := time.Now().UTC()
 		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
 	}
 
+	// Delete for the requesting user only ("me") — works for both sender and receiver.
 	if msg.SenderID == userID {
 		if msg.DeletedForSender {
 			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
@@ -369,6 +370,9 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 	needle := strings.ToLower(keyword)
 	results := make([]models.Message, 0, len(messages))
 	for _, msg := range messages {
+		if msg.DeletedForSender || msg.DeletedForReceiver {
+			continue
+		}
 		if strings.Contains(strings.ToLower(msg.Content), needle) {
 			results = append(results, msg)
 		}

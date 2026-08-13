@@ -106,7 +106,7 @@ func (c *Client) ReadPump() {
 				Type: "message:history",
 				Payload: mustMarshal(map[string]any{
 					"chat_id":  payload.ChatID,
-					"messages": toMessagePayloads(history),
+					"messages": toMessagePayloads(history, c.userID),
 				}),
 			})
 			c.send <- resp
@@ -225,7 +225,7 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(dto.SearchMessageResultPayload{
 					ChatID:   payload.ChatID,
 					Keyword:  payload.Keyword,
-					Messages: toMessagePayloads(messages),
+					Messages: toMessagePayloads(messages, c.userID),
 				}),
 			})
 			c.send <- resp
@@ -430,21 +430,34 @@ func mustMarshal(v any) json.RawMessage {
 	return out
 }
 
-func toMessagePayloads(messages []models.Message) []dto.MessagePayload {
+func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePayload {
 	result := make([]dto.MessagePayload, 0, len(messages))
 	for _, msg := range messages {
+		deleted := isMessageDeletedFor(msg, userID)
+		content := msg.Content
+		if deleted {
+			content = ""
+		}
 		result = append(result, dto.MessagePayload{
 			ID:        msg.ID,
 			ChatID:    msg.ChatID,
 			SenderID:  msg.SenderID,
-			Content:   msg.Content,
+			Content:   content,
 			EmojiID:   msg.EmojiID,
 			MediaID:   msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
+			Deleted:   deleted,
 			CreatedAt: msg.CreatedAt,
 		})
 	}
 	return result
+}
+
+func isMessageDeletedFor(msg models.Message, userID string) bool {
+	if msg.SenderID == userID {
+		return msg.DeletedForSender
+	}
+	return msg.DeletedForReceiver
 }
 
 func (c *Client) handleTypingEvent(chatID, eventType string) bool {

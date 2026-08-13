@@ -32,6 +32,7 @@ type MessagePayload struct {
 	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
 	IsAnonymized     bool      `json:"is_anonymized"`
 	AnonymousName    *string   `json:"anonymous_name,omitempty"`
+	Deleted          bool      `json:"deleted"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 

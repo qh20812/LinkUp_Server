@@ -145,7 +145,6 @@ func (r *ChatRepository) GetMessages(ctx context.Context, chatID, userID string)
 	var messages []models.Message
 	err := r.db.WithContext(ctx).
 		Where("chat_id = ?", chatID).
-		Where("(sender_id = ? AND deleted_for_sender = false) OR (sender_id <> ? AND deleted_for_receiver = false)", userID, userID).
 		Order("created_at DESC").
 		Find(&messages).Error
 	if err != nil {
