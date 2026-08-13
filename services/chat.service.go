@@ -50,7 +50,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID, replyToMessageID *string) (*models.Message, error) {
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, replyToMessageID *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -65,8 +65,17 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
 	}
 
-	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
-		return nil, err
+	// Với tin nhắn E2E (e2eVersion == 1), nội dung đã được client mã hóa đầu cuối,
+	// server chỉ lưu ciphertext mà không thể (và không được phép) đọc. Bỏ qua
+	// giới hạn độ dài plaintext vì ciphertext luôn dài hơn.
+	validateErr := s.validation.ValidateSendMessage(content, emojiID, mediaID)
+	if validateErr != nil {
+		if e2eVersion != 1 {
+			return nil, validateErr
+		}
+		if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
+			return nil, validateErr
+		}
 	}
 
 	_, err = s.chatRepo.FindChatByID(ctx, chatID)
@@ -112,21 +121,29 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		}
 	}
 
-	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
-	if err != nil {
-		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
-	}
-
-	encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("encrypt message: %w", err)
-	}
-
-
-	msg := models.NewMessage(chatID, userID, encryptedContent, mediaID, emojiID)
+	msg := models.NewMessage(chatID, userID, content, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+
+	if e2eVersion == 1 {
+		// E2E: lưu ciphertext client-gửi nguyên trạng, server không mã hóa lại.
+		msg.Content = content
+		msg.E2EVersion = 1
+	} else {
+		// Legacy: server mã hóa bằng khóa chat như trước đây.
+		encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
+		if err != nil {
+			return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
+		}
+
+		encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt message: %w", err)
+		}
+		msg.Content = encryptedContent
+		msg.E2EVersion = 0
+	}
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
 	if err != nil {
@@ -157,6 +174,11 @@ func (s *ChatService) GetAllMessagesDecrypted(ctx context.Context, userID, chatI
 	}
 
 	for i := range messages {
+		// Chỉ giải mã tin nhắn legacy (e2e_version = 0). Tin nhắn E2E
+		// (e2e_version = 1) giữ nguyên ciphertext — client tự giải mã.
+		if messages[i].E2EVersion != 0 {
+			continue
+		}
 		decrypted, err := utils.DecryptMessage(messages[i].Content, encryptionKey)
 		if err != nil {
 			fmt.Printf("failed to decrypt message %s: %v\n", messages[i].ID, err)
@@ -362,6 +384,16 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 		return nil, err
 	}
 
+	// Chat trực tiếp dùng E2E — server không đọc được nội dung nên trả về trống;
+	// client tự tìm kiếm trên dữ liệu đã giải mã ở máy.
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if chat.Type == models.ChatTypeDirect {
+		return []models.Message{}, nil
+	}
+
 	messages, err := s.GetAllMessagesDecrypted(ctx, userID, chatID)
 	if err != nil {
 		return nil, err
@@ -469,6 +501,11 @@ func (s *ChatService) ListUserChats(ctx context.Context, userID string) ([]dto.C
 
 	for i := range chats {
 		if chats[i].LastMessage == nil || chats[i].LastMessage.Content == "" {
+			continue
+		}
+		// Tin nhắn E2E giữ nguyên ciphertext (client tự giải mã để hiện preview);
+		// chỉ giải mã tin nhắn legacy (e2e_version = 0).
+		if chats[i].LastMessage.E2EVersion != 0 {
 			continue
 		}
 		key, keyErr := s.chatRepo.GetEncryptionKey(ctx, chats[i].ChatID)

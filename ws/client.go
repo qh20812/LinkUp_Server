@@ -118,16 +118,22 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			content, err := c.service.DecryptMessage(c.ctx, msg.ChatID, msg.Content)
-			if err != nil {
-				c.sendError("giải mã tin nhắn thất bại")
-				continue
+			// Tin nhắn E2E: server không đọc được nội dung, chuyển ciphertext
+			// nguyên trạng cho các client cùng chat (mỗi client tự giải mã).
+			content := msg.Content
+			if msg.E2EVersion == 0 {
+				decrypted, err := c.service.DecryptMessage(c.ctx, msg.ChatID, msg.Content)
+				if err != nil {
+					c.sendError("giải mã tin nhắn thất bại")
+					continue
+				}
+				content = decrypted
 			}
 
 			messagePayload := dto.MessagePayload{
@@ -138,6 +144,7 @@ func (c *Client) ReadPump() {
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
 				ReplyToMessageID: msg.ReplyToMessageID,
+				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
 			}
 
@@ -446,6 +453,7 @@ func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePa
 			EmojiID:   msg.EmojiID,
 			MediaID:   msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
+			E2EVersion: msg.E2EVersion,
 			Deleted:   deleted,
 			CreatedAt: msg.CreatedAt,
 		})

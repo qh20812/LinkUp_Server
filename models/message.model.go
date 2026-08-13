@@ -12,6 +12,7 @@ type Message struct {
 	ReplyToMessageID   *string    `json:"reply_to_message_id,omitempty" db:"reply_to_message_id"`
 	IsAnonymized       bool       `json:"is_anonymized" db:"is_anonymized"`
 	AnonymousName      *string    `json:"anonymous_name,omitempty" db:"anonymous_name"`
+	E2EVersion         int        `json:"e2e_version" db:"e2e_version" gorm:"column:e2e_version"`
 	DeletedForSender   bool       `json:"deleted_for_sender" db:"deleted_for_sender"`
 	DeletedForReceiver bool       `json:"deleted_for_receiver" db:"deleted_for_receiver"`
 	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`

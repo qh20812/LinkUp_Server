@@ -88,10 +88,16 @@ func main() {
 			&models.SystemConfig{},
 			&models.UserSetting{},
 			&models.UserSession{},
+			&models.UserE2EKey{},
+			&models.ChatE2EKey{},
 		)
 		if err != nil {
 			log.Printf("Warning: Migration failed: %v", err)
 		}
+
+		// Thêm cột messages.e2e_version (0 = legacy server-encrypted, 1 = E2E)
+		// idempotent, không làm mất dữ liệu khi chạy lại.
+		ensureColumn(gormDB, "messages", "e2e_version", "INT NOT NULL DEFAULT 0")
 
 		// Đồng bộ collation toàn bảng GORM về utf8mb4_unicode_ci (idempotent).
 		// “ads” do seed tạo đã là unicode_ci nhưng chạy lại cũng an toàn.
@@ -254,6 +260,12 @@ func main() {
 		chatController := controllers.NewChatController(chatHub, chatService, env)
 		routes.RegisterChatRoutes(router, chatController, env, gormDB)
 
+		// ===== KHỞI TẠO TẦNG E2E (MÃ HÓA ĐẦU CUỐI CHO TIN NHẮN TRỰC TIẾP) =====
+		e2eRepository := repository.NewE2ERepository(gormDB)
+		e2eService := services.NewE2EService(e2eRepository, chatRepository)
+		e2eController := controllers.NewE2EController(e2eService)
+		routes.RegisterE2ERoutes(router, e2eController, env, gormDB)
+
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
 		groupHub := groupws.NewHub()
 		go groupHub.Run()
@@ -411,5 +423,19 @@ func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn st
 	if err := db.Exec("ALTER TABLE "+table+" ADD CONSTRAINT "+fkName+
 		" FOREIGN KEY ("+column+") REFERENCES "+refTable+"("+refColumn+")").Error; err != nil {
 		log.Printf("Warning: ensure FK %s: %v", fkName, err)
+	}
+}
+
+// ensureColumn thêm cột nếu chưa tồn tại (idempotent). Kiểm tra
+// information_schema trước, tránh lỗi duplicate khi chạy lại server.
+func ensureColumn(db *gorm.DB, table, column, definition string) {
+	if !db.Migrator().HasTable(table) {
+		return
+	}
+	if db.Migrator().HasColumn(table, column) {
+		return
+	}
+	if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition).Error; err != nil {
+		log.Printf("Warning: ensure column %s.%s: %v", table, column, err)
 	}
 }

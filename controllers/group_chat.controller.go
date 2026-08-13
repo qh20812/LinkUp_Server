@@ -120,6 +120,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		userID,
 		chatID,
 		input.Content,
+		0,
 		input.EmojiID,
 		input.MediaID,
 		input.ReplyToMessageID,

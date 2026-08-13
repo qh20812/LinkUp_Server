@@ -20,6 +20,7 @@ type SendMessagePayload struct {
 	EmojiID          *string `json:"emoji_id,omitempty"`
 	MediaID          *string `json:"media_id,omitempty"`
 	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
+	E2EVersion       int     `json:"e2e_version,omitempty"`
 }
 
 type MessagePayload struct {
@@ -32,6 +33,7 @@ type MessagePayload struct {
 	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
 	IsAnonymized     bool      `json:"is_anonymized"`
 	AnonymousName    *string   `json:"anonymous_name,omitempty"`
+	E2EVersion       int       `json:"e2e_version,omitempty"`
 	Deleted          bool      `json:"deleted"`
 	CreatedAt        time.Time `json:"created_at"`
 }
@@ -100,6 +102,7 @@ type ChatConversationDTO struct {
 	ChatID      string          `json:"chat_id"`
 	Partner     ChatPartnerDTO  `json:"partner"`
 	LastMessage *MessagePayload `json:"last_message,omitempty"`
+	IsEncrypted bool            `json:"is_encrypted"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 

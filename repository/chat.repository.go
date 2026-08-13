@@ -343,6 +343,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		LastMessageID      *string    `gorm:"column:last_message_id"`
 		LastContent        *string    `gorm:"column:last_content"`
 		LastSenderID       *string    `gorm:"column:last_sender_id"`
+		LastE2EVersion     *int       `gorm:"column:last_e2e_version"`
 		LastCreatedAt      *time.Time `gorm:"column:last_created_at"`
 		UpdatedAt          time.Time  `gorm:"column:updated_at"`
 	}{}
@@ -356,6 +357,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			lm.id AS last_message_id,
 			lm.content AS last_content,
 			lm.sender_id AS last_sender_id,
+			lm.e2e_version AS last_e2e_version,
 			lm.created_at AS last_created_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
@@ -389,12 +391,18 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		}
 
 		if row.LastMessageID != nil && row.LastContent != nil && row.LastCreatedAt != nil {
+			e2eVersion := 0
+			if row.LastE2EVersion != nil {
+				e2eVersion = *row.LastE2EVersion
+			}
+			conv.IsEncrypted = e2eVersion == 1
 			conv.LastMessage = &dto.MessagePayload{
-				ID:        *row.LastMessageID,
-				ChatID:    row.ChatID,
-				SenderID:  derefString(row.LastSenderID),
-				Content:   *row.LastContent,
-				CreatedAt: *row.LastCreatedAt,
+				ID:         *row.LastMessageID,
+				ChatID:     row.ChatID,
+				SenderID:   derefString(row.LastSenderID),
+				Content:    *row.LastContent,
+				E2EVersion: e2eVersion,
+				CreatedAt:  *row.LastCreatedAt,
 			}
 		}
 
