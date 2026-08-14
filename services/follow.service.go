@@ -132,3 +132,61 @@ func (s *FollowService) GetSuggestions(ctx context.Context, userID string, page,
 		HasMore:  int64(page*pageSize) < total,
 	}, nil
 }
+
+func (s *FollowService) GetFollowers(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	total, err := s.followRepository.GetFollowerCount(ctx, userID)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("count followers: %w", err)
+	}
+
+	items, err := s.followRepository.ListFollowers(ctx, userID, offset, pageSize)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("list followers: %w", err)
+	}
+
+	return dto.FollowListResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}
+
+func (s *FollowService) GetFollowing(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	total, err := s.followRepository.GetFollowingCount(ctx, userID)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("count following: %w", err)
+	}
+
+	items, err := s.followRepository.ListFollowing(ctx, userID, offset, pageSize)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("list following: %w", err)
+	}
+
+	return dto.FollowListResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}

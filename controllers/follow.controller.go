@@ -107,3 +107,41 @@ func (crtl *FollowController) GetSuggestions(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+func (crtl *FollowController) GetFollowers(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	response, err := crtl.followService.GetFollowers(c.Request.Context(), targetUserID, page, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (crtl *FollowController) GetFollowing(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	response, err := crtl.followService.GetFollowing(c.Request.Context(), targetUserID, page, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}

@@ -19,6 +19,7 @@ type PostService interface {
 	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error)
 	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
+	GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
@@ -343,6 +344,108 @@ func (s *postService) GetSavedPosts(ctx context.Context, userID string, cursor s
 		if last.BookmarkID != nil && last.SavedAt != nil {
 			nextCursor = fmt.Sprintf("%d_%s", last.SavedAt.UnixNano(), *last.BookmarkID)
 		}
+	}
+
+	return posts, nextCursor, nil
+}
+
+func (s *postService) GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error) {
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+
+	var cursorCreatedAt *time.Time
+	var cursorID *string
+	if cursor != "" {
+		parts := strings.SplitN(cursor, "_", 2)
+		if len(parts) == 2 {
+			unixNano, err := strconv.ParseInt(parts[0], 10, 64)
+			if err == nil {
+				t := time.Unix(0, unixNano)
+				cursorCreatedAt = &t
+				cursorID = &parts[1]
+			}
+		}
+	}
+
+	var viewerIDPtr *string
+	if viewerID != "" {
+		viewerIDPtr = &viewerID
+	}
+
+	posts, err := s.repo.FetchByUserID(ctx, targetUserID, viewerIDPtr, cursorCreatedAt, cursorID, pageSize)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if len(posts) > 0 {
+		postIDs := make([]string, len(posts))
+		for i, p := range posts {
+			postIDs[i] = p.ID
+		}
+
+		likesMap, errL := s.repo.BatchCountLikes(ctx, postIDs)
+		if errL == nil {
+			for i := range posts {
+				posts[i].LikesCount = likesMap[posts[i].ID]
+			}
+		}
+
+		commentsMap, errC := s.repo.BatchCountComments(ctx, postIDs)
+		if errC == nil {
+			for i := range posts {
+				posts[i].CommentsCount = commentsMap[posts[i].ID]
+			}
+		}
+
+		sharesMap, errS := s.repo.BatchCountShares(ctx, postIDs)
+		if errS == nil {
+			for i := range posts {
+				posts[i].SharesCount = sharesMap[posts[i].ID]
+			}
+		}
+
+		if viewerID != "" {
+			likedMap, errL := s.repo.BatchCheckLiked(ctx, viewerID, postIDs)
+			if errL == nil {
+				for i := range posts {
+					posts[i].IsLiked = likedMap[posts[i].ID]
+				}
+			}
+
+			savedMap, errS := s.repo.BatchCheckSaved(ctx, viewerID, postIDs)
+			if errS == nil {
+				for i := range posts {
+					posts[i].IsSaved = savedMap[posts[i].ID]
+				}
+			}
+
+			sharedMap, errSh := s.repo.BatchCheckShared(ctx, viewerID, postIDs)
+			if errSh == nil {
+				for i := range posts {
+					posts[i].IsShared = sharedMap[posts[i].ID]
+				}
+			}
+		}
+
+		if s.mediaService != nil {
+			mediaMap, errM := s.mediaService.GetByPostIDs(ctx, postIDs)
+			if errM == nil {
+				for i := range posts {
+					if m, ok := mediaMap[posts[i].ID]; ok {
+						posts[i].Media = m
+					} else {
+						posts[i].Media = []models.Media{}
+					}
+				}
+			}
+		}
+	}
+
+	var nextCursor string
+	if len(posts) == pageSize {
+		last := posts[len(posts)-1]
+		nextCursor = fmt.Sprintf("%d_%s", last.CreatedAt.UnixNano(), last.ID)
 	}
 
 	return posts, nextCursor, nil

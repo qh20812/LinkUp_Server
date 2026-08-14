@@ -114,6 +114,39 @@ func (ctrl *PostController) GetSavedPosts(c *gin.Context) {
 	})
 }
 
+func (ctrl *PostController) GetUserPosts(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	cursor := c.Query("cursor")
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	var viewerID string
+	if val, exists := c.Get("userID"); exists {
+		viewerID = fmt.Sprintf("%v", val)
+	}
+
+	posts, nextCursor, err := ctrl.service.GetUserPosts(c.Request.Context(), targetUserID, viewerID, cursor, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	var nc *string
+	if nextCursor != "" {
+		nc = &nextCursor
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"page_size":   pageSize,
+		"next_cursor": nc,
+		"data":        posts,
+	})
+}
+
 func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 	postID := c.Param("id")
 	if postID == "" {

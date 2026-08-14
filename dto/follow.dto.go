@@ -29,3 +29,18 @@ type FollowSuggestionsResponse struct {
 	Total    int64                  `json:"total"`
 	HasMore  bool                   `json:"has_more"`
 }
+
+type FollowListItem struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+}
+
+type FollowListResponse struct {
+	Data     []FollowListItem `json:"data"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
+	Total    int64            `json:"total"`
+	HasMore  bool             `json:"has_more"`
+}
