@@ -106,7 +106,7 @@ func (c *Client) ReadPump() {
 				Type: "message:history",
 				Payload: mustMarshal(map[string]any{
 					"chat_id":  payload.ChatID,
-					"messages": toMessagePayloads(history),
+					"messages": toMessagePayloads(history, c.userID),
 				}),
 			})
 			c.send <- resp
@@ -118,16 +118,22 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			content, err := c.service.DecryptMessage(c.ctx, msg.ChatID, msg.Content)
-			if err != nil {
-				c.sendError("giải mã tin nhắn thất bại")
-				continue
+			// Tin nhắn E2E: server không đọc được nội dung, chuyển ciphertext
+			// nguyên trạng cho các client cùng chat (mỗi client tự giải mã).
+			content := msg.Content
+			if msg.E2EVersion == 0 {
+				decrypted, err := c.service.DecryptMessage(c.ctx, msg.ChatID, msg.Content)
+				if err != nil {
+					c.sendError("giải mã tin nhắn thất bại")
+					continue
+				}
+				content = decrypted
 			}
 
 			messagePayload := dto.MessagePayload{
@@ -138,6 +144,7 @@ func (c *Client) ReadPump() {
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
 				ReplyToMessageID: msg.ReplyToMessageID,
+				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
 			}
 
@@ -225,7 +232,7 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(dto.SearchMessageResultPayload{
 					ChatID:   payload.ChatID,
 					Keyword:  payload.Keyword,
-					Messages: toMessagePayloads(messages),
+					Messages: toMessagePayloads(messages, c.userID),
 				}),
 			})
 			c.send <- resp
@@ -430,21 +437,35 @@ func mustMarshal(v any) json.RawMessage {
 	return out
 }
 
-func toMessagePayloads(messages []models.Message) []dto.MessagePayload {
+func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePayload {
 	result := make([]dto.MessagePayload, 0, len(messages))
 	for _, msg := range messages {
+		deleted := isMessageDeletedFor(msg, userID)
+		content := msg.Content
+		if deleted {
+			content = ""
+		}
 		result = append(result, dto.MessagePayload{
 			ID:        msg.ID,
 			ChatID:    msg.ChatID,
 			SenderID:  msg.SenderID,
-			Content:   msg.Content,
+			Content:   content,
 			EmojiID:   msg.EmojiID,
 			MediaID:   msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
+			E2EVersion: msg.E2EVersion,
+			Deleted:   deleted,
 			CreatedAt: msg.CreatedAt,
 		})
 	}
 	return result
+}
+
+func isMessageDeletedFor(msg models.Message, userID string) bool {
+	if msg.SenderID == userID {
+		return msg.DeletedForSender
+	}
+	return msg.DeletedForReceiver
 }
 
 func (c *Client) handleTypingEvent(chatID, eventType string) bool {

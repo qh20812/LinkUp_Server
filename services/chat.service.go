@@ -18,22 +18,24 @@ import (
 const errMySQLDuplicate = "Duplicate entry"
 
 type ChatService struct {
-	chatRepo        *repository.ChatRepository
-	friendRepo      *repository.FriendRepository
-	inviteRepo      *repository.ChatInvitationRepository
-	mediaRepo       *repository.MediaRepository
+	chatRepo         *repository.ChatRepository
+	friendRepo       *repository.FriendRepository
+	inviteRepo       *repository.ChatInvitationRepository
+	mediaRepo        *repository.MediaRepository
 	userSettingsRepo *repository.UserSettingsRepository
-	notifService    *NotificationService
-	validation      *validations.ChatValidation
+	profileRepo      *repository.ProfileRepository
+	notifService     *NotificationService
+	validation       *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, userSettingsRepo *repository.UserSettingsRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, userSettingsRepo *repository.UserSettingsRepository, profileRepo *repository.ProfileRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
 		chatRepo:         chatRepo,
 		friendRepo:       friendRepo,
 		inviteRepo:       inviteRepo,
 		mediaRepo:        mediaRepo,
 		userSettingsRepo: userSettingsRepo,
+		profileRepo:      profileRepo,
 		notifService:     notifService,
 		validation:       validation,
 	}
@@ -50,7 +52,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, emojiID, mediaID, replyToMessageID *string) (*models.Message, error) {
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, replyToMessageID *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -65,8 +67,17 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
 	}
 
-	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
-		return nil, err
+	// Với tin nhắn E2E (e2eVersion == 1), nội dung đã được client mã hóa đầu cuối,
+	// server chỉ lưu ciphertext mà không thể (và không được phép) đọc. Bỏ qua
+	// giới hạn độ dài plaintext vì ciphertext luôn dài hơn.
+	validateErr := s.validation.ValidateSendMessage(content, emojiID, mediaID)
+	if validateErr != nil {
+		if e2eVersion != 1 {
+			return nil, validateErr
+		}
+		if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
+			return nil, validateErr
+		}
 	}
 
 	_, err = s.chatRepo.FindChatByID(ctx, chatID)
@@ -112,21 +123,29 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		}
 	}
 
-	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
-	if err != nil {
-		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
-	}
-
-	encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("encrypt message: %w", err)
-	}
-
-
-	msg := models.NewMessage(chatID, userID, encryptedContent, mediaID, emojiID)
+	msg := models.NewMessage(chatID, userID, content, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+
+	if e2eVersion == 1 {
+		// E2E: lưu ciphertext client-gửi nguyên trạng, server không mã hóa lại.
+		msg.Content = content
+		msg.E2EVersion = 1
+	} else {
+		// Legacy: server mã hóa bằng khóa chat như trước đây.
+		encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
+		if err != nil {
+			return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
+		}
+
+		encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt message: %w", err)
+		}
+		msg.Content = encryptedContent
+		msg.E2EVersion = 0
+	}
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
 	if err != nil {
@@ -157,6 +176,11 @@ func (s *ChatService) GetAllMessagesDecrypted(ctx context.Context, userID, chatI
 	}
 
 	for i := range messages {
+		// Chỉ giải mã tin nhắn legacy (e2e_version = 0). Tin nhắn E2E
+		// (e2e_version = 1) giữ nguyên ciphertext — client tự giải mã.
+		if messages[i].E2EVersion != 0 {
+			continue
+		}
 		decrypted, err := utils.DecryptMessage(messages[i].Content, encryptionKey)
 		if err != nil {
 			fmt.Printf("failed to decrypt message %s: %v\n", messages[i].ID, err)
@@ -280,8 +304,51 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 	return invite, nil
 }
 
-func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID string, accept bool) (*models.Chat, error) {
-	invite, err := s.inviteRepo.FindPendingByID(ctx, inviteID)
+func (s *ChatService) ListReceivedInvites(ctx context.Context, userID string) ([]dto.ChatInviteItemDTO, error) {
+	invites, err := s.inviteRepo.FindPendingByTarget(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(invites) == 0 {
+		return []dto.ChatInviteItemDTO{}, nil
+	}
+
+	requesterIDs := make([]string, 0, len(invites))
+	for _, inv := range invites {
+		requesterIDs = append(requesterIDs, inv.RequesterID)
+	}
+
+	profileMap := make(map[string]dto.SenderProfile)
+	if profiles, err := s.profileRepo.FindByIDs(ctx, requesterIDs); err == nil {
+		for _, p := range profiles {
+			name := p.DisplayName
+			if name == "" {
+				name = "User"
+			}
+			profileMap[p.UserID] = dto.SenderProfile{
+				DisplayName: name,
+				AvatarURI:   p.AvatarURI,
+			}
+		}
+	}
+
+	items := make([]dto.ChatInviteItemDTO, 0, len(invites))
+	for _, inv := range invites {
+		item := dto.ChatInviteItemDTO{
+			InviteID:    inv.ID,
+			RequesterID: inv.RequesterID,
+			CreatedAt:   inv.CreatedAt,
+		}
+		if sender, ok := profileMap[inv.RequesterID]; ok {
+			item.RequesterName = sender.DisplayName
+			item.RequesterAvatar = sender.AvatarURI
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID string, accept bool) (*models.Chat, error) {	invite, err := s.inviteRepo.FindPendingByID(ctx, inviteID)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +383,7 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 		return nil, err
 	}
 
-	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, msg.DeletedForSender, msg.DeletedForReceiver); err != nil {
+	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, mode); err != nil {
 		return nil, err
 	}
 	if err := s.validation.ValidateDeleteMode(mode); err != nil {
@@ -326,13 +393,14 @@ func (s *ChatService) DeleteMessage(ctx context.Context, userID, messageID, mode
 	deleteForAll := strings.EqualFold(mode, "all")
 
 	if deleteForAll {
-		if msg.DeletedForSender || msg.DeletedForReceiver || msg.DeletedAt != nil {
+		if msg.DeletedAt != nil {
 			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
 		}
 		deletedAt := time.Now().UTC()
 		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
 	}
 
+	// Delete for the requesting user only ("me") — works for both sender and receiver.
 	if msg.SenderID == userID {
 		if msg.DeletedForSender {
 			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
@@ -361,6 +429,16 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 		return nil, err
 	}
 
+	// Chat trực tiếp dùng E2E — server không đọc được nội dung nên trả về trống;
+	// client tự tìm kiếm trên dữ liệu đã giải mã ở máy.
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if chat.Type == models.ChatTypeDirect {
+		return []models.Message{}, nil
+	}
+
 	messages, err := s.GetAllMessagesDecrypted(ctx, userID, chatID)
 	if err != nil {
 		return nil, err
@@ -369,6 +447,9 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 	needle := strings.ToLower(keyword)
 	results := make([]models.Message, 0, len(messages))
 	for _, msg := range messages {
+		if msg.DeletedForSender || msg.DeletedForReceiver {
+			continue
+		}
 		if strings.Contains(strings.ToLower(msg.Content), needle) {
 			results = append(results, msg)
 		}
@@ -465,6 +546,11 @@ func (s *ChatService) ListUserChats(ctx context.Context, userID string) ([]dto.C
 
 	for i := range chats {
 		if chats[i].LastMessage == nil || chats[i].LastMessage.Content == "" {
+			continue
+		}
+		// Tin nhắn E2E giữ nguyên ciphertext (client tự giải mã để hiện preview);
+		// chỉ giải mã tin nhắn legacy (e2e_version = 0).
+		if chats[i].LastMessage.E2EVersion != 0 {
 			continue
 		}
 		key, keyErr := s.chatRepo.GetEncryptionKey(ctx, chats[i].ChatID)

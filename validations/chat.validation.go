@@ -43,8 +43,8 @@ func (v *ChatValidation) ValidateSearchMessages(keyword string) error {
 	return nil
 }
 
-func (v *ChatValidation) ValidateDeleteMessage(senderID, userID string, deletedForSender, deletedForReceiver bool) error {
-	if senderID != userID {
+func (v *ChatValidation) ValidateDeleteMessage(senderID, userID, mode string) error {
+	if strings.EqualFold(mode, "all") && senderID != userID {
 		return errorsapp.New(errorsapp.ErrCodeChatNotSender)
 	}
 	return nil

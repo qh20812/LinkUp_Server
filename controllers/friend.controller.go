@@ -5,6 +5,7 @@ import (
 	"linkup/services"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -146,6 +147,29 @@ func (ctrl *FriendController) Unfriend(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+func (ctrl *FriendController) SearchFriends(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := val.(string)
+
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	if keyword == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	results, err := ctrl.friendService.SearchFriends(c.Request.Context(), userID, keyword)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"users": results})
 }
 
 func (ctrl *FriendController) GetFriendSuggestions(c *gin.Context) {

@@ -23,6 +23,7 @@ func RegisterFriendRoutes(router *gin.Engine, friendController *controllers.Frie
 	friends.Use(middlewares.AuthMiddleware(env, db))
 	{
 		friends.GET("", friendController.GetFriends)
+		friends.GET("/search", friendController.SearchFriends)
 		friends.GET("/suggestions", friendController.GetFriendSuggestions)
 		friends.DELETE("/:userID", friendController.Unfriend)
 	}

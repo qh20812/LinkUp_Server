@@ -225,6 +225,7 @@ const (
 	ErrCodeChatAlreadyDeleted    = "chat.ALREADY_DELETED"
 	ErrCodeChatMessageNotFound   = "chat.MESSAGE_NOT_FOUND"
 	ErrCodeChatAccessDenied      = "chat.ACCESS_DENIED"
+	ErrCodeChatKeyNotFound       = "chat.KEY_NOT_FOUND"
 
 	// ── Friend ─────────────────────────────────────────────────
 	ErrCodeFriendTargetRequired       = "friend.TARGET_REQUIRED"

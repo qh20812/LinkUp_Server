@@ -816,6 +816,28 @@ func Run(env config.Env) error {
 			INDEX idx_user_sessions_user_id (user_id),
 			INDEX idx_user_sessions_expires_at (expires_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 48. user_e2e_keys — public key ECDH của user (private key chỉ ở client)
+		`CREATE TABLE IF NOT EXISTS user_e2e_keys (
+			user_id VARCHAR(36) PRIMARY KEY,
+			public_key TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 49. chat_e2e_keys — khóa AES của chat được bọc riêng cho từng user
+		`CREATE TABLE IF NOT EXISTS chat_e2e_keys (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			wrapped_key TEXT NOT NULL,
+			nonce VARCHAR(64) NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, user_id),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_chat_e2e_keys_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
@@ -854,6 +876,10 @@ func Run(env config.Env) error {
 	// 31. Message encryption column
 	if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFAULT true"); err != nil {
 		return fmt.Errorf("schema: add is_encrypted: %w", err)
+	}
+	// 31b. E2E version column (0 = legacy server-encrypted, 1 = end-to-end encrypted)
+	if err := addColumnIfMissing(database, "messages", "e2e_version", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add e2e_version: %w", err)
 	}
 
 	// Phase 1: Admin Manage Groups/Communities — idempotent column additions
