@@ -17,6 +17,7 @@ func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, en
 	chatGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
 		chatGroup.GET("", ctrl.ListChats)
+		chatGroup.GET("/invites", ctrl.ListChatInvites)
 		chatGroup.POST("/direct", ctrl.CreateDirectChat)
 		chatGroup.POST("/invite", ctrl.CreateChatInvite)
 		chatGroup.POST("/invite/respond", ctrl.ResponseChatInvite)

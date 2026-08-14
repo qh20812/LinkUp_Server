@@ -127,6 +127,18 @@ func (ctrl *ChatController) CreateChatInvite(c *gin.Context) {
 	})
 }
 
+func (ctrl *ChatController) ListChatInvites(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	invites, err := ctrl.chatService.ListReceivedInvites(c.Request.Context(), userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.ChatInviteListResponse{Data: invites})
+}
+
 func (ctrl *ChatController) ResponseChatInvite(c *gin.Context) {
 	userID := fmt.Sprintf("%v", c.GetString("userID"))
 

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -197,8 +198,7 @@ func (s *FriendService) RejectFriendRequest(ctx context.Context, userID, request
 	}, nil
 }
 
-func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pageSize int) (dto.FriendListResponse, error) {
-	if page < 1 {
+func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pageSize int) (dto.FriendListResponse, error) {	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 50 {
@@ -217,6 +217,18 @@ func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pag
 		Total:    total,
 		HasMore:  int64(page*pageSize) < total,
 	}, nil
+}
+
+func (s *FriendService) SearchFriends(ctx context.Context, userID, keyword string) ([]dto.UserSearchResult, error) {
+	if strings.TrimSpace(keyword) == "" {
+		return []dto.UserSearchResult{}, nil
+	}
+
+	results, err := s.friendRepo.SearchAcceptedFriends(ctx, userID, strings.TrimSpace(keyword), 10)
+	if err != nil {
+		return nil, fmt.Errorf("search friends: %w", err)
+	}
+	return results, nil
 }
 
 func (s *FriendService) Unfriend(ctx context.Context, userID, targetUserID string) (dto.FriendActionResponse, error) {

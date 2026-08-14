@@ -18,22 +18,24 @@ import (
 const errMySQLDuplicate = "Duplicate entry"
 
 type ChatService struct {
-	chatRepo        *repository.ChatRepository
-	friendRepo      *repository.FriendRepository
-	inviteRepo      *repository.ChatInvitationRepository
-	mediaRepo       *repository.MediaRepository
+	chatRepo         *repository.ChatRepository
+	friendRepo       *repository.FriendRepository
+	inviteRepo       *repository.ChatInvitationRepository
+	mediaRepo        *repository.MediaRepository
 	userSettingsRepo *repository.UserSettingsRepository
-	notifService    *NotificationService
-	validation      *validations.ChatValidation
+	profileRepo      *repository.ProfileRepository
+	notifService     *NotificationService
+	validation       *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, userSettingsRepo *repository.UserSettingsRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, userSettingsRepo *repository.UserSettingsRepository, profileRepo *repository.ProfileRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
 		chatRepo:         chatRepo,
 		friendRepo:       friendRepo,
 		inviteRepo:       inviteRepo,
 		mediaRepo:        mediaRepo,
 		userSettingsRepo: userSettingsRepo,
+		profileRepo:      profileRepo,
 		notifService:     notifService,
 		validation:       validation,
 	}
@@ -302,8 +304,51 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 	return invite, nil
 }
 
-func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID string, accept bool) (*models.Chat, error) {
-	invite, err := s.inviteRepo.FindPendingByID(ctx, inviteID)
+func (s *ChatService) ListReceivedInvites(ctx context.Context, userID string) ([]dto.ChatInviteItemDTO, error) {
+	invites, err := s.inviteRepo.FindPendingByTarget(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(invites) == 0 {
+		return []dto.ChatInviteItemDTO{}, nil
+	}
+
+	requesterIDs := make([]string, 0, len(invites))
+	for _, inv := range invites {
+		requesterIDs = append(requesterIDs, inv.RequesterID)
+	}
+
+	profileMap := make(map[string]dto.SenderProfile)
+	if profiles, err := s.profileRepo.FindByIDs(ctx, requesterIDs); err == nil {
+		for _, p := range profiles {
+			name := p.DisplayName
+			if name == "" {
+				name = "User"
+			}
+			profileMap[p.UserID] = dto.SenderProfile{
+				DisplayName: name,
+				AvatarURI:   p.AvatarURI,
+			}
+		}
+	}
+
+	items := make([]dto.ChatInviteItemDTO, 0, len(invites))
+	for _, inv := range invites {
+		item := dto.ChatInviteItemDTO{
+			InviteID:    inv.ID,
+			RequesterID: inv.RequesterID,
+			CreatedAt:   inv.CreatedAt,
+		}
+		if sender, ok := profileMap[inv.RequesterID]; ok {
+			item.RequesterName = sender.DisplayName
+			item.RequesterAvatar = sender.AvatarURI
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID string, accept bool) (*models.Chat, error) {	invite, err := s.inviteRepo.FindPendingByID(ctx, inviteID)
 	if err != nil {
 		return nil, err
 	}

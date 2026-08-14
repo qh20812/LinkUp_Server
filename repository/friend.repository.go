@@ -161,6 +161,55 @@ func (r *FriendRepository) FindAcceptedFriends(ctx context.Context, userID strin
 	return items, total, nil
 }
 
+// SearchAcceptedFriends tìm bạn bè đã kết bạn (status accepted) theo tên/username.
+func (r *FriendRepository) SearchAcceptedFriends(ctx context.Context, userID, keyword string, limit int) ([]dto.UserSearchResult, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	like := "%" + keyword + "%"
+
+	type friendRow struct {
+		UserID      string
+		Username    string
+		DisplayName string
+		AvatarURI   string
+	}
+	query := `
+		SELECT
+			(CASE WHEN f.sender_id = ? THEN f.receiver_id ELSE f.sender_id END) AS user_id,
+			u.username,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri
+		FROM friends f
+		JOIN users u ON u.id = (CASE WHEN f.sender_id = ? THEN f.receiver_id ELSE f.sender_id END)
+		LEFT JOIN profiles p ON p.user_id = (CASE WHEN f.sender_id = ? THEN f.receiver_id ELSE f.sender_id END)
+		WHERE (f.sender_id = ? OR f.receiver_id = ?) AND f.status = ?
+			AND (u.username LIKE ? OR p.display_name LIKE ?)
+		ORDER BY p.display_name ASC
+		LIMIT ?`
+	args := []interface{}{
+		userID, userID, userID,
+		userID, userID, string(models.FriendStatusAccepted),
+		like, like, limit,
+	}
+
+	var rows []friendRow
+	if err := r.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("search accepted friends: %w", err)
+	}
+
+	results := make([]dto.UserSearchResult, len(rows))
+	for i, row := range rows {
+		results[i] = dto.UserSearchResult{
+			ID:          row.UserID,
+			Username:    row.Username,
+			DisplayName: row.DisplayName,
+			AvatarURI:   row.AvatarURI,
+		}
+	}
+	return results, nil
+}
+
 func (r *FriendRepository) FindPair(ctx context.Context, userA, userB string) (*models.Friend, error) {
 	var friend models.Friend
 	err := r.db.WithContext(ctx).

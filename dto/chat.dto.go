@@ -109,3 +109,15 @@ type ChatConversationDTO struct {
 type ChatListResponse struct {
 	Data []ChatConversationDTO `json:"data"`
 }
+
+type ChatInviteItemDTO struct {
+	InviteID        string    `json:"invite_id"`
+	RequesterID     string    `json:"requester_id"`
+	RequesterName   string    `json:"requester_name,omitempty"`
+	RequesterAvatar string    `json:"requester_avatar,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type ChatInviteListResponse struct {
+	Data []ChatInviteItemDTO `json:"data"`
+}
