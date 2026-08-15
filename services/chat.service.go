@@ -429,16 +429,9 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 		return nil, err
 	}
 
-	// Chat trực tiếp dùng E2E — server không đọc được nội dung nên trả về trống;
-	// client tự tìm kiếm trên dữ liệu đã giải mã ở máy.
-	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
-	if err != nil {
-		return nil, err
-	}
-	if chat.Type == models.ChatTypeDirect {
-		return []models.Message{}, nil
-	}
-
+	// Chat legacy (e2e_version = 0) được server mã hóa bằng khóa chat nên có thể
+	// giải mã và tìm kiếm. Chat E2E (e2e_version = 1) server không đọc được nội
+	// dung — client tự tìm kiếm trên dữ liệu đã giải mã ở máy.
 	messages, err := s.GetAllMessagesDecrypted(ctx, userID, chatID)
 	if err != nil {
 		return nil, err
@@ -448,6 +441,10 @@ func (s *ChatService) SearchMessages(ctx context.Context, userID, chatID, keywor
 	results := make([]models.Message, 0, len(messages))
 	for _, msg := range messages {
 		if msg.DeletedForSender || msg.DeletedForReceiver {
+			continue
+		}
+		// E2E messages là ciphertext không thể khớp — bỏ qua.
+		if msg.E2EVersion != 0 {
 			continue
 		}
 		if strings.Contains(strings.ToLower(msg.Content), needle) {
