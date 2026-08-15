@@ -6,8 +6,8 @@ import "time"
 // access/refresh tokens as the JWT `jti` claim and used to enforce per-session
 // revocation (list / revoke specific devices).
 type UserSession struct {
-	ID           string     `json:"id" gorm:"primaryKey"`
-	UserID       string     `json:"user_id" gorm:"index"`
+	ID           string     `json:"id" gorm:"type:varchar(36);primaryKey"`
+	UserID       string     `json:"user_id" gorm:"type:varchar(36);index"`
 	DeviceName   string     `json:"device_name"`
 	IPAddress    string     `json:"ip_address"`
 	UserAgent    string     `json:"user_agent"`

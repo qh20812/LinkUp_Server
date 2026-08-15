@@ -57,7 +57,7 @@ go mod download
 Tạo file `.env` tại thư mục gốc:
 
 ```env
-# Database
+# Database (required)
 DB_HOST=localhost
 DB_PORT=3306
 DB_USER=root
@@ -65,34 +65,41 @@ DB_PASSWORD=yourpassword
 DB_NAME=linkup
 DB_SSL=true
 
-# JWT
+# JWT (required)
 JWT_SECRET=your-secret-key
 JWT_EXPIRES_IN=15
 
-# Cloudinary
+# Cloudinary (required)
 CLOUDINARY_URL=cloudinary://api_key:api_secret@cloud_name
 
-# Email (SMTP Gmail — tùy chọn, cho quên mật khẩu)
+# MongoDB (required — group-call history only; MySQL is primary DB)
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB_NAME=linkup
+
+# Email (SMTP Gmail — optional, cho quên mật khẩu)
+# Đọc trực tiếp qua os.Getenv, không qua config.Env
 GMAIL_USER=your-email@gmail.com
 GMAIL_PASSWORD=your-app-password
 
-# ICE Servers (WebRTC — tùy chọn)
-# STUN: comma-separated URLs
+# ICE Servers (WebRTC — optional)
 ICE_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
-# TURN: để trống nếu chưa dùng
 TURN_SERVER_URL=
 TURN_USERNAME=
 TURN_CREDENTIAL=
 
-# WebSocket origin (tùy chọn, mặc định cho phép tất cả)
+# Google OAuth (optional — check ID token từ client)
+GOOGLE_CLIENT_IDS=your-client-id.apps.googleusercontent.com
+
+# WebSocket origin (optional, mặc định "*")
 WS_ALLOWED_ORIGINS=http://localhost:3000
 
 # Server
 PORT=8080
+VERIFY_EMAIL_URL=http://localhost:3000/verify-email
 FRONTEND_RESET_URL=http://localhost:3000
 ```
 
-> **Lưu ý:** `DB_SSL` phải set thành `"true"` do lỗi parser config (giá trị `false` bị coi là thiếu). Thực tế DSN không dùng SSL.
+> **Lưu ý:** `DB_SSL` phải set thành `"true"` do lỗi parser config (giá trị `false` bị coi là thiếu). Thực tế DSN không dùng SSL. `MONGO_URI` là required (server sẽ fail nếu thiếu) nhưng chỉ dùng cho group-call history — MySQL là primary DB.
 
 ### Seed database
 
@@ -125,18 +132,18 @@ go build -o ./tmp/main.exe ./cmd
 ```
 ├── cmd/
 │   ├── main.go                 # Entrypoint (Gin, GORM, routes, WS)
-│   ├── seed/                   # Seed database (main.go + schema/ sub-package)
+│   ├── seed/                   # Seed database (main.go + schema/, internal/, 10 sub-packages)
 │   └── cloudinary-check/       # Standalone (không dùng trong app)
 ├── config/                     # Env parser (custom, singleton guard)
 ├── controllers/                # HTTP handlers (Gin) — 22 files
-├── dto/                        # Data Transfer Objects (binding tags + validators)
 ├── db/                         # Kết nối MySQL (*sql.DB)
-├── docs/                       # Tài liệu + test cases (.test-case.md)
+├── docs/                       # Tài liệu (designs/, migrations/, postman/, test-case/)
+├── errors/                     # App error codes & messages (errorsapp package)
 ├── groupws/                    # Group chat WebSocket Hub (riêng, không phải ws.Hub)
-├── middlewares/                # Auth (JWT) & RBAC middleware
-├── models/                     # GORM models — 49 files
+├── middlewares/                # Auth (JWT), RBAC, Prometheus metrics
+├── models/                     # GORM models — 57 files
 ├── repository/                 # Database access layer (GORM + raw SQL)
-├── routes/                     # Route registration — 22 files
+├── routes/                     # Route registration — 25 files
 ├── services/                   # Business logic (PostService, etc. là interfaces)
 ├── tests/                      # Validation tests (community, contribution, call)
 ├── utils/                      # JWT, encryption (AES-256-GCM), hash, UUID, email
@@ -152,15 +159,16 @@ go build -o ./tmp/main.exe ./cmd
 |--------|------|-------|
 | GET | `/health` | Health check |
 | GET | `/ws` | WebSocket (notifications) `?token=` |
-| GET | `/posts` | Danh sách bài viết |
-| GET | `/posts/:id` | Chi tiết bài viết |
-| GET | `/stories/feed` | Danh sách story đầu trang chủ |
-| GET | `/api/tags/:name/posts` | Bài viết theo tag |
-| GET | `/api/profile/:userID` | Profile công khai |
+| GET | `/api/posts` | Danh sách bài viết (cần auth để personalized feed) |
+| GET | `/api/posts/:id` | Chi tiết bài viết |
+| GET | `/api/posts/hashtag/:name` | Bài viết theo hashtag |
+| GET | `/api/emojis` | Danh sách emoji |
+| GET | `/api/stories/feed` | Danh sách story đầu trang chủ |
+| GET | `/api/stories/user/:userID/active` | Kiểm tra user có story active |
+| GET | `/api/ads/packages` | Danh sách gói quảng cáo |
 | GET | `/api/search` | Tìm kiếm (posts, users, hashtags) |
 | GET | `/api/communities/:id/contributions/leaderboard` | Bảng xếp hạng điểm đóng góp |
 | GET | `/api/communities/:id/contributions/:userID` | Điểm của user trong community |
-| GET | `/api/calls/ice-servers` | ICE server config (STUN/TURN) |
 
 ### Yêu cầu xác thực
 
@@ -172,8 +180,12 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 |--------|------|-------|
 | POST | `/api/auth/register` | Đăng ký |
 | POST | `/api/auth/login` | Đăng nhập |
+| POST | `/api/auth/google` | Google OAuth login |
 | POST | `/api/auth/refresh` | Refresh token |
-| POST | `/api/auth/change-password` | Đổi mật khẩu |
+| POST | `/api/auth/verify-email` | Xác thực email |
+| POST | `/api/auth/resend-verification` | Gửi lại email xác thực |
+| POST | `/api/auth/change-password` | Đổi mật khẩu (auth) |
+| POST | `/api/auth/logout` | Đăng xuất (auth) |
 | POST | `/api/auth/forgot-password` | Quên mật khẩu (gửi email) |
 | POST | `/api/auth/verify-reset-token` | Xác thực token reset |
 | POST | `/api/auth/reset-password` | Đặt lại mật khẩu |
@@ -182,29 +194,62 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 
 | Method | Path | Mô tả |
 |--------|------|-------|
-| POST | `/posts` | Tạo bài viết |
-| POST | `/posts/:id/react` | React bài viết (toggle) |
-| POST | `/posts/:id/comments` | Bình luận |
-| POST | `/posts/:id/share` | Chia sẻ |
-| POST | `/posts/:id/save` | Lưu bài (bookmark) |
+| GET | `/api/posts` | Danh sách bài viết (auth → personalized) |
+| GET | `/api/posts/saved` | Bài viết đã lưu |
+| GET | `/api/posts/user/:userID` | Bài viết của user |
+| GET | `/api/posts/user/:userID/media` | Media của user |
+| GET | `/api/posts/:id` | Chi tiết bài viết (public) |
+| GET | `/api/posts/:id/comments` | Danh sách bình luận (public) |
+| POST | `/api/posts` | Tạo bài viết |
+| DELETE | `/api/posts/:id` | Xóa bài viết |
+| POST | `/api/posts/:id/react` | React bài viết (toggle) |
+| POST | `/api/posts/:id/comments` | Bình luận |
+| POST | `/api/posts/:id/share` | Chia sẻ |
+| POST | `/api/posts/:id/save` | Lưu bài (bookmark) |
+| POST | `/api/posts/:id/pin` | Ghim bài viết |
+| DELETE | `/api/posts/:id/pin` | Bỏ ghim bài viết |
 
 #### Stories
 
 | Method | Path | Mô tả |
 |--------|------|-------|
-| POST | `/stories` | Đăng tải story mới |
-| GET | `/stories/:id` | Xem story (ghi nhận view) |
-| POST | `/stories/:id/interact` | Tương tác (react, reply, share) |
-| GET | `/stories/:id/analytics` | Analytics cho chủ story |
+| POST | `/api/stories` | Đăng tải story mới |
+| GET | `/api/stories/user/:userID` | Danh sách story của user (optional auth) |
+| GET | `/api/stories/user/:userID/active` | Kiểm tra story active (public) |
+| GET | `/api/stories/:id` | Xem story (ghi nhận view) |
+| POST | `/api/stories/:id/interact` | Tương tác (react, reply, share) |
+| GET | `/api/stories/:id/analytics` | Analytics cho chủ story |
 
 #### Profile & Social
 
 | Method | Path | Mô tả |
 |--------|------|-------|
+| GET | `/api/profile/:userID` | Profile công khai (public) |
 | PATCH | `/api/profile` | Cập nhật profile |
 | GET/POST | `/api/follow/*` | Follow/Unfollow (toggle) |
 | GET/POST | `/api/friend-requests/*` | Kết bạn (toggle + accept/reject) |
 | GET/POST | `/api/blocks` | Chặn/Bỏ chặn (toggle) |
+
+#### Settings
+
+| Method | Path | Mô tả |
+|--------|------|-------|
+| GET/PUT | `/api/settings/privacy` | Cài đặt riêng tư |
+| GET | `/api/settings/storage` | Thông tin dung lượng |
+| POST | `/api/settings/deactivate` | Vô hiệu hóa tài khoản |
+| GET/PUT | `/api/settings/appearance` | Giao diện (theme, language) |
+| GET | `/api/settings/sessions` | Danh sách session |
+| DELETE | `/api/settings/sessions/:id` | Thu hồi session |
+| POST | `/api/settings/sessions/revoke-others` | Thu hồi tất cả session khác |
+
+#### E2E Encryption
+
+| Method | Path | Mô tả |
+|--------|------|-------|
+| PUT | `/api/e2e/keys` | Đăng ký public key |
+| GET | `/api/e2e/keys/:userID` | Lấy public key của user |
+| POST | `/api/e2e/chats/keys` | Lưu encryption key cho chat |
+| GET | `/api/e2e/chats/:chatID/keys` | Lấy encryption key của chat |
 
 #### Media & Reports
 
@@ -217,7 +262,11 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 
 | Method | Path | Mô tả |
 |--------|------|-------|
-| GET/POST | `/api/notifications*` | Thông báo (mark read, list) |
+| GET | `/api/notifications` | Danh sách thông báo |
+| PUT | `/api/notifications/:id/read` | Đánh dấu đã đọc |
+| PUT | `/api/notifications/read-all` | Đánh dấu tất cả đã đọc |
+| GET | `/api/notifications/unread-count` | Số thông báo chưa đọc |
+| GET/PUT | `/api/notifications/preferences` | Tùy chọn thông báo |
 
 #### Chat
 
@@ -227,6 +276,7 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 | GET | `/api/chats/ws` | WebSocket Chat Hub (Bearer auth) |
 | GET/POST | `/api/group-chats/*` | Group chat settings, members, mutes |
 | GET | `/api/group-chats/ws` | WebSocket Group Chat Hub (`?token=` access JWT) |
+| GET | `/api/group-calls/ws` | WebSocket Group Call Hub (`?token=`) |
 
 #### Communities
 
@@ -239,34 +289,77 @@ Tất cả endpoint dưới đây yêu cầu `Authorization: Bearer <access_toke
 
 | Method | Path | Mô tả |
 |--------|------|-------|
-| GET/POST/PUT/DELETE | `/ads-management*` | Quản lý quảng cáo |
-| GET/POST | `/customer/*` | Quảng cáo (partner) |
-
-#### Admin
-
-| Method | Path | Mô tả |
-|--------|------|-------|
-| GET/POST | `/api/admin/*` | Admin dashboard, reports, bans, moderation |
-| GET | `/api/admin/media/flagged` | Danh sách media flagged/rejected (phân trang, filter status) |
-| POST | `/api/admin/media/:id/review` | Duyệt media (approved / rejected) — kèm cleanup Cloudinary + notification |
-| POST | `/api/admin/media/cleanup-rejected` | Dọn dẹp media rejected quá 7 ngày |
+| GET/POST/PUT/DELETE | `/api/ads-management*` | Quản lý quảng cáo |
+| POST | `/api/ads-management/subscribe` | Đăng ký gói quảng cáo |
+| GET | `/api/ads-management/subscription` | Thông tin subscription hiện tại |
+| GET | `/api/customer/*` | Quảng cáo feed + tracking (partner) |
 
 #### Calls
 
 | Method | Path | Mô tả |
 |--------|------|-------|
-| GET | `/api/calls/history` | Lịch sử cuộc gọi (phân trang, filter theo `status`/`call_type`/`direction`) |
-| GET | `/api/calls/history/missed-count` | Số cuộc gọi nhỡ chưa đọc |
-| POST | `/api/calls/history/mark-read` | Đánh dấu đã đọc cuộc gọi nhỡ |
-| POST | `/api/calls/history/hide` | Ẩn cuộc gọi khỏi lịch sử (soft-delete theo user) |
+| GET | `/api/calls/ice-servers` | ICE server config (STUN/TURN) |
+| GET | `/api/calls/history` | Lịch sử cuộc gọi (phân trang, filter) |
+| GET | `/api/calls/missed/count` | Số cuộc gọi nhỡ chưa đọc |
+| POST | `/api/calls/missed/read` | Đánh dấu đã đọc cuộc gọi nhỡ |
+| DELETE | `/api/calls/:callID/hide` | Ẩn cuộc gọi khỏi lịch sử (soft-delete) |
 | GET | `/api/calls/:callID` | Chi tiết cuộc gọi |
+| POST | `/api/calls/initiate` | Tạo cuộc gọi mới |
+| POST | `/api/calls/:callID/accept` | Chấp nhận cuộc gọi |
+| POST | `/api/calls/:callID/reject` | Từ chối cuộc gọi |
 | POST | `/api/calls/:callID/mute` | Bật/tắt mic |
 | POST | `/api/calls/:callID/video` | Bật/tắt camera |
 | GET | `/api/calls/ws` | WebSocket Call Hub (signaling + control) |
 
+#### Admin (RBAC: SuperAdmin/Admin)
+
+| Method | Path | Mô tả |
+|--------|------|-------|
+| GET | `/api/admin/analytics` | Dashboard analytics |
+| GET | `/api/admin/users` | Danh sách users |
+| PUT | `/api/admin/users/:userID/status` | Thay đổi trạng thái user |
+| POST | `/api/admin/users/:userID/ban` | Ban user |
+| GET | `/api/admin/posts` | Danh sách bài viết |
+| PUT | `/api/admin/posts/:postID/hide` | Ẩn bài viết |
+| PUT | `/api/admin/posts/:postID/status` | Thay đổi trạng thái bài viết |
+| GET | `/api/admin/comments` | Danh sách bình luận |
+| PUT | `/api/admin/comments/:commentID/hide` | Ẩn bình luận |
+| PUT | `/api/admin/comments/:commentID/reveal` | Hiện bình luận |
+| GET | `/api/admin/reports` | Danh sách báo cáo |
+| GET | `/api/admin/reports/:reportID` | Chi tiết báo cáo |
+| POST | `/api/admin/reports/:reportID/decision` | Xử lý báo cáo |
+| GET | `/api/admin/media/grouped` | Media grouped by user |
+| GET | `/api/admin/media/flagged` | Media flagged/rejected |
+| POST | `/api/admin/media/:id/review` | Duyệt media (approved/rejected) |
+| POST | `/api/admin/media/cleanup-rejected` | Dọn media rejected >7 ngày |
+| GET | `/api/admin/groups` | Danh sách nhóm chat |
+| GET | `/api/admin/groups/:chatID` | Chi tiết nhóm |
+| GET | `/api/admin/groups/:chatID/members` | Thành viên nhóm |
+| GET | `/api/admin/groups/:chatID/logs` | Moderation logs |
+| POST | `/api/admin/groups/:chatID/hide` | Ẩn nhóm |
+| POST | `/api/admin/groups/:chatID/unhide` | Hiện nhóm |
+| POST | `/api/admin/groups/:chatID/archive` | Lưu trữ nhóm |
+| POST | `/api/admin/groups/:chatID/warn` | Cảnh báo nhóm |
+| DELETE | `/api/admin/groups/:chatID` | Xóa nhóm |
+| GET | `/api/admin/communities` | Danh sách cộng đồng |
+| GET | `/api/admin/communities/:id` | Chi tiết cộng đồng |
+| GET | `/api/admin/communities/:id/members` | Thành viên cộng đồng |
+| GET | `/api/admin/communities/:id/logs` | Moderation logs |
+| POST | `/api/admin/communities/:id/hide` | Ẩn cộng đồng |
+| POST | `/api/admin/communities/:id/unhide` | Hiện cộng đồng |
+| POST | `/api/admin/communities/:id/archive` | Lưu trữ cộng đồng |
+| POST | `/api/admin/communities/:id/unarchive` | Bỏ lưu trữ |
+| POST | `/api/admin/communities/:id/warn` | Cảnh báo cộng đồng |
+| DELETE | `/api/admin/communities/:id` | Xóa cộng đồng |
+| GET | `/api/admin/ads` | Danh sách quảng cáo |
+| PATCH | `/api/admin/ads/:id/status` | Thay đổi trạng thái QC |
+| DELETE | `/api/admin/ads/:id` | Xóa quảng cáo |
+| GET | `/api/admin/settings` | Site settings |
+| PUT | `/api/admin/settings` | Cập nhật site settings |
+
 ## WebSocket
 
-Kiến trúc WS: **2 Hub types (`ws.Hub`, `groupws.Hub`), 3 Hub instances, 4 endpoints**.
+Kiến trúc WS: **2 Hub types (`ws.Hub`, `groupws.Hub`), 4 Hub instances, 5 endpoints**.
 
 | Endpoint | Hub type | Instance | Service | Auth | Mục đích |
 |---|---|---|---|---|---|
@@ -274,6 +367,7 @@ Kiến trúc WS: **2 Hub types (`ws.Hub`, `groupws.Hub`), 3 Hub instances, 4 end
 | `GET /api/chats/ws` | `ws.Hub` | `chatHub` | `ChatService` set | Bearer | Chat mã hóa |
 | `GET /api/calls/ws` | `ws.Hub` | `hub` (shared) | `callService` set | Bearer | WebRTC signaling |
 | `GET /api/group-chats/ws` | `groupws.Hub` | `groupHub` | `GroupMessageService` + `GroupChatService` | `?token=` access JWT | Group chat real-time |
+| `GET /api/group-calls/ws` | `groupws.Hub` | `groupHub` (shared) | Group call events | `?token=` access JWT | Group call signaling |
 
 ### Notification Hub (`GET /ws`)
 
@@ -365,12 +459,7 @@ go test ./services/... -v
 go build ./... && go vet ./...
 ```
 
-```bash
-# Integration tests — AI moderation (cần TEST_DSN)
-go test ./services/... -run TestAdminService -v
-```
-
-Test cases chi tiết cho từng module nằm trong `docs/test-case/` (xem `docs/test-case/ai-guardian.test-case.md` cho AI moderation).
+Test cases chi tiết cho từng module nằm trong `docs/test-case/` (6 file: ai-guardian, call-history, manage-groups-communities, report, video-call, voice-call). Postman collections trong `docs/postman/`.
 
 ## Kiến trúc
 
@@ -383,9 +472,11 @@ Client → Router (Gin) → Middleware (Auth/RBAC) → Controller → Service �
 ### Layers
 
 - **Controller:** Xử lý HTTP request/response, parse input (`ShouldBindJSON`, `ShouldBindQuery`)
-- **Service:** Business logic (interface-based: `PostService`, `MediaService`, `AdService`, `AIModerationService`, `CallService`; concrete struct cho phần còn lại, `AdminService` có setter tiện ích)
+- **Service:** Business logic (interface-based: `PostService`, `MediaService`, `AdService`, `AIModerationService`; concrete struct cho phần còn lại). `ws.CallService` và `ws.ChatService` là interfaces defined trong `ws/` để tránh import cycle
 - **Repository:** GORM queries + raw SQL khi cần (innodb lock, batch operations)
+- **Errors:** `errorsapp` package — error codes, messages (tiếng Việt), helpers. Import bởi tất cả services
 - **WebSocket Hub:** `ws.Hub` cho notification/chat/call, `groupws.Hub` riêng cho group chat real-time
+- **Middleware:** Auth (JWT), RBAC (`RequireRoles`, `CheckAdOwnership`, `RequireContributionLevel`), Prometheus metrics (`linkup_http_requests_total`, `linkup_http_request_duration_seconds`)
 
 ### Design patterns
 

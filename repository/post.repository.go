@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"linkup/models"
 	"time"
 
@@ -643,4 +644,63 @@ func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, of
 		Find(&posts).Error
 
 	return posts, err
+}
+
+func (r *PostRepository) PinPost(ctx context.Context, postID string) error {
+	now := time.Now()
+	tx := r.db.WithContext(ctx).
+		Model(&models.Post{}).
+		Where("id = ?", postID).
+		Updates(map[string]interface{}{"is_pinned": true, "pinned_at": now})
+	if tx.Error != nil {
+		return fmt.Errorf("pin post: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("post not found")
+	}
+	return nil
+}
+
+func (r *PostRepository) UnpinPost(ctx context.Context, postID string) error {
+	tx := r.db.WithContext(ctx).
+		Model(&models.Post{}).
+		Where("id = ?", postID).
+		Updates(map[string]interface{}{"is_pinned": false, "pinned_at": nil})
+	if tx.Error != nil {
+		return fmt.Errorf("unpin post: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("post not found")
+	}
+	return nil
+}
+
+func (r *PostRepository) FetchMediaByUserID(ctx context.Context, userID string, offset, limit int) ([]models.Media, error) {
+	var media []models.Media
+	tx := r.db.WithContext(ctx).
+		Raw(`SELECT m.id, m.post_id, m.file_uri, m.file_type, m.file_size, m.created_at
+			FROM media m
+			JOIN posts p ON p.id = m.post_id
+			WHERE p.user_id = ? AND p.status = ? AND p.deleted_at IS NULL
+			ORDER BY m.created_at DESC
+			LIMIT ? OFFSET ?`, userID, models.PostStatusPublic, limit, offset).
+		Scan(&media)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("fetch media by user: %w", tx.Error)
+	}
+	return media, nil
+}
+
+func (r *PostRepository) CountMediaByUserID(ctx context.Context, userID string) (int64, error) {
+	var count int64
+	tx := r.db.WithContext(ctx).
+		Raw(`SELECT COUNT(*)
+			FROM media m
+			JOIN posts p ON p.id = m.post_id
+			WHERE p.user_id = ? AND p.status = ? AND p.deleted_at IS NULL`, userID, models.PostStatusPublic).
+		Scan(&count)
+	if tx.Error != nil {
+		return 0, fmt.Errorf("count media by user: %w", tx.Error)
+	}
+	return count, nil
 }

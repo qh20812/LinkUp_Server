@@ -145,3 +145,26 @@ func (crtl *FollowController) GetFollowing(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+func (crtl *FollowController) GetMutualFollows(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	viewerID := val.(string)
+
+	items, err := crtl.followService.GetMutualFollows(c.Request.Context(), viewerID, targetUserID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": items, "total": len(items)})
+}

@@ -16,21 +16,25 @@ import (
 
 type StoryService interface {
 	CreateStory(ctx context.Context, userID string, fileHeader *multipart.FileHeader, caption string) (*dto.CreateStoryResponse, error)
-	GetHomeStories() ([]dto.StoryResponse, error)
+	GetHomeStories() ([]dto.StoryFeedGroup, error)
 	ViewStory(storyID, viewerID string) (*models.Story, error)
 	InteractWithStory(storyID, userID string, req dto.InteractStoryRequest) error
 	GetAnalytics(storyID, userID string) (*dto.StoryAnalyticsResponse, error)
+	HasActiveStory(userID string) (bool, error)
+	GetUserActiveStories(userID string, viewerID string) ([]dto.StoryResponse, error)
 }
 
 type storyService struct {
 	repo         repository.StoryRepository
-	mediaService MediaService // Inject MediaService
+	profileRepo  *repository.ProfileRepository
+	mediaService MediaService
 	notifService *NotificationService
 }
 
-func NewStoryService(repo repository.StoryRepository, mediaService MediaService, notifService *NotificationService) StoryService {
+func NewStoryService(repo repository.StoryRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService) StoryService {
 	return &storyService{
 		repo:         repo,
+		profileRepo:  profileRepo,
 		mediaService: mediaService,
 		notifService: notifService,
 	}
@@ -87,23 +91,70 @@ func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeade
 		ExpiresAt: *story.ExpiresAt,
 	}, nil
 }
-func (s *storyService) GetHomeStories() ([]dto.StoryResponse, error) {
+func (s *storyService) GetHomeStories() ([]dto.StoryFeedGroup, error) {
 	stories, err := s.repo.GetActiveStories()
 	if err != nil {
 		return nil, err
 	}
 
-	var res []dto.StoryResponse
-	for _, story := range stories {
-		res = append(res, dto.StoryResponse{
-			ID:        story.ID,
-			UserID:    story.UserID,
-			MediaURI:  story.MediaURI,
-			MediaType: story.MediaType.String(),
-			Caption:   story.Caption,
-			CreatedAt: story.CreatedAt,
+	if len(stories) == 0 {
+		return []dto.StoryFeedGroup{}, nil
+	}
+
+	// Collect unique user IDs
+	userIDSet := make(map[string]struct{})
+	for _, st := range stories {
+		userIDSet[st.UserID] = struct{}{}
+	}
+	userIDs := make([]string, 0, len(userIDSet))
+	for id := range userIDSet {
+		userIDs = append(userIDs, id)
+	}
+
+	// Batch load profiles
+	profiles, _ := s.profileRepo.FindByIDs(context.Background(), userIDs)
+	profileMap := make(map[string]models.Profile, len(profiles))
+	for _, p := range profiles {
+		profileMap[p.UserID] = p
+	}
+
+	// Group stories by user
+	grouped := make(map[string]*dto.StoryFeedGroup)
+	for _, st := range stories {
+		group, exists := grouped[st.UserID]
+		if !exists {
+			p := profileMap[st.UserID]
+			group = &dto.StoryFeedGroup{
+				User: dto.StoryUserInfo{
+					ID:          st.UserID,
+					DisplayName: p.DisplayName,
+					AvatarURI:   p.AvatarURI,
+				},
+				Stories: []dto.StoryResponse{},
+			}
+			grouped[st.UserID] = group
+		}
+		group.Stories = append(group.Stories, dto.StoryResponse{
+			ID:        st.ID,
+			UserID:    st.UserID,
+			MediaURI:  st.MediaURI,
+			MediaType: st.MediaType.String(),
+			Caption:   st.Caption,
+			CreatedAt: st.CreatedAt,
+			ExpiresAt: st.ExpiresAt,
+			HasViewed: false,
 		})
 	}
+
+	// Convert map to slice preserving order (stories already ordered by created_at DESC)
+	res := make([]dto.StoryFeedGroup, 0, len(grouped))
+	for _, st := range stories {
+		if group, exists := grouped[st.UserID]; exists {
+			res = append(res, *group)
+			delete(grouped, st.UserID)
+		}
+	}
+
 	return res, nil
 }
 
@@ -275,4 +326,37 @@ func (s *storyService) GetAnalytics(storyID, userID string) (*dto.StoryAnalytics
 		TotalShares:  shares,
 		Viewers:      viewersList,
 	}, nil
+}
+
+func (s *storyService) HasActiveStory(userID string) (bool, error) {
+	return s.repo.HasActiveStoryByUserID(userID)
+}
+
+func (s *storyService) GetUserActiveStories(userID string, viewerID string) ([]dto.StoryResponse, error) {
+	stories, err := s.repo.GetActiveStoriesByUserID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	var res []dto.StoryResponse
+	for _, story := range stories {
+		hasViewed := false
+		if viewerID != "" && viewerID != story.UserID {
+			viewed, err := s.repo.HasUserViewed(story.ID, viewerID)
+			if err == nil {
+				hasViewed = viewed
+			}
+		}
+		res = append(res, dto.StoryResponse{
+			ID:        story.ID,
+			UserID:    story.UserID,
+			MediaURI:  story.MediaURI,
+			MediaType: story.MediaType.String(),
+			Caption:   story.Caption,
+			CreatedAt: story.CreatedAt,
+			ExpiresAt: story.ExpiresAt,
+			HasViewed: hasViewed,
+		})
+	}
+	return res, nil
 }

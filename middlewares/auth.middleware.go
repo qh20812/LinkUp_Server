@@ -99,3 +99,38 @@ func AuthMiddleware(env config.Env, db *gorm.DB) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// OptionalAuth tries to parse the JWT token and set userID/email if present,
+// but does NOT abort if the token is missing or invalid.
+func OptionalAuth(env config.Env, db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.Next()
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.Next()
+			return
+		}
+
+		token, err := utils.ParseToken(env.JWTSecret, parts[1])
+		if err != nil || !token.Valid {
+			c.Next()
+			return
+		}
+
+		claims := token.Claims.(*utils.TokenClaims)
+		if claims.TokenType != "access" {
+			c.Next()
+			return
+		}
+
+		c.Set("userID", claims.UserID)
+		c.Set("email", claims.Email)
+		c.Set("sessionID", claims.ID)
+		c.Next()
+	}
+}

@@ -117,8 +117,8 @@ func (r *FollowRepository) GetSuggestions(ctx context.Context, userID string, pa
 				MutualCount: row.MutualCount,
 			}
 		}
-		return items, nil
-	}
+	return items, nil
+}
 
 	personalizedQuery := `SELECT u.id, u.username,
 		COALESCE(p.display_name, '') AS display_name,
@@ -210,6 +210,43 @@ func (r *FollowRepository) ListFollowing(ctx context.Context, userID string, off
 		Scan(&rows)
 	if tx.Error != nil {
 		return nil, fmt.Errorf("list following: %w", tx.Error)
+	}
+
+	items := make([]dto.FollowListItem, len(rows))
+	for i, row := range rows {
+		items[i] = dto.FollowListItem{
+			UserID:      row.UserID,
+			Username:    row.Username,
+			DisplayName: row.DisplayName,
+			AvatarURI:   row.AvatarURI,
+		}
+	}
+	return items, nil
+}
+
+func (r *FollowRepository) GetMutualFollows(ctx context.Context, viewerID, targetUserID string, limit int) ([]dto.FollowListItem, error) {
+	type followRow struct {
+		UserID      string
+		Username    string
+		DisplayName string
+		AvatarURI   string
+	}
+
+	var rows []followRow
+	tx := r.db.WithContext(ctx).
+		Raw(`SELECT u.id AS user_id, u.username,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri
+			FROM follows f1
+			JOIN follows f2 ON f2.following_id = f1.following_id AND f2.follower_id = ?
+			JOIN users u ON u.id = f1.following_id
+			LEFT JOIN profiles p ON p.user_id = f1.following_id
+			WHERE f1.follower_id = ?
+			ORDER BY u.username
+			LIMIT ?`, viewerID, targetUserID, limit).
+		Scan(&rows)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("get mutual follows: %w", tx.Error)
 	}
 
 	items := make([]dto.FollowListItem, len(rows))

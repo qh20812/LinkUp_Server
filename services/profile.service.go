@@ -20,8 +20,8 @@ func NewProfileService(profileRepository *repository.ProfileRepository) *Profile
 	}
 }
 
-func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*models.Profile, error) {
-	profile, err := s.profileRepository.FindByUserID(ctx, userID)
+func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*repository.ProfileView, error) {
+	profile, err := s.profileRepository.FindEnrichedByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("view profile: %w", err)
 	}
@@ -31,8 +31,8 @@ func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*model
 	return profile, nil
 }
 
-func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, targetUserID string) (*models.Profile, error) {
-	profile, err := s.profileRepository.FindByUserID(ctx, targetUserID)
+func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, targetUserID string) (*repository.ProfileView, error) {
+	profile, err := s.profileRepository.FindEnrichedByUserID(ctx, targetUserID)
 	if err != nil {
 		return nil, fmt.Errorf("view profile: %w", err)
 	}
@@ -81,6 +81,9 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
 	}
 	if input.AvatarURI != nil {
 		existingProfile.AvatarURI = *input.AvatarURI
+	}
+	if input.CoverURI != nil {
+		existingProfile.CoverURI = *input.CoverURI
 	}
 	if input.Bio != nil {
 		existingProfile.Bio = *input.Bio

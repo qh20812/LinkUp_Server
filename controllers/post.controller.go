@@ -335,3 +335,62 @@ func (ctrl *PostController) GetEmojis(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": emojis})
 }
+
+func (ctrl *PostController) PinPost(c *gin.Context) {
+	postID := c.Param("id")
+	userID, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	err := ctrl.service.PinPost(c.Request.Context(), userID.(string), postID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã ghim bài viết"})
+}
+
+func (ctrl *PostController) UnpinPost(c *gin.Context) {
+	postID := c.Param("id")
+	userID, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	err := ctrl.service.UnpinPost(c.Request.Context(), userID.(string), postID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã bỏ ghim bài viết"})
+}
+
+func (ctrl *PostController) GetUserMedia(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+
+	media, total, err := ctrl.service.GetUserMedia(c.Request.Context(), targetUserID, page, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":      media,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+		"has_more":  int64(page*pageSize) < total,
+	})
+}

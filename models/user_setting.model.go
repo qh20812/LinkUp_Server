@@ -4,7 +4,7 @@ package models
 // public profile. Absence of a row means defaults (DiscoverableInSearch=true,
 // AllowStrangerMessages=false, Theme=light, Language=vi).
 type UserSetting struct {
-	UserID                string `json:"user_id" gorm:"primaryKey"`
+	UserID                string `json:"user_id" gorm:"type:varchar(36);primaryKey"`
 	DiscoverableInSearch  bool   `json:"discoverable_in_search"`
 	AllowStrangerMessages bool   `json:"allow_stranger_messages"`
 	Theme                 string `json:"theme"`

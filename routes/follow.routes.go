@@ -17,5 +17,6 @@ func RegisterFollowRoutes(router *gin.Engine, followController *controllers.Foll
 		follow.GET("/suggestions", middlewares.AuthMiddleware(env, db), followController.GetSuggestions)
 		follow.GET("/:userID/followers", followController.GetFollowers)
 		follow.GET("/:userID/following", followController.GetFollowing)
+		follow.GET("/:userID/mutual", middlewares.AuthMiddleware(env, db), followController.GetMutualFollows)
 	}
 }

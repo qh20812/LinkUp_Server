@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"linkup/models"
 
@@ -67,6 +68,38 @@ func (r *ProfileRepository) Update(ctx context.Context, userID string, profile *
 		return nil, fmt.Errorf("profile not found")
 	}
 	return profile, nil
+}
+
+// ProfileView is an enriched profile that includes data from the users and posts tables.
+type ProfileView struct {
+ models.Profile
+ Username  string    `json:"username"`
+ PostCount int64     `json:"post_count"`
+ CreatedAt time.Time `json:"created_at"`
+}
+
+// FindEnrichedByUserID returns an enriched profile with username, post_count, and created_at.
+// Returns (nil, nil) when no profile exists.
+func (r *ProfileRepository) FindEnrichedByUserID(ctx context.Context, userID string) (*ProfileView, error) {
+ var pv ProfileView
+ tx := r.db.WithContext(ctx).
+   Raw(`SELECT p.*, u.username,
+       (SELECT COUNT(*) FROM posts WHERE user_id = p.user_id AND status != 'deleted') AS post_count,
+       u.created_at
+       FROM profiles p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.user_id = ?`, userID).
+   Scan(&pv)
+ if tx.Error != nil {
+   if tx.Error == gorm.ErrRecordNotFound {
+     return nil, nil
+   }
+   return nil, fmt.Errorf("find enriched profile: %w", tx.Error)
+ }
+ if pv.UserID == "" {
+   return nil, nil
+ }
+ return &pv, nil
 }
 
 // FindByIDs returns profiles for the given user IDs.

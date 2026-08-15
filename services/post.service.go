@@ -30,6 +30,9 @@ type PostService interface {
 	GetPostsByHashtag(ctx context.Context, hashtag string, page, pageSize int) ([]models.Post, error)
 	ListEmojis(ctx context.Context) ([]models.Emoji, error)
 	SetMediaService(mediaService MediaService)
+	PinPost(ctx context.Context, userID, postID string) error
+	UnpinPost(ctx context.Context, userID, postID string) error
+	GetUserMedia(ctx context.Context, userID string, page, pageSize int) ([]models.Media, int64, error)
 }
 
 type postService struct {
@@ -737,4 +740,54 @@ func (s *postService) GetPostsByHashtag(ctx context.Context, hashtag string, pag
 
 func (s *postService) ListEmojis(ctx context.Context) ([]models.Emoji, error) {
 	return s.repo.ListEmojis(ctx)
+}
+
+func (s *postService) PinPost(ctx context.Context, userID, postID string) error {
+	post, err := s.repo.FindByID(ctx, postID)
+	if err != nil {
+		return fmt.Errorf("pin post: %w", err)
+	}
+	if post == nil {
+		return fmt.Errorf("post not found")
+	}
+	if post.UserID != userID {
+		return fmt.Errorf("unauthorized")
+	}
+	return s.repo.PinPost(ctx, postID)
+}
+
+func (s *postService) UnpinPost(ctx context.Context, userID, postID string) error {
+	post, err := s.repo.FindByID(ctx, postID)
+	if err != nil {
+		return fmt.Errorf("unpin post: %w", err)
+	}
+	if post == nil {
+		return fmt.Errorf("post not found")
+	}
+	if post.UserID != userID {
+		return fmt.Errorf("unauthorized")
+	}
+	return s.repo.UnpinPost(ctx, postID)
+}
+
+func (s *postService) GetUserMedia(ctx context.Context, userID string, page, pageSize int) ([]models.Media, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	total, err := s.repo.CountMediaByUserID(ctx, userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count user media: %w", err)
+	}
+
+	media, err := s.repo.FetchMediaByUserID(ctx, userID, offset, pageSize)
+	if err != nil {
+		return nil, 0, fmt.Errorf("get user media: %w", err)
+	}
+
+	return media, total, nil
 }

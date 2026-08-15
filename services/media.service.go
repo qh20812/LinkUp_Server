@@ -107,7 +107,7 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 	}
 
 	// 7. Notification + Moderation log (side effects — không block response)
-	s.sendModerationNotification(ctx, userID, result)
+	s.sendModerationNotification(ctx, userID, media.PostID, result)
 	s.writeModerationLog(ctx, media.ID, result)
 
 	return &media, nil
@@ -166,25 +166,29 @@ func (s *mediaService) GetByPostIDs(ctx context.Context, postIDs []string) (map[
 }
 
 // sendModerationNotification gửi thông báo cho user về kết quả kiểm duyệt.
-func (s *mediaService) sendModerationNotification(ctx context.Context, userID string, result *AIModerationResult) {
+func (s *mediaService) sendModerationNotification(ctx context.Context, userID string, postID *string, result *AIModerationResult) {
 	if s.notificationService == nil {
 		return
 	}
 
 	var message string
+	var notifType models.NotificationType
 	switch result.Status {
 	case models.MediaStatusApproved:
 		message = "Ảnh/video của bạn đã được hệ thống tự động duyệt."
+		notifType = models.NotificationTypeMediaApproved
 	case models.MediaStatusRejected:
 		message = "Ảnh/video của bạn bị từ chối do vi phạm tiêu chuẩn cộng đồng."
+		notifType = models.NotificationTypeMediaRejected
 	case models.MediaStatusFlagged:
 		message = "Ảnh/video của bạn đang chờ admin kiểm duyệt."
+		notifType = models.NotificationTypeMediaFlagged
 	default:
 		return
 	}
 
-	if _, err := s.notificationService.Create(ctx, userID, nil, models.NotificationTypeMessage,
-		message, nil, nil, nil); err != nil {
+	if _, err := s.notificationService.Create(ctx, userID, nil, notifType,
+		message, postID, nil, nil); err != nil {
 		log.Printf("[Media] không thể gửi thông báo moderation cho user %s: %v", userID, err)
 	}
 }

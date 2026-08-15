@@ -23,6 +23,8 @@ type Post struct {
 	Content     string     `json:"content"`
 	ViewsCount  int        `json:"views_count"`
 	Status      PostStatus `json:"status"`
+	IsPinned    bool       `json:"is_pinned"`
+	PinnedAt    *time.Time `json:"pinned_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
 

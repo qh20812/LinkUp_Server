@@ -162,6 +162,12 @@ func (s *FollowService) GetFollowers(ctx context.Context, userID string, page, p
 	}, nil
 }
 
+func (s *FollowService) GetMutualFollows(ctx context.Context, viewerID, targetUserID string) ([]dto.FollowListItem, error) {
+	if viewerID == "" || viewerID == targetUserID {
+		return []dto.FollowListItem{}, nil
+	}
+	return s.followRepository.GetMutualFollows(ctx, viewerID, targetUserID, 10)
+}
 func (s *FollowService) GetFollowing(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
 	if page < 1 {
 		page = 1

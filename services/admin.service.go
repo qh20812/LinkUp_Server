@@ -1173,8 +1173,20 @@ func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string,
 		return fmt.Errorf("ghi log kiểm duyệt thất bại: %w", err)
 	}
 
+	var notifType models.NotificationType
+	switch newStatus {
+	case models.MediaStatusApproved:
+		notifType = models.NotificationTypeMediaApproved
+	case models.MediaStatusRejected:
+		notifType = models.NotificationTypeMediaRejected
+	case models.MediaStatusFlagged:
+		notifType = models.NotificationTypeMediaFlagged
+	default:
+		notifType = models.NotificationTypeMessage
+	}
+
 	if _, err := s.notificationService.Create(ctx, media.UserID, &adminID,
-		models.NotificationTypeMessage, notificationMsg, nil, nil, nil); err != nil {
+		notifType, notificationMsg, media.PostID, nil, nil); err != nil {
 		return fmt.Errorf("gửi thông báo thất bại: %w", err)
 	}
 

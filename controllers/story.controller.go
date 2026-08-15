@@ -90,3 +90,40 @@ func (ctrl *StoryController) GetAnalytics(c *gin.Context) {
 
 	c.JSON(http.StatusOK, analytics)
 }
+
+// CheckUserStory kiểm tra user có story active không
+func (ctrl *StoryController) CheckUserStory(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	has, err := ctrl.service.HasActiveStory(targetUserID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"has_story": has})
+}
+
+// GetUserStories lấy danh sách story active của 1 user
+func (ctrl *StoryController) GetUserStories(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	viewerID, _ := c.Get("userID")
+	viewerStr, _ := viewerID.(string)
+
+	stories, err := ctrl.service.GetUserActiveStories(targetUserID, viewerStr)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"stories": stories})
+}

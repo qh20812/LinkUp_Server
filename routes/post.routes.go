@@ -25,5 +25,8 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 		apiGroup.POST("/posts/:id/save", middlewares.AuthMiddleware(env, db), ctrl.SavePost)
 		apiGroup.GET("/posts/hashtag/:name", ctrl.GetPostsByHashtag)
 		apiGroup.GET("/emojis", ctrl.GetEmojis)
+		apiGroup.POST("/posts/:id/pin", middlewares.AuthMiddleware(env, db), ctrl.PinPost)
+		apiGroup.DELETE("/posts/:id/pin", middlewares.AuthMiddleware(env, db), ctrl.UnpinPost)
+		apiGroup.GET("/posts/user/:userID/media", middlewares.AuthMiddleware(env, db), ctrl.GetUserMedia)
 	}
 }

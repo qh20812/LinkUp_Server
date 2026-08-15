@@ -18,6 +18,8 @@ type StoryRepository interface {
 	Create(story *models.Story) error
 	FindByID(id string) (*models.Story, error)
 	GetActiveStories() ([]models.Story, error)
+	HasActiveStoryByUserID(userID string) (bool, error)
+	GetActiveStoriesByUserID(userID string) ([]models.Story, error)
 	HasUserViewed(storyID, viewerID string) (bool, error)
 	LogView(storyID, viewerID string) error
 	CountViews(storyID string) (int64, error)
@@ -50,6 +52,21 @@ func (r *storyRepository) FindByID(id string) (*models.Story, error) {
 func (r *storyRepository) GetActiveStories() ([]models.Story, error) {
 	var stories []models.Story
 	err := r.db.Where("expires_at > ?", time.Now()).Order("created_at DESC").Find(&stories).Error
+	return stories, err
+}
+
+func (r *storyRepository) HasActiveStoryByUserID(userID string) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.Story{}).
+		Where("user_id = ? AND expires_at > ?", userID, time.Now()).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (r *storyRepository) GetActiveStoriesByUserID(userID string) ([]models.Story, error) {
+	var stories []models.Story
+	err := r.db.Where("user_id = ? AND expires_at > ?", userID, time.Now()).
+		Order("created_at ASC").Find(&stories).Error
 	return stories, err
 }
 
