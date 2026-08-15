@@ -54,16 +54,16 @@ func Run(env config.Env, state *internal.SeedState) error {
 	}
 
 	emojis := []emoji{
-		{internal.UUID(), ":like:", "https://cdn.example.com/emojis/like.png"},
-		{internal.UUID(), ":love:", "https://cdn.example.com/emojis/love.png"},
-		{internal.UUID(), ":haha:", "https://cdn.example.com/emojis/haha.png"},
-		{internal.UUID(), ":wow:", "https://cdn.example.com/emojis/wow.png"},
-		{internal.UUID(), ":sad:", "https://cdn.example.com/emojis/sad.png"},
-		{internal.UUID(), ":angry:", "https://cdn.example.com/emojis/angry.png"},
-		{internal.UUID(), ":clap:", "https://cdn.example.com/emojis/clap.png"},
-		{internal.UUID(), ":fire:", "https://cdn.example.com/emojis/fire.png"},
-		{internal.UUID(), ":heart:", "https://cdn.example.com/emojis/heart.png"},
-		{internal.UUID(), ":rocket:", "https://cdn.example.com/emojis/rocket.png"},
+		{internal.UUID(), ":like:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f44d.png"},
+		{internal.UUID(), ":love:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/2764.png"},
+		{internal.UUID(), ":haha:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f602.png"},
+		{internal.UUID(), ":wow:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f62e.png"},
+		{internal.UUID(), ":sad:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f622.png"},
+		{internal.UUID(), ":angry:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f621.png"},
+		{internal.UUID(), ":clap:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f44f.png"},
+		{internal.UUID(), ":fire:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f525.png"},
+		{internal.UUID(), ":heart:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f496.png"},
+		{internal.UUID(), ":rocket:", "https://cdn.jsdelivr.net/gh/jdecked/twemoji@15.1.0/assets/72x72/1f680.png"},
 	}
 
 	for _, e := range emojis {
