@@ -168,6 +168,10 @@ func main() {
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
+		// Wire sau khi cả media + story repo đã khởi tạo
+		mediaService.SetStoryRepo(storyRepository)
+		profileService.SetMediaRepo(mediaRepository)
+
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
 		reportRepository := repository.NewReportRepository(gormDB)
 		reportValidation := validations.NewReportValidation()

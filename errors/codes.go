@@ -265,6 +265,7 @@ const (
 	ErrCodeMediaImageTooSmall       = "media.IMAGE_TOO_SMALL"
 	ErrCodeMediaImageTooLarge       = "media.IMAGE_TOO_LARGE"
 	ErrCodeMediaInvalidAspectRatio  = "media.INVALID_ASPECT_RATIO"
+	ErrCodeMediaRejected            = "media.REJECTED"
 
 	// ── Contribution ───────────────────────────────────────────
 	ErrCodeContribPostWeightInvalid     = "contribution.POST_WEIGHT_INVALID"

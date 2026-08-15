@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -79,16 +80,28 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 	}
 
 	// Xử lý upload danh sách hình ảnh/video đa phần từ form-data lên Cloudinary
+	// Upload song song để tăng tốc (moderation chạy nền, không block)
 	if len(files) > 0 && s.mediaService != nil {
-		var mediaIDs []string
+		var (
+			wg       sync.WaitGroup
+			mu       sync.Mutex
+			mediaIDs []string
+		)
 		for _, file := range files {
-			uploadedMedia, err := s.mediaService.UploadMedia(ctx, userID, file)
-			if err == nil && uploadedMedia != nil {
-				mediaIDs = append(mediaIDs, uploadedMedia.ID)
-			} else if err != nil {
-				log.Printf("[Media Upload Error] Lỗi tải file lên: %v", err)
-			}
+			wg.Add(1)
+			go func(f *multipart.FileHeader) {
+				defer wg.Done()
+				uploadedMedia, err := s.mediaService.UploadMedia(ctx, userID, f)
+				if err == nil && uploadedMedia != nil {
+					mu.Lock()
+					mediaIDs = append(mediaIDs, uploadedMedia.ID)
+					mu.Unlock()
+				} else if err != nil {
+					log.Printf("[Media Upload Error] Lỗi tải file lên: %v", err)
+				}
+			}(file)
 		}
+		wg.Wait()
 		if len(mediaIDs) > 0 {
 			_ = s.repo.LinkMediaToPost(ctx, mediaIDs, post.ID)
 		}

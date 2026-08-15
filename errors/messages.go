@@ -269,6 +269,7 @@ var Messages = map[string]string{
 	"media.IMAGE_TOO_SMALL":      "Ảnh quá nhỏ",
 	"media.IMAGE_TOO_LARGE":      "Ảnh quá lớn",
 	"media.INVALID_ASPECT_RATIO": "Tỉ lệ khung hình không hợp lệ",
+	"media.REJECTED":             "Nội dung không phù hợp và đã bị từ chối",
 
 	// ── Contribution ───────────────────────────────────────────
 	"contribution.POST_WEIGHT_INVALID":      "Trọng số bài viết phải từ 0 đến 100",

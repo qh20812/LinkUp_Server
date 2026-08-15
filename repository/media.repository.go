@@ -46,7 +46,7 @@ func (r *MediaRepository) GetByID(ctx context.Context, id string) (*models.Media
 
 func (r *MediaRepository) GetByUserID(ctx context.Context, userID string) ([]models.Media, error) {
 	var medias []models.Media
-	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&medias).Error
+	err := r.db.WithContext(ctx).Where("user_id = ? AND status != ?", userID, models.MediaStatusRejected).Find(&medias).Error
 	return medias, err
 }
 
@@ -140,7 +140,7 @@ func (r *MediaRepository) GetByPostIDs(ctx context.Context, postIDs []string) (m
 
 	var medias []models.Media
 	if err := r.db.WithContext(ctx).
-		Where("post_id IN ?", postIDs).
+		Where("post_id IN ? AND status != ?", postIDs, models.MediaStatusRejected).
 		Order("created_at ASC").
 		Find(&medias).Error; err != nil {
 		return nil, err

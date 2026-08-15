@@ -28,9 +28,14 @@ type AIModerationResult struct {
 }
 
 // AIModerationService xử lý kiểm duyệt nội dung media qua AI (Cloudinary + AWS Rekognition).
-// Moderate thực hiện upload + moderation trong 1 call duy nhất, trả về URL và kết quả.
 type AIModerationService interface {
+	// Moderate upload file + chạy moderation trong 1 call (blocking).
 	Moderate(ctx context.Context, file multipart.File, fileType string) (*AIModerationResult, error)
+	// UploadWithoutModeration upload file lên Cloudinary mà KHÔNG chạy moderation.
+	// Dùng cho upload-first flow: upload nhanh, chạy nền sau.
+	UploadWithoutModeration(ctx context.Context, file multipart.File, publicID string) (*uploader.UploadResult, error)
+	// ModerateAsset chạy moderation trên asset đã upload (gọi Cloudinary Explicit API).
+	ModerateAsset(ctx context.Context, publicID string, resourceType string) (*AIModerationResult, error)
 }
 
 type cloudinaryModerationService struct {
@@ -41,6 +46,7 @@ func NewCloudinaryModerationService(cld *cloudinary.Cloudinary) AIModerationServ
 	return &cloudinaryModerationService{cld: cld}
 }
 
+// Moderate upload file + chạy AWS Rekognition moderation trong 1 call duy nhất.
 func (s *cloudinaryModerationService) Moderate(
 	ctx context.Context, src multipart.File, fileType string,
 ) (*AIModerationResult, error) {
@@ -81,6 +87,73 @@ func (s *cloudinaryModerationService) Moderate(
 		result.Status = models.MediaStatusRejected
 	default:
 		// "pending" hoặc giá trị lạ → gắn cờ chờ xử lý thủ công
+		result.Status = models.MediaStatusFlagged
+	}
+
+	return result, nil
+}
+
+// UploadWithoutModeration upload file lên Cloudinary mà KHÔNG chạy moderation.
+// Trả về UploadResult để caller lấy SecureURL và lưu vào DB.
+func (s *cloudinaryModerationService) UploadWithoutModeration(
+	ctx context.Context, src multipart.File, publicID string,
+) (*uploader.UploadResult, error) {
+	if s.cld == nil {
+		return nil, errorsapp.New(errorsapp.ErrCodeModCloudinaryNotInit)
+	}
+
+	uploadResult, err := s.cld.Upload.Upload(ctx, src, uploader.UploadParams{
+		PublicID:     publicID,
+		ResourceType: "auto",
+	})
+	if err != nil {
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeModUploadFailed, err)
+	}
+
+	return uploadResult, nil
+}
+
+// ModerateAsset chạy AWS Rekognition moderation trên asset đã upload.
+// Gọi Cloudinary Explicit API — không cần upload lại file.
+func (s *cloudinaryModerationService) ModerateAsset(
+	ctx context.Context, publicID string, resourceType string,
+) (*AIModerationResult, error) {
+	if s.cld == nil {
+		return nil, errorsapp.New(errorsapp.ErrCodeModCloudinaryNotInit)
+	}
+
+	explicitResult, err := s.cld.Upload.Explicit(ctx, uploader.UploadParams{
+		PublicID:     publicID,
+		ResourceType: resourceType,
+		Moderation:   "aws_rek",
+	})
+	if err != nil {
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeModUploadFailed, err)
+	}
+
+	// Nếu Cloudinary không trả về moderation (chưa cấu hình Rekognition)
+	if len(explicitResult.Moderation) == 0 {
+		return &AIModerationResult{
+			Status:    models.MediaStatusFlagged,
+			SecureURL: explicitResult.SecureURL,
+			PublicID:  explicitResult.PublicID,
+		}, nil
+	}
+
+	mod := explicitResult.Moderation[0]
+
+	result := &AIModerationResult{
+		SecureURL: explicitResult.SecureURL,
+		PublicID:  explicitResult.PublicID,
+		Labels:    toModerationLabels(mod.Response.ModerationLabels),
+	}
+
+	switch mod.Status {
+	case api.Approved:
+		result.Status = models.MediaStatusApproved
+	case api.Rejected:
+		result.Status = models.MediaStatusRejected
+	default:
 		result.Status = models.MediaStatusFlagged
 	}
 
