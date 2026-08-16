@@ -17,7 +17,7 @@ import (
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error)
+	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string) (*models.Post, error)
 	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
 	GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error)
@@ -57,7 +57,7 @@ func (s *postService) SetMediaService(mediaService MediaService) {
 	s.mediaService = mediaService
 }
 
-func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader) (*models.Post, error) {
+func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string) (*models.Post, error) {
 	if communityID != nil {
 		if s.contributionService == nil {
 			return nil, errorsapp.New(errorsapp.ErrCodePostContributionNotInit)
@@ -104,6 +104,13 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		wg.Wait()
 		if len(mediaIDs) > 0 {
 			_ = s.repo.LinkMediaToPost(ctx, mediaIDs, post.ID)
+		}
+	}
+
+	// GIF ngoài (Tenor/Giphy): lưu trực tiếp như một bản ghi media của bài viết
+	if gifURL != "" {
+		if err := s.repo.CreateExternalGifMedia(ctx, userID, post.ID, gifURL); err != nil {
+			log.Printf("[GIF Error] không thể lưu GIF cho post %s: %v", post.ID, err)
 		}
 	}
 

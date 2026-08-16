@@ -34,7 +34,7 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 		files = form.File["media"]
 	}
 
-	if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status, len(files) > 0); err != nil {
+	if err := validations.ValidateCreatePost(input.Title, input.Content, input.Status, len(files) > 0 || input.GifURL != ""); err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
@@ -46,7 +46,7 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files)
+	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return

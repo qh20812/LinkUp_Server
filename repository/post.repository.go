@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"linkup/models"
+	"linkup/utils"
 	"time"
 
 	"gorm.io/gorm"
@@ -533,6 +534,21 @@ func (r *PostRepository) DeleteBookmark(ctx context.Context, id string) error {
 // Liên kết các Media ID tạm thời vào Post ID sau khi upload xong
 func (r *PostRepository) LinkMediaToPost(ctx context.Context, mediaIDs []string, postID string) error {
 	return r.db.WithContext(ctx).Table("media").Where("id IN ?", mediaIDs).Update("post_id", postID).Error
+}
+
+// Tạo bản ghi media cho GIF ngoài (Tenor/Giphy) gắn trực tiếp vào bài viết
+func (r *PostRepository) CreateExternalGifMedia(ctx context.Context, userID, postID, fileURI string) error {
+	media := models.Media{
+		ID:        utils.GenerateUUID(),
+		UserID:    userID,
+		PostID:    &postID,
+		FileURI:   fileURI,
+		FileType:  "image/gif",
+		FileSize:  0,
+		Status:    models.MediaStatusApproved,
+		CreatedAt: time.Now(),
+	}
+	return r.db.WithContext(ctx).Create(&media).Error
 }
 
 // Lấy thông tin tác giả (username, display_name, avatar_uri) theo user_id
