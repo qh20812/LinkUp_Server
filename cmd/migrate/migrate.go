@@ -43,6 +43,12 @@ func Run(db *gorm.DB) {
 	// Thêm cột profiles.cover_uri cho tính năng đổi ảnh bìa
 	ensureColumn(db, "profiles", "cover_uri", "VARCHAR(500) NOT NULL DEFAULT ''")
 
+	// Thêm các cột profile mới cho About tab
+	ensureColumn(db, "profiles", "location", "VARCHAR(255) NOT NULL DEFAULT ''")
+	ensureColumn(db, "profiles", "work", "VARCHAR(255) NOT NULL DEFAULT ''")
+	ensureColumn(db, "profiles", "education", "VARCHAR(255) NOT NULL DEFAULT ''")
+	ensureColumn(db, "profiles", "website", "VARCHAR(255) NOT NULL DEFAULT ''")
+
 	// Đồng bộ collation toàn bảng GORM về utf8mb4_unicode_ci (idempotent).
 	// "ads" do seed tạo đã là unicode_ci nhưng chạy lại cũng an toàn.
 	for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts"} {

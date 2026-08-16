@@ -75,6 +75,7 @@ type ProfileView struct {
  models.Profile
  Username  string    `json:"username"`
  PostCount int64     `json:"post_count"`
+ FriendCount int64   `json:"friend_count"`
  CreatedAt time.Time `json:"created_at"`
 }
 
@@ -85,6 +86,7 @@ func (r *ProfileRepository) FindEnrichedByUserID(ctx context.Context, userID str
  tx := r.db.WithContext(ctx).
    Raw(`SELECT p.*, u.username,
        (SELECT COUNT(*) FROM posts WHERE user_id = p.user_id AND status != 'deleted') AS post_count,
+       (SELECT COUNT(*) FROM friends WHERE (sender_id = p.user_id OR receiver_id = p.user_id) AND status = 'accepted') AS friend_count,
        u.created_at
        FROM profiles p
        JOIN users u ON u.id = p.user_id

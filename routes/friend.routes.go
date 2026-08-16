@@ -27,4 +27,6 @@ func RegisterFriendRoutes(router *gin.Engine, friendController *controllers.Frie
 		friends.GET("/suggestions", friendController.GetFriendSuggestions)
 		friends.DELETE("/:userID", friendController.Unfriend)
 	}
+
+	router.GET("/api/friend-status/:userID", middlewares.AuthMiddleware(env, db), friendController.GetFriendStatus)
 }

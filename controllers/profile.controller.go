@@ -39,11 +39,16 @@ func (h *ProfileController) ViewProfile(c *gin.Context) {
 		AvatarURI:                  profile.AvatarURI,
 		CoverURI:                   profile.CoverURI,
 		Bio:                        profile.Bio,
+		Location:                   profile.Location,
+		Work:                       profile.Work,
+		Education:                  profile.Education,
+		Website:                    profile.Website,
 		IsPrivateProfile:           profile.IsPrivateProfile,
 		IsPrivatePosts:             profile.IsPrivatePosts,
 		AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
 		Username:                   profile.Username,
 		PostCount:                  profile.PostCount,
+		FriendCount:                profile.FriendCount,
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
 	}
@@ -76,11 +81,16 @@ func (h *ProfileController) ViewProfileByID(c *gin.Context) {
 		AvatarURI:                  profile.AvatarURI,
 		CoverURI:                   profile.CoverURI,
 		Bio:                        profile.Bio,
+		Location:                   profile.Location,
+		Work:                       profile.Work,
+		Education:                  profile.Education,
+		Website:                    profile.Website,
 		IsPrivateProfile:           profile.IsPrivateProfile,
 		IsPrivatePosts:             profile.IsPrivatePosts,
 		AllowStrangerFriendRequest: profile.AllowStrangerFriendRequest,
 		Username:                   profile.Username,
 		PostCount:                  profile.PostCount,
+		FriendCount:                profile.FriendCount,
 		CreatedAt:                  profile.CreatedAt,
 		UpdatedAt:                  profile.UpdatedAt,
 	}
@@ -104,6 +114,8 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
 	if input.DisplayName == nil && input.PhoneNumber == nil &&
 		input.DateOfBirth == nil && input.AvatarURI == nil &&
 		input.CoverURI == nil && input.Bio == nil &&
+		input.Location == nil && input.Work == nil &&
+		input.Education == nil && input.Website == nil &&
 		input.IsPrivateProfile == nil && input.IsPrivatePosts == nil &&
 		input.AllowStrangerFriendRequest == nil {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
@@ -130,6 +142,10 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
 			AvatarURI:                  updatedProfile.AvatarURI,
 			CoverURI:                   updatedProfile.CoverURI,
 			Bio:                        updatedProfile.Bio,
+			Location:                   updatedProfile.Location,
+			Work:                       updatedProfile.Work,
+			Education:                  updatedProfile.Education,
+			Website:                    updatedProfile.Website,
 			IsPrivateProfile:           updatedProfile.IsPrivateProfile,
 			IsPrivatePosts:             updatedProfile.IsPrivatePosts,
 			AllowStrangerFriendRequest: updatedProfile.AllowStrangerFriendRequest,

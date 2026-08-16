@@ -191,3 +191,26 @@ func (ctrl *FriendController) GetFriendSuggestions(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+func (ctrl *FriendController) GetFriendStatus(c *gin.Context) {
+	targetUserID := c.Param("userID")
+	if targetUserID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := val.(string)
+
+	response, err := ctrl.friendService.GetFriendStatus(c.Request.Context(), userID, targetUserID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}

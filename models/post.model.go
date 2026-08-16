@@ -43,6 +43,8 @@ type Post struct {
 	IsShared    bool `json:"is_shared" gorm:"->"`
 	IsFollowing bool `json:"is_following" gorm:"->"`
 
+	FeedScore float64 `json:"-" gorm:"->"`
+
 	SavedAt    *time.Time `json:"saved_at,omitempty" gorm:"->"`
 	BookmarkID *string    `json:"bookmark_id,omitempty" gorm:"->"`
 }

@@ -57,3 +57,8 @@ type FriendSuggestionsResponse struct {
 	Total    int64                  `json:"total"`
 	HasMore  bool                   `json:"has_more"`
 }
+
+type FriendStatusResponse struct {
+	Status    string  `json:"status"`
+	RequestID *string `json:"request_id,omitempty"`
+}

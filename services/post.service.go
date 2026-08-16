@@ -164,37 +164,30 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 		userIDPtr = &userID
 	}
 
-	var cursorTier *int
-	var cursorCreatedAt *time.Time
+	// Parse cursor mới: {snapshotTimeNano}_{score}_{postID}
+	var cursorScore *float64
 	var cursorID *string
+	var snapshotTime time.Time
+
 	if cursor != "" {
 		parts := strings.SplitN(cursor, "_", 3)
-		if filterFollowing {
-			if len(parts) == 2 {
-				unixNano, err := strconv.ParseInt(parts[0], 10, 64)
-				if err == nil {
-					t := time.Unix(0, unixNano)
-					cursorCreatedAt = &t
-					cursorID = &parts[1]
-				}
-			}
-		} else {
-			if len(parts) == 3 {
-				tier, err := strconv.Atoi(parts[0])
-				if err == nil {
-					unixNano, err := strconv.ParseInt(parts[1], 10, 64)
-					if err == nil {
-						t := time.Unix(0, unixNano)
-						cursorTier = &tier
-						cursorCreatedAt = &t
-						cursorID = &parts[2]
-					}
-				}
+		if len(parts) == 3 {
+			snapshotNano, err1 := strconv.ParseInt(parts[0], 10, 64)
+			score, err2 := strconv.ParseFloat(parts[1], 64)
+			if err1 == nil && err2 == nil {
+				snapshotTime = time.Unix(0, snapshotNano)
+				cursorScore = &score
+				cursorID = &parts[2]
 			}
 		}
 	}
 
-	posts, err := s.repo.FetchActive(ctx, pageSize, userIDPtr, cursorTier, cursorCreatedAt, cursorID, filterFollowing)
+	// First page: dùng thời gian hiện tại làm snapshot
+	if snapshotTime.IsZero() {
+		snapshotTime = time.Now()
+	}
+
+	posts, err := s.repo.FetchActive(ctx, pageSize, userIDPtr, cursorScore, cursorID, snapshotTime, filterFollowing)
 	if err != nil {
 		return nil, "", err
 	}
@@ -266,15 +259,7 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 	var nextCursor string
 	if len(posts) == pageSize {
 		last := posts[len(posts)-1]
-		if filterFollowing {
-			nextCursor = fmt.Sprintf("%d_%s", last.CreatedAt.UnixNano(), last.ID)
-		} else {
-			tier := 1
-			if last.IsFollowing {
-				tier = 0
-			}
-			nextCursor = fmt.Sprintf("%d_%d_%s", tier, last.CreatedAt.UnixNano(), last.ID)
-		}
+		nextCursor = fmt.Sprintf("%d_%f_%s", snapshotTime.UnixNano(), last.FeedScore, last.ID)
 	}
 
 	return posts, nextCursor, nil

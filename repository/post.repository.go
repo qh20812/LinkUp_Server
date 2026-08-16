@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"linkup/config"
 	"linkup/models"
 	"linkup/utils"
 	"time"
@@ -22,60 +23,49 @@ func (r *PostRepository) Create(ctx context.Context, post *models.Post) error {
 	return r.db.WithContext(ctx).Create(post).Error
 }
 
-func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *string, cursorTier *int, cursorCreatedAt *time.Time, cursorID *string, filterFollowing bool) ([]models.Post, error) {
+func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *string, cursorScore *float64, cursorID *string, snapshotTime time.Time, filterFollowing bool) ([]models.Post, error) {
 	var posts []models.Post
+
+	w := config.DefaultFeedWeights
+
+	// Subqueries cho engagement counts
+	likesSubQuery := r.db.Table("post_reactions").Select("post_id, COUNT(*) AS likes").Group("post_id")
+	commentsSubQuery := r.db.Table("comments").Select("post_id, COUNT(*) AS comments").Group("post_id")
+	sharesSubQuery := r.db.Table("post_shares").Select("post_id, COUNT(*) AS shares").Group("post_id")
 
 	q := r.db.WithContext(ctx).
 		Table("posts").
-		Select(`posts.*, 
-            users.username,
-            COALESCE(profiles.display_name, users.username) AS display_name,
-            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
-		Joins("LEFT JOIN users ON users.id = posts.user_id").
-		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
-		Where("posts.status = ?", models.PostStatusPublic).
-		Limit(limit)
-
-	if userID != nil && *userID != "" {
-		q = q.Select(`posts.*, 
+		Select(`posts.*,
             users.username,
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri,
-            CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`)
-		q = q.Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", *userID)
+            CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following,
+            (0.4 * EXP(-? * ((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)) +
+             0.35 * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
+             0.25 * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
+             0.01 * RAND()) AS feed_score`,
+			w.DecayRate, snapshotTime, w.LikeWeight, w.CommentWeight, w.ShareWeight).
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
+		Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", userID).
+		Joins("LEFT JOIN (?) lr ON lr.post_id = posts.id", likesSubQuery).
+		Joins("LEFT JOIN (?) cr ON cr.post_id = posts.id", commentsSubQuery).
+		Joins("LEFT JOIN (?) sr ON sr.post_id = posts.id", sharesSubQuery).
+		Where("posts.status = ?", models.PostStatusPublic).
+		Limit(limit)
 
-		if filterFollowing {
-			q = q.Where("f.follower_id IS NOT NULL")
-
-			if cursorCreatedAt != nil && cursorID != nil {
-				q = q.Where("posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?)",
-					*cursorCreatedAt, *cursorCreatedAt, *cursorID)
-			}
-
-			q = q.Order("posts.created_at DESC, posts.id DESC")
-		} else {
-			if cursorTier != nil && cursorCreatedAt != nil && cursorID != nil {
-				q = q.Where(`(
-					CASE WHEN f.follower_id IS NOT NULL THEN 0 ELSE 1 END
-				) > ? OR (
-					(CASE WHEN f.follower_id IS NOT NULL THEN 0 ELSE 1 END) = ?
-					AND (posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?))
-				)`,
-					*cursorTier, *cursorTier, *cursorCreatedAt, *cursorCreatedAt, *cursorID)
-			}
-
-			q = q.Order("CASE WHEN f.follower_id IS NOT NULL THEN 0 ELSE 1 END, posts.created_at DESC, posts.id DESC")
-		}
-	} else {
-		if cursorTier != nil && cursorCreatedAt != nil && cursorID != nil {
-			q = q.Where("posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?)",
-				*cursorCreatedAt, *cursorCreatedAt, *cursorID)
-		}
-		q = q.Order("posts.created_at DESC, posts.id DESC")
+	if filterFollowing {
+		q = q.Where("f.follower_id IS NOT NULL")
 	}
 
-	err := q.Find(&posts).Error
+	if cursorScore != nil && cursorID != nil {
+		q = q.Having("feed_score < ? OR (feed_score = ? AND posts.id < ?)",
+			*cursorScore, *cursorScore, *cursorID)
+	}
 
+	q = q.Order("feed_score DESC, posts.id DESC")
+
+	err := q.Find(&posts).Error
 	return posts, err
 }
 
@@ -93,7 +83,14 @@ func (r *PostRepository) FetchByUserID(ctx context.Context, targetUserID string,
 		Where("posts.user_id = ? AND posts.status = ?", targetUserID, models.PostStatusPublic).
 		Limit(limit)
 
-	if viewerID != nil && *viewerID != "" {
+	if viewerID != nil && *viewerID != "" && *viewerID != targetUserID {
+		q = q.Where(`NOT EXISTS (
+			SELECT 1 FROM profiles WHERE profiles.user_id = posts.user_id
+			AND profiles.is_private_posts = true
+			AND NOT EXISTS (
+				SELECT 1 FROM follows WHERE follows.following_id = posts.user_id AND follows.follower_id = ?
+			)
+		)`, *viewerID)
 		q = q.Select(`posts.*,
 			users.username,
 			COALESCE(profiles.display_name, users.username) AS display_name,

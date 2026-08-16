@@ -104,6 +104,18 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
 	if input.Bio != nil {
 		existingProfile.Bio = *input.Bio
 	}
+	if input.Location != nil {
+		existingProfile.Location = *input.Location
+	}
+	if input.Work != nil {
+		existingProfile.Work = *input.Work
+	}
+	if input.Education != nil {
+		existingProfile.Education = *input.Education
+	}
+	if input.Website != nil {
+		existingProfile.Website = *input.Website
+	}
 	if input.IsPrivateProfile != nil {
 		existingProfile.IsPrivateProfile = *input.IsPrivateProfile
 	}

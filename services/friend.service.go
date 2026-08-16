@@ -257,6 +257,33 @@ func (s *FriendService) Unfriend(ctx context.Context, userID, targetUserID strin
 	}, nil
 }
 
+func (s *FriendService) GetFriendStatus(ctx context.Context, userID, targetUserID string) (dto.FriendStatusResponse, error) {
+	if userID == targetUserID {
+		return dto.FriendStatusResponse{Status: "self"}, nil
+	}
+
+	pair, err := s.friendRepo.FindPair(ctx, userID, targetUserID)
+	if err != nil {
+		return dto.FriendStatusResponse{}, fmt.Errorf("get friend status: %w", err)
+	}
+
+	if pair == nil {
+		return dto.FriendStatusResponse{Status: "none"}, nil
+	}
+
+	switch pair.Status {
+	case models.FriendStatusAccepted:
+		return dto.FriendStatusResponse{Status: "accepted"}, nil
+	case models.FriendStatusPending:
+		if pair.SenderID == userID {
+			return dto.FriendStatusResponse{Status: "sent", RequestID: &pair.ID}, nil
+		}
+		return dto.FriendStatusResponse{Status: "received", RequestID: &pair.ID}, nil
+	default:
+		return dto.FriendStatusResponse{Status: "none"}, nil
+	}
+}
+
 func (s *FriendService) GetFriendSuggestions(ctx context.Context, userID string, page, pageSize int) (dto.FriendSuggestionsResponse, error) {
 	if page < 1 {
 		page = 1

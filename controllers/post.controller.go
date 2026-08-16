@@ -78,6 +78,7 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 		nc = &nextCursor
 	}
 
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
 		"page_size":   pageSize,
 		"next_cursor": nc,
