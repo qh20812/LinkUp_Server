@@ -6,6 +6,7 @@ type CreatePostInput struct {
 	Content     string  `json:"content" form:"content"`
 	Status      string  `json:"status" form:"status"`
 	CommunityID *string `json:"community_id,omitempty" form:"community_id"`
+	GifURL      string  `json:"gif_url,omitempty" form:"gif_url"`
 }
 
 // DTO chia sẻ bài viết có kèm text
