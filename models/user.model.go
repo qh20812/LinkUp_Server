@@ -29,6 +29,7 @@ type User struct {
 	EmailVerifiedAt   *time.Time `json:"email_verified_at,omitempty"`
 	GoogleID          *string    `json:"google_id,omitempty" gorm:"type:varchar(255)"`
 	SelfDeactivatedAt *time.Time `json:"self_deactivated_at,omitempty"`
+	LastSeen          *time.Time `json:"last_seen,omitempty" gorm:"index"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
 }

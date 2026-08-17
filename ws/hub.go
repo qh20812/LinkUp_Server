@@ -5,6 +5,12 @@ import (
 	"sync"
 )
 
+// PresenceService defines the interface for presence operations.
+type PresenceService interface {
+	MarkOnline(userID string)
+	MarkOffline(userID string)
+}
+
 type BroadcastMessage struct {
 	ChatID string
 	Data   []byte
@@ -22,6 +28,7 @@ type Hub struct {
 	unregister chan *Client
 	broadcast  chan *BroadcastMessage
 	mu         sync.RWMutex
+	presence   PresenceService
 }
 
 func NewHub() *Hub {
@@ -32,6 +39,11 @@ func NewHub() *Hub {
 		unregister: make(chan *Client),
 		broadcast:  make(chan *BroadcastMessage),
 	}
+}
+
+// SetPresenceService sets the presence service for the hub.
+func (h *Hub) SetPresenceService(presence PresenceService) {
+	h.presence = presence
 }
 
 func (h *Hub) Run() {
@@ -49,11 +61,28 @@ func (h *Hub) Run() {
 			h.clients[client.userID][client] = true
 			h.mu.Unlock()
 
+			// Mark user online in presence service
+			if h.presence != nil {
+				h.presence.MarkOnline(client.userID)
+				h.broadcastPresenceUpdate(client.userID, "online")
+			}
+
 		case client := <-h.unregister:
 			h.mu.Lock()
 			h.removeFromClientsMap(client)
 			h.mu.Unlock()
 			close(client.send)
+
+			// Check if user has any remaining connections
+			if h.presence != nil {
+				h.mu.RLock()
+				hasConnections := len(h.clients[client.userID]) > 0
+				h.mu.RUnlock()
+				if !hasConnections {
+					h.presence.MarkOffline(client.userID)
+					h.broadcastPresenceUpdate(client.userID, "offline")
+				}
+			}
 
 		case message := <-h.broadcast:
 			// Phase 1 fix: Acquire RLock, snapshot the client set into a
@@ -189,4 +218,61 @@ func (h *Hub) SendToUsers(userIDs []string, msg OutgoingMessage) {
 	for _, uid := range userIDs {
 		h.SendToUser(uid, msg)
 	}
+}
+
+// broadcastPresenceUpdate broadcasts a presence update to all connected clients.
+func (h *Hub) broadcastPresenceUpdate(userID string, status string) {
+	msg := OutgoingMessage{
+		Type: "presence:update",
+		Data: map[string]interface{}{
+			"user_id": userID,
+			"status":  status,
+		},
+	}
+	h.SendToAll(msg)
+}
+
+// SendToAll sends a message to all connected clients.
+func (h *Hub) SendToAll(msg OutgoingMessage) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	// Get all unique clients
+	allClients := make(map[*Client]bool)
+	for _, clients := range h.clients {
+		for c := range clients {
+			allClients[c] = true
+		}
+	}
+	h.mu.RUnlock()
+
+	// Send to all clients
+	var toRemove []*Client
+	for c := range allClients {
+		select {
+		case c.send <- data:
+		default:
+			toRemove = append(toRemove, c)
+		}
+	}
+
+	// Remove stuck clients
+	if len(toRemove) > 0 {
+		h.mu.Lock()
+		for _, c := range toRemove {
+			h.removeFromClientsMap(c)
+			close(c.send)
+		}
+		h.mu.Unlock()
+	}
+}
+
+// GetUserClientCount returns the number of connections for a user.
+func (h *Hub) GetUserClientCount(userID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[userID])
 }

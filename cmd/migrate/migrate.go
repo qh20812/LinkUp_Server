@@ -49,6 +49,14 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "profiles", "education", "VARCHAR(255) NOT NULL DEFAULT ''")
 	ensureColumn(db, "profiles", "website", "VARCHAR(255) NOT NULL DEFAULT ''")
 
+	// Thêm cột last_seen vào users cho online/offline presence
+	ensureColumn(db, "users", "last_seen", "DATETIME NULL")
+	ensureIndex(db, "users", "idx_users_last_seen", "last_seen")
+
+	// Thêm các cột presence vào user_settings
+	ensureColumn(db, "user_settings", "activity_status_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
+	ensureColumn(db, "user_settings", "last_seen_visibility", "VARCHAR(20) NOT NULL DEFAULT 'all_friends'")
+
 	// Đồng bộ collation toàn bảng GORM về utf8mb4_unicode_ci (idempotent).
 	// "ads" do seed tạo đã là unicode_ci nhưng chạy lại cũng an toàn.
 	for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts"} {
@@ -161,5 +169,18 @@ func ensureColumn(db *gorm.DB, table, column, definition string) {
 	}
 	if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition).Error; err != nil {
 		log.Printf("Warning: ensure column %s.%s: %v", table, column, err)
+	}
+}
+
+// ensureIndex thêm index nếu chưa tồn tại (idempotent).
+func ensureIndex(db *gorm.DB, table, indexName, columns string) {
+	if !db.Migrator().HasTable(table) {
+		return
+	}
+	if db.Migrator().HasIndex(table, indexName) {
+		return
+	}
+	if err := db.Exec("CREATE INDEX " + indexName + " ON " + table + " (" + columns + ")").Error; err != nil {
+		log.Printf("Warning: ensure index %s: %v", indexName, err)
 	}
 }

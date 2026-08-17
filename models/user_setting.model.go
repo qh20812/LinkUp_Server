@@ -9,6 +9,9 @@ type UserSetting struct {
 	AllowStrangerMessages bool   `json:"allow_stranger_messages"`
 	Theme                 string `json:"theme"`
 	Language              string `json:"language"`
+	// Presence settings
+	ActivityStatusEnabled bool   `json:"activity_status_enabled" gorm:"default:true"`
+	LastSeenVisibility    string `json:"last_seen_visibility" gorm:"type:VARCHAR(20);default:'all_friends'"`
 }
 
 func DefaultUserSetting(userID string) UserSetting {
@@ -18,5 +21,7 @@ func DefaultUserSetting(userID string) UserSetting {
 		AllowStrangerMessages: false,
 		Theme:                 "light",
 		Language:              "vi",
+		ActivityStatusEnabled: true,
+		LastSeenVisibility:    string(LastSeenVisibilityAllFriends),
 	}
 }

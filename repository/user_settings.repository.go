@@ -39,3 +39,18 @@ func (r *UserSettingsRepository) Upsert(ctx context.Context, setting *models.Use
 	}
 	return nil
 }
+
+// UpdatePresenceSettings updates only the presence-related fields.
+func (r *UserSettingsRepository) UpdatePresenceSettings(ctx context.Context, userID string, activityStatusEnabled bool, lastSeenVisibility string) error {
+	tx := r.db.WithContext(ctx).
+		Model(&models.UserSetting{}).
+		Where("user_id = ?", userID).
+		Updates(map[string]interface{}{
+			"activity_status_enabled": activityStatusEnabled,
+			"last_seen_visibility":    lastSeenVisibility,
+		})
+	if tx.Error != nil {
+		return fmt.Errorf("update presence settings: %w", tx.Error)
+	}
+	return nil
+}

@@ -211,6 +211,13 @@ func main() {
 		chatController := controllers.NewChatController(chatHub, chatService, env)
 		routes.RegisterChatRoutes(router, chatController, env, gormDB)
 
+		// ===== KHỞI TẠO TẦNG PRESENCE (ONLINE/OFFLINE STATUS) =====
+		presenceRepository := repository.NewPresenceRepository(gormDB)
+		presenceService := services.NewPresenceService(presenceRepository, userSettingsRepository, friendRepository, chatRepository)
+		presenceController := controllers.NewPresenceController(presenceService)
+		routes.RegisterPresenceRoutes(router, presenceController, env, gormDB)
+		hub.SetPresenceService(presenceService)
+
 		// ===== KHỞI TẠO TẦNG E2E (MÃ HÓA ĐẦU CUỐI CHO TIN NHẮN TRỰC TIẾP) =====
 		e2eRepository := repository.NewE2ERepository(gormDB)
 		e2eService := services.NewE2EService(e2eRepository, chatRepository)
