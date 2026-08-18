@@ -19,6 +19,7 @@ type SendMessagePayload struct {
 	Content          string  `json:"content"`
 	EmojiID          *string `json:"emoji_id,omitempty"`
 	MediaID          *string `json:"media_id,omitempty"`
+	GifURL           *string `json:"gif_url,omitempty"`
 	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
 	E2EVersion       int     `json:"e2e_version,omitempty"`
 }

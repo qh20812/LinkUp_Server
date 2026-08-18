@@ -123,6 +123,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		0,
 		input.EmojiID,
 		input.MediaID,
+		nil,
 		input.ReplyToMessageID,
 	)
 	if err != nil {
