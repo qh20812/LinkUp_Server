@@ -277,6 +277,18 @@ func main() {
 		callController := controllers.NewVoiceCallController(hub, callService, env)
 		routes.RegisterCallRoutes(router, callController, env, gormDB)
 
+		// Dọn dẹp cuộc gọi bị bỏ dở khi user mất kết nối hoàn toàn: nếu socket
+		// cuối cùng của user đóng mà họ còn một cuộc gọi đang "calling"/"ringing"/
+		// "connected", kết thúc cuộc gọi đó (hủy/nhỡ/kết thúc) để không chặn
+		// các cuộc gọi sau này qua CreateIfNotBusy.
+		hub.SetOnClientDisconnect(func(userID string) {
+			if !hub.IsUserOnline(userID) {
+				if err := callService.CleanupDisconnectedCalls(context.Background(), userID); err != nil {
+					log.Printf("cleanup disconnected calls for %s: %v", userID, err)
+				}
+			}
+		})
+
 		// ===== GROUP CALL =====
 		groupCallHub := groupws.NewHub()
 		go groupCallHub.Run()
