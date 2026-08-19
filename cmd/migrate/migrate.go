@@ -40,6 +40,10 @@ func Run(db *gorm.DB) {
 	// idempotent, không làm mất dữ liệu khi chạy lại.
 	ensureColumn(db, "messages", "e2e_version", "INT NOT NULL DEFAULT 0")
 
+	// Thêm cột pin cho posts (is_pinned/pinned_at)
+	ensureColumn(db, "posts", "is_pinned", "TINYINT(1) NOT NULL DEFAULT 0")
+	ensureColumn(db, "posts", "pinned_at", "DATETIME NULL")
+
 	// Thêm cột profiles.cover_uri cho tính năng đổi ảnh bìa
 	ensureColumn(db, "profiles", "cover_uri", "VARCHAR(500) NOT NULL DEFAULT ''")
 

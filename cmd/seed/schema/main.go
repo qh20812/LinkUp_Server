@@ -157,6 +157,8 @@ func Run(env config.Env) error {
 			content LONGTEXT,
 			views_count INT NOT NULL DEFAULT 0,
 			status VARCHAR(20) NOT NULL DEFAULT 'public',
+			is_pinned TINYINT(1) NOT NULL DEFAULT 0,
+			pinned_at DATETIME NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
