@@ -694,7 +694,7 @@ func (r *PostRepository) FetchMediaByUserID(ctx context.Context, userID string, 
 		Raw(`SELECT m.id, m.post_id, m.file_uri, m.file_type, m.file_size, m.created_at
 			FROM media m
 			JOIN posts p ON p.id = m.post_id
-			WHERE p.user_id = ? AND p.status = ? AND p.deleted_at IS NULL
+			WHERE p.user_id = ? AND p.status = ?
 			ORDER BY m.created_at DESC
 			LIMIT ? OFFSET ?`, userID, models.PostStatusPublic, limit, offset).
 		Scan(&media)
@@ -710,7 +710,7 @@ func (r *PostRepository) CountMediaByUserID(ctx context.Context, userID string) 
 		Raw(`SELECT COUNT(*)
 			FROM media m
 			JOIN posts p ON p.id = m.post_id
-			WHERE p.user_id = ? AND p.status = ? AND p.deleted_at IS NULL`, userID, models.PostStatusPublic).
+			WHERE p.user_id = ? AND p.status = ?`, userID, models.PostStatusPublic).
 		Scan(&count)
 	if tx.Error != nil {
 		return 0, fmt.Errorf("count media by user: %w", tx.Error)
