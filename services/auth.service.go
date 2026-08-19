@@ -191,10 +191,18 @@ func (s *AuthService) Register(ctx context.Context, input dto.RegisterInput) (dt
 		return dto.AuthResponse{}, err
 	}
 
+	avatarURI := ""
+	if s.env.CloudinaryEnv != "" {
+		if url, err := utils.GenerateAndUploadAvatar(s.env.CloudinaryEnv, input.DisplayName); err == nil {
+			avatarURI = url
+		}
+	}
+
 	if _, err := s.profileRepo.Create(ctx, &models.Profile{
 		ID:          utils.GenerateUUID(),
 		UserID:      createdUser.ID,
 		DisplayName: input.DisplayName,
+		AvatarURI:   avatarURI,
 	}); err != nil {
 		return dto.AuthResponse{}, err
 	}
@@ -326,11 +334,18 @@ func (s *AuthService) createUserFromGoogle(ctx context.Context, claims *GoogleCl
 		return nil, err
 	}
 
+	avatarURI := claims.Picture
+	if avatarURI == "" && s.env.CloudinaryEnv != "" {
+		if url, err := utils.GenerateAndUploadAvatar(s.env.CloudinaryEnv, displayName); err == nil {
+			avatarURI = url
+		}
+	}
+
 	if _, err := s.profileRepo.Create(ctx, &models.Profile{
 		ID:          utils.GenerateUUID(),
 		UserID:      createdUser.ID,
 		DisplayName: displayName,
-		AvatarURI:   claims.Picture,
+		AvatarURI:   avatarURI,
 	}); err != nil {
 		return nil, err
 	}
