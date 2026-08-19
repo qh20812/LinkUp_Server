@@ -412,6 +412,25 @@ func (r *CallRepository) CountMissedSince(ctx context.Context, userID string, si
 	return total, nil
 }
 
+// FindActiveByParticipant returns the most recent call for the user that is
+// still in progress (calling/ringing/connected). Used to clean up calls
+// abandoned when a participant's connection drops.
+func (r *CallRepository) FindActiveByParticipant(ctx context.Context, userID string) (*models.Call, error) {
+	var call models.Call
+	err := r.db.WithContext(ctx).
+		Where("(caller_id = ? OR callee_id = ?) AND status IN (?, ?, ?)", userID, userID,
+			models.CallStatusCalling, models.CallStatusRinging, models.CallStatusConnected).
+		Order("created_at DESC").
+		First(&call).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find active call: %w", err)
+	}
+	return &call, nil
+}
+
 // MarkMissedRead sets last_read_missed_at on the user's profile to now,
 // so subsequent CountMissedSince only counts calls after this moment.
 func (r *CallRepository) MarkMissedRead(ctx context.Context, userID string) error {

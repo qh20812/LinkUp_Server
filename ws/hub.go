@@ -22,13 +22,14 @@ type OutgoingMessage struct {
 }
 
 type Hub struct {
-	rooms      map[string]map[*Client]bool
-	clients    map[string]map[*Client]bool
-	register   chan *Client
-	unregister chan *Client
-	broadcast  chan *BroadcastMessage
-	mu         sync.RWMutex
-	presence   PresenceService
+	rooms              map[string]map[*Client]bool
+	clients            map[string]map[*Client]bool
+	register           chan *Client
+	unregister         chan *Client
+	broadcast          chan *BroadcastMessage
+	onClientDisconnect func(userID string)
+	mu                 sync.RWMutex
+	presence           PresenceService
 }
 
 func NewHub() *Hub {
@@ -71,6 +72,9 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.removeFromClientsMap(client)
 			h.mu.Unlock()
+			if h.onClientDisconnect != nil {
+				h.onClientDisconnect(client.userID)
+			}
 			close(client.send)
 
 			// Check if user has any remaining connections
@@ -111,6 +115,7 @@ func (h *Hub) Run() {
 			}
 
 			// Batch-remove stuck clients under a single write lock.
+			var disconnected []string
 			if len(toRemove) > 0 {
 				h.mu.Lock()
 				for _, c := range toRemove {
@@ -120,9 +125,17 @@ func (h *Hub) Run() {
 						delete(roomClients, c)
 					}
 					h.removeFromClientsMap(c)
+					disconnected = append(disconnected, c.userID)
 					close(c.send)
 				}
 				h.mu.Unlock()
+			}
+
+			// Notify after releasing the lock so hooks can safely re-enter the hub.
+			if h.onClientDisconnect != nil {
+				for _, uid := range disconnected {
+					h.onClientDisconnect(uid)
+				}
 			}
 		}
 	}
@@ -139,6 +152,14 @@ func (h *Hub) JoinChat(chatID string, client *Client) {
 
 func (h *Hub) RegisterClient(client *Client) {
 	h.register <- client
+}
+
+// SetOnClientDisconnect registers a callback invoked after a client's
+// connection is removed from the hub. It is only called once the user's
+// sockets have actually been removed, so callers may re-check presence
+// (e.g. IsUserOnline) to decide whether the user went fully offline.
+func (h *Hub) SetOnClientDisconnect(fn func(userID string)) {
+	h.onClientDisconnect = fn
 }
 
 // SendToUser sends a message to all WebSocket connections of the given user.

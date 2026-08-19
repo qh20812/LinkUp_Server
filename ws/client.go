@@ -118,7 +118,7 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue

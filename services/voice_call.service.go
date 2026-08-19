@@ -241,6 +241,22 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 	return nil
 }
 
+func (s *VoiceCallService) CleanupDisconnectedCalls(ctx context.Context, userID string) error {
+	call, err := s.callRepo.FindActiveByParticipant(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("tìm cuộc gọi đang hoạt động: %w", err)
+	}
+	if call == nil {
+		return nil
+	}
+	// Reuse EndCall semantics: caller-disconnect while ringing -> cancelled,
+	// callee-disconnect while ringing -> missed (with notification), and
+	// disconnect mid-conversation -> ended with the real duration. The
+	// disconnected party no longer has a socket, so only the other
+	// participant receives the broadcast.
+	return s.EndCall(ctx, userID, call.ID)
+}
+
 func (s *VoiceCallService) GetCallHistory(ctx context.Context, userID string, limit, offset int) ([]models.Call, int64, error) {
 	calls, err := s.callRepo.GetHistory(ctx, userID, limit, offset)
 	if err != nil {

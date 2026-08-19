@@ -52,7 +52,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, replyToMessageID *string) (*models.Message, error) {
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -67,19 +67,6 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
 	}
 
-	// Với tin nhắn E2E (e2eVersion == 1), nội dung đã được client mã hóa đầu cuối,
-	// server chỉ lưu ciphertext mà không thể (và không được phép) đọc. Bỏ qua
-	// giới hạn độ dài plaintext vì ciphertext luôn dài hơn.
-	validateErr := s.validation.ValidateSendMessage(content, emojiID, mediaID)
-	if validateErr != nil {
-		if e2eVersion != 1 {
-			return nil, validateErr
-		}
-		if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
-			return nil, validateErr
-		}
-	}
-
 	_, err = s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
 		return nil, err
@@ -91,6 +78,38 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	}
 	if !participant {
 		return nil, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
+	}
+
+	// GIF ngoài (GIPHY/Tenor): tạo bản ghi media như bài viết, rồi gắn media_id
+	// để tái sử dụng toàn bộ pipeline media sẵn có của tin nhắn (render, preview,
+	// download). Không upload lên Cloudinary, chỉ lưu URL gốc.
+	if gifURL != nil && *gifURL != "" {
+		gifMedia := models.Media{
+			ID:        utils.GenerateUUID(),
+			UserID:    userID,
+			FileURI:   *gifURL,
+			FileType:  "image/gif",
+			FileSize:  0,
+			Status:    models.MediaStatusApproved,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := s.mediaRepo.Create(ctx, &gifMedia); err != nil {
+			return nil, fmt.Errorf("create gif media: %w", err)
+		}
+		mediaID = &gifMedia.ID
+	}
+
+	// Với tin nhắn E2E (e2eVersion == 1), nội dung đã được client mã hóa đầu cuối,
+	// server chỉ lưu ciphertext mà không thể (và không được phép) đọc. Bỏ qua
+	// giới hạn độ dài plaintext vì ciphertext luôn dài hơn.
+	validateErr := s.validation.ValidateSendMessage(content, emojiID, mediaID)
+	if validateErr != nil {
+		if e2eVersion != 1 {
+			return nil, validateErr
+		}
+		if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
+			return nil, validateErr
+		}
 	}
 
 	if emojiID != nil && *emojiID != "" {
