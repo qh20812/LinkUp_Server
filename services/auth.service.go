@@ -334,7 +334,17 @@ func (s *AuthService) createUserFromGoogle(ctx context.Context, claims *GoogleCl
 		return nil, err
 	}
 
-	avatarURI := claims.Picture
+	avatarURI := ""
+	if claims.Picture != "" && s.env.CloudinaryEnv != "" {
+		if url, err := utils.UploadImageFromURL(s.env.CloudinaryEnv, claims.Picture, "avatars"); err == nil {
+			avatarURI = url
+		} else {
+			avatarURI = claims.Picture
+		}
+	}
+	if avatarURI == "" {
+		avatarURI = claims.Picture
+	}
 	if avatarURI == "" && s.env.CloudinaryEnv != "" {
 		if url, err := utils.GenerateAndUploadAvatar(s.env.CloudinaryEnv, displayName); err == nil {
 			avatarURI = url

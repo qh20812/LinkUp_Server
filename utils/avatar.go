@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"io"
+	"net/http"
 	"strings"
 
 	"github.com/cloudinary/cloudinary-go/v2"
@@ -74,6 +76,59 @@ func GenerateAndUploadAvatar(cloudinaryURL, name string) (string, error) {
 	})
 	if err != nil {
 		return "", fmt.Errorf("upload avatar to cloudinary: %w", err)
+	}
+
+	return result.SecureURL, nil
+}
+
+func formatFromMIME(mime string) string {
+	switch mime {
+	case "image/jpeg":
+		return "jpg"
+	case "image/png":
+		return "png"
+	case "image/gif":
+		return "gif"
+	case "image/webp":
+		return "webp"
+	default:
+		return "jpg"
+	}
+}
+
+// UploadImageFromURL downloads an image from sourceURL and uploads it to Cloudinary.
+func UploadImageFromURL(cloudinaryURL, sourceURL, folder string) (string, error) {
+	resp, err := http.Get(sourceURL)
+	if err != nil {
+		return "", fmt.Errorf("download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download image: status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read image data: %w", err)
+	}
+
+	contentType := http.DetectContentType(data)
+
+	cld, err := cloudinary.NewFromURL(cloudinaryURL)
+	if err != nil {
+		return "", fmt.Errorf("init cloudinary: %w", err)
+	}
+
+	publicID := "avatar-" + GenerateUUID()
+	result, err := cld.Upload.Upload(context.Background(), bytes.NewReader(data), uploader.UploadParams{
+		PublicID:     publicID,
+		Folder:       folder,
+		ResourceType: "image",
+		Format:       formatFromMIME(contentType),
+	})
+	if err != nil {
+		return "", fmt.Errorf("upload to cloudinary: %w", err)
 	}
 
 	return result.SecureURL, nil
