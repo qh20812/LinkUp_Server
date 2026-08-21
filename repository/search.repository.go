@@ -117,3 +117,39 @@ func (r *SearchRepository) SearchHashtags(ctx context.Context, keyword string) (
 	}
 	return results, nil
 }
+
+func (r *SearchRepository) SearchCommunities(ctx context.Context, keyword string) ([]dto.CommunitySearchResult, error) {
+	type communityRow struct {
+		ID          string `gorm:"column:id"`
+		Name        string `gorm:"column:name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+		MemberCount int    `gorm:"column:member_count"`
+		Privacy     string `gorm:"column:privacy"`
+	}
+
+	var rows []communityRow
+	err := r.db.WithContext(ctx).
+		Table("communities").
+		Select(`communities.id, communities.name, communities.avatar_uri, communities.privacy,
+			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
+		Where("communities.status = ? AND communities.name ILIKE ?",
+			models.CommunityStatusActive, "%"+keyword+"%").
+		Order("member_count DESC").
+		Limit(10).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("search communities: %w", err)
+	}
+
+	results := make([]dto.CommunitySearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, dto.CommunitySearchResult{
+			ID:          row.ID,
+			Name:        row.Name,
+			AvatarURI:   row.AvatarURI,
+			MemberCount: row.MemberCount,
+			Privacy:     row.Privacy,
+		})
+	}
+	return results, nil
+}

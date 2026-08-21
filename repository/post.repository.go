@@ -110,6 +110,41 @@ func (r *PostRepository) FetchByUserID(ctx context.Context, targetUserID string,
 	return posts, err
 }
 
+func (r *PostRepository) FetchByCommunityID(ctx context.Context, communityID string, viewerID *string, cursorCreatedAt *time.Time, cursorID *string, limit int) ([]models.Post, error) {
+	var posts []models.Post
+
+	q := r.db.WithContext(ctx).
+		Table("posts").
+		Select(`posts.*,
+			users.username,
+			COALESCE(profiles.display_name, users.username) AS display_name,
+			COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
+		Where("posts.community_id = ? AND posts.status = ? AND posts.community_id IS NOT NULL",
+			communityID, models.PostStatusPublic).
+		Limit(limit)
+
+	if viewerID != nil && *viewerID != "" {
+		q = q.Select(`posts.*,
+			users.username,
+			COALESCE(profiles.display_name, users.username) AS display_name,
+			COALESCE(profiles.avatar_uri, '') AS avatar_uri,
+			CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following`).
+			Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", *viewerID)
+	}
+
+	if cursorCreatedAt != nil && cursorID != nil {
+		q = q.Where("posts.created_at < ? OR (posts.created_at = ? AND posts.id < ?)",
+			*cursorCreatedAt, *cursorCreatedAt, *cursorID)
+	}
+
+	q = q.Order("posts.created_at DESC, posts.id DESC")
+
+	err := q.Find(&posts).Error
+	return posts, err
+}
+
 type countRow struct {
 	PostID string
 	Count  int

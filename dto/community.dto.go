@@ -100,3 +100,38 @@ type CommunityTransferOwnershipInput struct {
 	TargetUserID string `json:"target_user_id" binding:"required"`
 	KeepAdmin    bool   `json:"keep_admin"`
 }
+
+// ── User-facing Community List/Detail ──
+
+type CommunityListItem struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	AvatarURI   string    `json:"avatar_uri"`
+	Privacy     string    `json:"privacy"`
+	MemberCount int       `json:"member_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CommunityListResponse struct {
+	Communities []CommunityListItem `json:"communities"`
+	Total       int64               `json:"total"`
+	Page        int                 `json:"page"`
+	PageSize    int                 `json:"page_size"`
+}
+
+type CommunityDetailResponse struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	AvatarURI        string    `json:"avatar_uri"`
+	BackgroundURI    string    `json:"background_uri"`
+	CreatorID        string    `json:"creator_id"`
+	CreatorName      string    `json:"creator_name"`
+	Privacy          string    `json:"privacy"`
+	AutoApprove      bool      `json:"auto_approve"`
+	MemberCount      int       `json:"member_count"`
+	MembershipStatus string    `json:"membership_status"`
+	UserMemberRole   string    `json:"user_member_role,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}

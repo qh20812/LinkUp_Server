@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"errors"
 	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/models"
@@ -13,10 +14,13 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"gorm.io/gorm"
 )
 
 type CommunityService struct {
 	repo         *repository.CommunityRepository
+	postRepo     *repository.PostRepository
 	authRepo     *repository.AuthRepository
 	profileRepo  *repository.ProfileRepository
 	mediaService MediaService
@@ -25,9 +29,10 @@ type CommunityService struct {
 	validation   *validations.CommunityValidation
 }
 
-func NewCommunityService(repo *repository.CommunityRepository, validation *validations.CommunityValidation, authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService) *CommunityService {
+func NewCommunityService(repo *repository.CommunityRepository, validation *validations.CommunityValidation, authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService, postRepo *repository.PostRepository) *CommunityService {
 	return &CommunityService{
 		repo:         repo,
+		postRepo:     postRepo,
 		validation:   validation,
 		authRepo:     authRepo,
 		profileRepo:  profileRepo,
@@ -37,7 +42,7 @@ func NewCommunityService(repo *repository.CommunityRepository, validation *valid
 	}
 }
 
-func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI string, autoApprove bool) (*models.Community, *models.Chat, error) {
+func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*models.Community, *models.Chat, error) {
 	if err := s.validation.ValidateCreateCommunity(name, description, avatarURI); err != nil {
 		return nil, nil, err
 	}
@@ -71,7 +76,7 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 	}
 
 	now := time.Now().UTC()
-	community := models.NewCommunity(creatorID, name, description, avatarURI)
+	community := models.NewCommunity(creatorID, name, description, avatarURI, backgroundURI, privacy)
 	community.ID = utils.GenerateUUID()
 	community.AutoApprove = autoApprove
 	community.CreatedAt = now
@@ -797,4 +802,132 @@ func (s *CommunityService) RespondInvitation(ctx context.Context, userID, invita
 	}
 
 	return nil
+}
+
+// ── User-facing Community List/Detail ──
+
+func (s *CommunityService) ListCommunities(ctx context.Context, keyword string, page, pageSize int) (dto.CommunityListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	communities, total, err := s.repo.ListCommunities(ctx, keyword, page, pageSize)
+	if err != nil {
+		return dto.CommunityListResponse{}, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+	}
+
+	return dto.CommunityListResponse{
+		Communities: communities,
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
+	}, nil
+}
+
+func (s *CommunityService) ListJoinedCommunities(ctx context.Context, userID, keyword string, page, pageSize int) (dto.CommunityListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	communities, total, err := s.repo.ListUserJoinedCommunities(ctx, userID, keyword, page, pageSize)
+	if err != nil {
+		return dto.CommunityListResponse{}, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+	}
+
+	return dto.CommunityListResponse{
+		Communities: communities,
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
+	}, nil
+}
+
+func (s *CommunityService) ListCreatedCommunities(ctx context.Context, userID, keyword string, page, pageSize int) (dto.CommunityListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	communities, total, err := s.repo.ListUserCreatedCommunities(ctx, userID, keyword, page, pageSize)
+	if err != nil {
+		return dto.CommunityListResponse{}, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+	}
+
+	return dto.CommunityListResponse{
+		Communities: communities,
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
+	}, nil
+}
+
+func (s *CommunityService) GetCommunityDetail(ctx context.Context, communityID, userID string) (*dto.CommunityDetailResponse, error) {
+	if communityID == "" {
+		return nil, errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
+	}
+
+	resp, err := s.repo.GetCommunityDetailForUser(ctx, communityID, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
+		}
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+	}
+
+	// Resolve creator profile name
+	creator, err := s.authRepo.FindByID(ctx, resp.CreatorID)
+	if err == nil {
+		resp.CreatorName = creator.Username
+	}
+
+	return resp, nil
+}
+
+func (s *CommunityService) GetCommunityPosts(ctx context.Context, communityID, viewerID string, cursorCreatedAt, cursorID *string, limit int) ([]models.Post, error) {
+	if communityID == "" {
+		return nil, errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
+	}
+
+	// Verify community exists and is active
+	community, err := s.repo.FindByID(ctx, communityID)
+	if err != nil {
+		return nil, errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
+	}
+	if community.Status != models.CommunityStatusActive {
+		return nil, errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
+	}
+
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	var cursorTime *time.Time
+	var cursorIDVal *string
+	if cursorCreatedAt != nil && cursorID != nil {
+		t, parseErr := time.Parse(time.RFC3339Nano, *cursorCreatedAt)
+		if parseErr == nil {
+			cursorTime = &t
+			cursorIDVal = cursorID
+		}
+	}
+
+	var viewerIDPtr *string
+	if viewerID != "" {
+		viewerIDPtr = &viewerID
+	}
+
+	posts, err := s.postRepo.FetchByCommunityID(ctx, communityID, viewerIDPtr, cursorTime, cursorIDVal, limit)
+	if err != nil {
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+	}
+
+	return posts, nil
 }

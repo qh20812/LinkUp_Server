@@ -237,7 +237,7 @@ func main() {
 		// ===== KHỞI TẠO COMMUNITY (NHÓM CỘNG ĐỒNG BÀI VIẾT) =====
 		communityRepository := repository.NewCommunityRepository(gormDB)
 		communityValidation := validations.NewCommunityValidation()
-		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService)
+		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService, postRepository)
 		communityController := controllers.NewCommunityController(communityService, mediaService)
 		routes.RegisterCommunityRoutes(router, communityController, env, gormDB)
 

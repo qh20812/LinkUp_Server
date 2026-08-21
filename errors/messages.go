@@ -347,7 +347,7 @@ var Messages = map[string]string{
 
 	// ── Search ─────────────────────────────────────────────────
 	"search.KEYWORD_TOO_SHORT": "Từ khóa tìm kiếm phải có ít nhất 2 ký tự",
-	"search.TYPE_INVALID":      "Loại tìm kiếm phải là 'all', 'users', 'posts' hoặc 'hashtags'",
+	"search.TYPE_INVALID":      "Loại tìm kiếm phải là 'all', 'users', 'posts', 'hashtags' hoặc 'communities'",
 
 	// ── Ad ─────────────────────────────────────────────────────
 	"ad.NO_SUBSCRIPTION":            "Bạn cần đăng ký gói quảng cáo trước khi tạo chiến dịch",

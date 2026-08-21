@@ -10,9 +10,16 @@ import (
 )
 
 func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityController, env config.Env, db *gorm.DB) {
+	// Public routes (no auth required)
+	router.GET("/api/communities", ctrl.ListCommunities)
+	router.GET("/api/communities/:communityID", ctrl.GetCommunityDetail)
+	router.GET("/api/communities/:communityID/posts", ctrl.GetCommunityPosts)
+
 	communityGroup := router.Group("/api/communities")
 	communityGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
+		communityGroup.GET("/joined", ctrl.ListJoinedCommunities)
+		communityGroup.GET("/created", ctrl.ListCreatedCommunities)
 		communityGroup.POST("", ctrl.CreateCommunity)
 		communityGroup.PUT("/:communityID/background", ctrl.SetCommunityBackground)
 		communityGroup.POST("/:communityID/join", ctrl.RequestJoin)

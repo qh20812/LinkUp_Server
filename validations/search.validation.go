@@ -16,7 +16,7 @@ func (v *SearchValidation) ValidateSearch(keyword, searchType string) error {
 		return errorsapp.New(errorsapp.ErrCodeSearchKeywordTooShort)
 	}
 
-	if searchType != "" && searchType != "all" && searchType != "users" && searchType != "posts" && searchType != "hashtags" {
+	if searchType != "" && searchType != "all" && searchType != "users" && searchType != "posts" && searchType != "hashtags" && searchType != "communities" {
 		return errorsapp.New(errorsapp.ErrCodeSearchTypeInvalid)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"linkup/services"
 	"linkup/validations"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +31,7 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	name := c.PostForm("name")
 	description := c.PostForm("description")
 	autoApprove := c.PostForm("auto_approve") == "true"
+	privacy := models.ParseCommunityPrivacy(c.PostForm("privacy"))
 
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
@@ -44,7 +46,6 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 			if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
 				MinWidth: 200, MinHeight: 200,
 				MaxWidth: 2048, MaxHeight: 2048,
-				AspectRatio: "1:1",
 			}); err != nil {
 				src.Close()
 				errorsapp.Respond(c, http.StatusBadRequest, err)
@@ -65,7 +66,35 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 		avatarURI = media.FileURI
 	}
 
-	community, groupChat, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, autoApprove)
+	backgroundURI := ""
+	bgFile, err := c.FormFile("background")
+	if err == nil && bgFile != nil {
+		src, err := bgFile.Open()
+		if err == nil {
+			if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
+				MinWidth: 800, MinHeight: 400,
+				MaxWidth: 4096, MaxHeight: 4096,
+			}); err != nil {
+				src.Close()
+				errorsapp.Respond(c, http.StatusBadRequest, err)
+				return
+			}
+			src.Close()
+		}
+
+		bgMedia, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), bgFile)
+		if err != nil {
+			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed))
+			return
+		}
+		if bgMedia.Status == models.MediaStatusRejected {
+			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundRejected))
+			return
+		}
+		backgroundURI = bgMedia.FileURI
+	}
+
+	community, groupChat, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, backgroundURI, privacy, autoApprove)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
@@ -480,4 +509,157 @@ func (ctrl *CommunityController) RespondInvitation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Phản hồi lời mời thành công!"})
+}
+
+// ── User-facing Community List/Detail ──
+
+func (ctrl *CommunityController) ListCommunities(c *gin.Context) {
+	keyword := c.Query("keyword")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	result, err := ctrl.communityService.ListCommunities(c.Request.Context(), keyword, page, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *CommunityController) ListJoinedCommunities(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+	userID := val.(string)
+
+	keyword := c.Query("keyword")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	result, err := ctrl.communityService.ListJoinedCommunities(c.Request.Context(), userID, keyword, page, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *CommunityController) ListCreatedCommunities(c *gin.Context) {
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+	userID := val.(string)
+
+	keyword := c.Query("keyword")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 10
+	}
+
+	result, err := ctrl.communityService.ListCreatedCommunities(c.Request.Context(), userID, keyword, page, pageSize)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *CommunityController) GetCommunityDetail(c *gin.Context) {
+	communityID := c.Param("communityID")
+	if communityID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
+		return
+	}
+
+	// Optional auth — userID may not exist
+	userID, _ := c.Get("userID")
+	userIDStr, _ := userID.(string)
+
+	result, err := ctrl.communityService.GetCommunityDetail(c.Request.Context(), communityID, userIDStr)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (ctrl *CommunityController) GetCommunityPosts(c *gin.Context) {
+	communityID := c.Param("communityID")
+	if communityID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityNotFound))
+		return
+	}
+
+	// Optional auth
+	userID, _ := c.Get("userID")
+	userIDStr, _ := userID.(string)
+
+	cursorStr := c.Query("cursor")
+	limit, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	var cursorCreatedAt, cursorID *string
+	if cursorStr != "" {
+		parts := splitCursor(cursorStr)
+		if len(parts) == 2 {
+			cursorCreatedAt = &parts[0]
+			cursorID = &parts[1]
+		}
+	}
+
+	cursorTime, cursorIDVal := parseCursor(cursorCreatedAt, cursorID)
+
+	posts, err := ctrl.communityService.GetCommunityPosts(c.Request.Context(), communityID, userIDStr, cursorTime, cursorIDVal, limit)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"posts": posts})
+}
+
+func splitCursor(cursor string) []string {
+	// cursor format: "timestamp_nano,post_id"
+	for i := len(cursor) - 1; i >= 0; i-- {
+		if cursor[i] == ',' {
+			return []string{cursor[:i], cursor[i+1:]}
+		}
+	}
+	return nil
+}
+
+func parseCursor(createdAtStr, idStr *string) (*string, *string) {
+	if createdAtStr == nil || idStr == nil {
+		return nil, nil
+	}
+	return createdAtStr, idStr
 }

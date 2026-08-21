@@ -849,3 +849,212 @@ func mapRoleNameToGroupRole(name models.RoleName) models.GroupRole {
 		return models.GroupRoleMember
 	}
 }
+
+// ── User-facing Community List/Detail ──
+
+func (r *CommunityRepository) ListCommunities(ctx context.Context, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
+	type communityRow struct {
+		ID          string    `gorm:"column:id"`
+		Name        string    `gorm:"column:name"`
+		Description string    `gorm:"column:description"`
+		AvatarURI   string    `gorm:"column:avatar_uri"`
+		Privacy     string    `gorm:"column:privacy"`
+		MemberCount int       `gorm:"column:member_count"`
+		CreatedAt   time.Time `gorm:"column:created_at"`
+	}
+
+	query := r.db.WithContext(ctx).
+		Table("communities").
+		Select(`communities.id, communities.name, communities.description, communities.avatar_uri,
+			communities.privacy, communities.created_at,
+			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
+		Where("communities.status = ?", models.CommunityStatusActive)
+
+	if keyword != "" {
+		query = query.Where("communities.name LIKE ?", "%"+keyword+"%")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count communities: %w", err)
+	}
+
+	var rows []communityRow
+	offset := (page - 1) * pageSize
+	if err := query.Order("member_count DESC, communities.created_at DESC").
+		Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("list communities: %w", err)
+	}
+
+	items := make([]dto.CommunityListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.CommunityListItem{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+			AvatarURI:   row.AvatarURI,
+			Privacy:     row.Privacy,
+			MemberCount: row.MemberCount,
+			CreatedAt:   row.CreatedAt,
+		})
+	}
+	return items, total, nil
+}
+
+func (r *CommunityRepository) GetCommunityDetailForUser(ctx context.Context, communityID, userID string) (*dto.CommunityDetailResponse, error) {
+	community, err := r.FindByID(ctx, communityID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Count members
+	var memberCount int64
+	if err := r.db.WithContext(ctx).Model(&models.GroupMember{}).
+		Where("community_id = ?", communityID).Count(&memberCount).Error; err != nil {
+		return nil, fmt.Errorf("count community members: %w", err)
+	}
+
+	// Resolve creator profile
+	creatorName := ""
+
+	// Determine membership status
+	membershipStatus := "none"
+	userMemberRole := ""
+
+	if userID != "" {
+		isCreator, err := r.IsUserCreator(ctx, communityID, userID)
+		if err == nil && isCreator {
+			membershipStatus = "creator"
+		} else {
+			isMember, err := r.IsUserMember(ctx, communityID, userID)
+			if err == nil && isMember {
+				membershipStatus = "member"
+				role, err := r.GetUserRole(ctx, communityID, userID)
+				if err == nil {
+					userMemberRole = string(role)
+				}
+			} else {
+				// Check pending join request
+				pending, err := r.FindPendingJoinRequestByUserAndCommunity(ctx, communityID, userID)
+				if err == nil && pending != nil {
+					membershipStatus = "pending"
+				}
+			}
+		}
+	}
+
+	return &dto.CommunityDetailResponse{
+		ID:               community.ID,
+		Name:             community.Name,
+		Description:      community.Description,
+		AvatarURI:        community.AvatarURI,
+		BackgroundURI:    community.BackgroundURI,
+		CreatorID:        community.CreatorID,
+		CreatorName:      creatorName,
+		Privacy:          string(community.Privacy),
+		AutoApprove:      community.AutoApprove,
+		MemberCount:      int(memberCount),
+		MembershipStatus: membershipStatus,
+		UserMemberRole:   userMemberRole,
+		CreatedAt:        community.CreatedAt,
+	}, nil
+}
+
+func (r *CommunityRepository) ListUserJoinedCommunities(ctx context.Context, userID string, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
+	type communityRow struct {
+		ID          string    `gorm:"column:id"`
+		Name        string    `gorm:"column:name"`
+		Description string    `gorm:"column:description"`
+		AvatarURI   string    `gorm:"column:avatar_uri"`
+		Privacy     string    `gorm:"column:privacy"`
+		MemberCount int       `gorm:"column:member_count"`
+		CreatedAt   time.Time `gorm:"column:created_at"`
+	}
+
+	query := r.db.WithContext(ctx).
+		Table("communities").
+		Joins("JOIN group_members gm ON gm.community_id = communities.id AND gm.user_id = ?", userID).
+		Select(`communities.id, communities.name, communities.description, communities.avatar_uri,
+			communities.privacy, communities.created_at,
+			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
+		Where("communities.status = ?", models.CommunityStatusActive)
+
+	if keyword != "" {
+		query = query.Where("communities.name LIKE ?", "%"+keyword+"%")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count joined communities: %w", err)
+	}
+
+	var rows []communityRow
+	offset := (page - 1) * pageSize
+	if err := query.Order("communities.created_at DESC").
+		Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("list joined communities: %w", err)
+	}
+
+	items := make([]dto.CommunityListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.CommunityListItem{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+			AvatarURI:   row.AvatarURI,
+			Privacy:     row.Privacy,
+			MemberCount: row.MemberCount,
+			CreatedAt:   row.CreatedAt,
+		})
+	}
+	return items, total, nil
+}
+
+func (r *CommunityRepository) ListUserCreatedCommunities(ctx context.Context, userID string, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
+	type communityRow struct {
+		ID          string    `gorm:"column:id"`
+		Name        string    `gorm:"column:name"`
+		Description string    `gorm:"column:description"`
+		AvatarURI   string    `gorm:"column:avatar_uri"`
+		Privacy     string    `gorm:"column:privacy"`
+		MemberCount int       `gorm:"column:member_count"`
+		CreatedAt   time.Time `gorm:"column:created_at"`
+	}
+
+	query := r.db.WithContext(ctx).
+		Table("communities").
+		Select(`communities.id, communities.name, communities.description, communities.avatar_uri,
+			communities.privacy, communities.created_at,
+			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
+		Where("communities.creator_id = ? AND communities.status = ?", userID, models.CommunityStatusActive)
+
+	if keyword != "" {
+		query = query.Where("communities.name LIKE ?", "%"+keyword+"%")
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count created communities: %w", err)
+	}
+
+	var rows []communityRow
+	offset := (page - 1) * pageSize
+	if err := query.Order("communities.created_at DESC").
+		Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
+		return nil, 0, fmt.Errorf("list created communities: %w", err)
+	}
+
+	items := make([]dto.CommunityListItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.CommunityListItem{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+			AvatarURI:   row.AvatarURI,
+			Privacy:     row.Privacy,
+			MemberCount: row.MemberCount,
+			CreatedAt:   row.CreatedAt,
+		})
+	}
+	return items, total, nil
+}
