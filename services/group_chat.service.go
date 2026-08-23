@@ -279,6 +279,9 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		)
 	}
 
+	requesterName := s.getDisplayName(ctx, requesterID)
+	s.createSystemMessage(ctx, chatID, fmt.Sprintf("%s đã được mời vào nhóm", requesterName), "member_invited")
+
 	return req.ID, nil
 }
 
@@ -615,6 +618,9 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 		)
 	}
 
+	targetName := s.getDisplayName(ctx, targetUserID)
+	s.createSystemMessage(ctx, chatID, fmt.Sprintf("%s đã tham gia nhóm", targetName), "member_joined")
+
 	return nil
 }
 
@@ -681,4 +687,16 @@ func (s *GroupChatService) ListGroupChatsForUser(ctx context.Context, userID str
 	}
 
 	return chats, nil
+}
+
+func (s *GroupChatService) createSystemMessage(ctx context.Context, chatID, content, msgType string) {
+	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+	msg.ID = utils.GenerateUUID()
+	msg.Type = msgType
+	msg.CreatedAt = time.Now().UTC()
+	_, _ = s.chatRepo.CreateMessage(ctx, &msg)
+}
+
+func (s *GroupChatService) getDisplayName(ctx context.Context, userID string) string {
+	return s.chatRepo.GetDisplayName(ctx, userID)
 }

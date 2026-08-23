@@ -165,6 +165,7 @@ func (c *Client) ReadPump() {
 				EmojiID:          m.EmojiID,
 				MediaID:          m.MediaID,
 				ReplyToMessageID: m.ReplyToMessageID,
+				Type:             m.Type,
 				IsAnonymized:     m.IsAnonymized,
 				AnonymousName:    m.AnonymousName,
 				CreatedAt:        m.CreatedAt,
@@ -237,6 +238,7 @@ func (c *Client) ReadPump() {
 			EmojiID:          msg.EmojiID,
 			MediaID:          msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
+			Type:             msg.Type,
 			CreatedAt:        msg.CreatedAt,
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})

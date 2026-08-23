@@ -34,6 +34,7 @@ type MessagePayload struct {
 	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
 	SenderName       string    `json:"sender_name,omitempty"`
 	SenderAvatar     string    `json:"sender_avatar,omitempty"`
+	Type             string    `json:"type,omitempty"`
 	IsAnonymized     bool      `json:"is_anonymized"`
 	AnonymousName    *string   `json:"anonymous_name,omitempty"`
 	E2EVersion       int       `json:"e2e_version,omitempty"`
