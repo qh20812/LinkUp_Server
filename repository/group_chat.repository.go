@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/utils"
 	"time"
@@ -362,4 +363,117 @@ func (r *GroupChatRepository) RejectMemberRequest(ctx context.Context, requestID
 			"status":       models.GroupChatMemberRequestRejected,
 			"responded_at": now,
 		}).Error
+}
+
+func (r *GroupChatRepository) GetGroupMembersWithProfiles(ctx context.Context, chatID string) ([]dto.GroupChatMemberDTO, error) {
+	type row struct {
+		UserID      string `gorm:"column:user_id"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+		Role        string `gorm:"column:role"`
+	}
+
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Table("chat_participants AS cp").
+		Select(`cp.user_id,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri,
+			cp.role`).
+		Joins(`LEFT JOIN profiles AS p ON p.user_id = cp.user_id`).
+		Where("cp.chat_id = ?", chatID).
+		Order("cp.joined_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("lấy danh sách thành viên nhóm thất bại: %w", err)
+	}
+
+	members := make([]dto.GroupChatMemberDTO, 0, len(rows))
+	for _, r := range rows {
+		members = append(members, dto.GroupChatMemberDTO{
+			UserID:      r.UserID,
+			DisplayName: r.DisplayName,
+			AvatarURI:   r.AvatarURI,
+			Role:        r.Role,
+		})
+	}
+	return members, nil
+}
+
+func (r *GroupChatRepository) GetMemberProfiles(ctx context.Context, chatID string, userIDs []string, out interface{}) error {
+	return r.db.WithContext(ctx).
+		Table("chat_participants AS cp").
+		Select(`cp.user_id,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri`).
+		Joins(`LEFT JOIN profiles AS p ON p.user_id = cp.user_id`).
+		Where("cp.chat_id = ? AND cp.user_id IN ?", chatID, userIDs).
+		Scan(out).Error
+}
+
+func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID string) ([]dto.GroupChatConversationDTO, error) {
+	type row struct {
+		ChatID      string     `gorm:"column:chat_id"`
+		Name        string     `gorm:"column:name"`
+		AvatarURI   string     `gorm:"column:avatar_uri"`
+		MemberCount int        `gorm:"column:member_count"`
+		LastMsgID   *string    `gorm:"column:last_message_id"`
+		LastContent *string    `gorm:"column:last_content"`
+		LastSender  *string    `gorm:"column:last_sender_id"`
+		LastCreated *time.Time `gorm:"column:last_created_at"`
+		UpdatedAt   time.Time  `gorm:"column:updated_at"`
+	}
+
+	var rows []row
+
+	err := r.db.WithContext(ctx).
+		Table("chats").
+		Select(`chats.id AS chat_id,
+			chats.name AS name,
+			COALESCE(chats.avatar_uri, '') AS avatar_uri,
+			COUNT(DISTINCT cp2.user_id) AS member_count,
+			lm.id AS last_message_id,
+			lm.content AS last_content,
+			lm.sender_id AS last_sender_id,
+			lm.created_at AS last_created_at,
+			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
+		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
+		Joins("JOIN chat_participants AS cp2 ON cp2.chat_id = chats.id").
+		Joins(`LEFT JOIN messages AS lm ON lm.id = (
+			SELECT m2.id FROM messages m2
+			WHERE m2.chat_id = chats.id
+				AND ((m2.sender_id = ? AND m2.deleted_for_sender = false)
+					OR (m2.sender_id <> ? AND m2.deleted_for_receiver = false))
+			ORDER BY m2.created_at DESC
+			LIMIT 1
+		)`, userID, userID).
+		Where("chats.type = ?", models.ChatTypeGroup).
+		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lm.created_at, chats.created_at").
+		Order("COALESCE(lm.created_at, chats.created_at) DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list user group chats: %w", err)
+	}
+
+	items := make([]dto.GroupChatConversationDTO, 0, len(rows))
+	for _, r := range rows {
+		item := dto.GroupChatConversationDTO{
+			ChatID:      r.ChatID,
+			Name:        r.Name,
+			AvatarURI:   r.AvatarURI,
+			MemberCount: r.MemberCount,
+			UpdatedAt:   r.UpdatedAt,
+		}
+		if r.LastMsgID != nil && r.LastContent != nil && r.LastCreated != nil {
+			item.LastMessage = &dto.MessagePayload{
+				ID:        *r.LastMsgID,
+				ChatID:    r.ChatID,
+				SenderID:  derefString(r.LastSender),
+				Content:   *r.LastContent,
+				CreatedAt: *r.LastCreated,
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }

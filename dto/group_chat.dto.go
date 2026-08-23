@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 type CreateGroupInput struct {
 	Name      string   `json:"name" binding:"required,min=3,max=50"`
 	AvatarURI string   `json:"avatar_uri"`
@@ -38,12 +40,20 @@ type GroupChatMemberSettingsResponse struct {
 	NotificationsEnabled bool `json:"notifications_enabled"`
 }
 
+type GroupChatMemberDTO struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+	Role        string `json:"role"`
+}
+
 type GroupChatSettingsResponse struct {
 	ChatID         string                          `json:"chat_id"`
 	Name           string                          `json:"name"`
 	AvatarURI      string                          `json:"avatar_uri"`
 	AllowMemberAdd bool                            `json:"allow_member_add"`
 	MemberSettings GroupChatMemberSettingsResponse `json:"member_settings"`
+	Members        []GroupChatMemberDTO            `json:"members,omitempty"`
 }
 
 type MuteMemberInput struct {
@@ -60,4 +70,17 @@ type UnmuteMemberInput struct {
 type GroupChatTransferOwnershipInput struct {
 	TargetUserID string `json:"target_user_id" binding:"required"`
 	KeepAdmin    bool   `json:"keep_admin"`
+}
+
+type GroupChatConversationDTO struct {
+	ChatID      string          `json:"chat_id"`
+	Name        string          `json:"name"`
+	AvatarURI   string          `json:"avatar_uri"`
+	MemberCount int             `json:"member_count"`
+	LastMessage *MessagePayload `json:"last_message,omitempty"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type GroupChatListResponse struct {
+	Data []GroupChatConversationDTO `json:"data"`
 }

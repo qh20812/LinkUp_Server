@@ -22,6 +22,10 @@ func NewChatRepository(db *gorm.DB) *ChatRepository {
 	return &ChatRepository{db: db}
 }
 
+func (r *ChatRepository) DB() *gorm.DB {
+	return r.db
+}
+
 func (r *ChatRepository) FindChatByID(ctx context.Context, chatID string) (*models.Chat, error) {
 	var chat models.Chat
 	err := r.db.WithContext(ctx).Where("id = ?", chatID).First(&chat).Error
@@ -436,4 +440,19 @@ func (r *ChatRepository) GetUserMute(ctx context.Context, chatID, userID string)
         return nil, nil
     }
     return &mute, nil
+}
+
+func (r *ChatRepository) GetDisplayName(ctx context.Context, userID string) string {
+	var result struct {
+		DisplayName string `gorm:"column:display_name"`
+	}
+	err := r.db.WithContext(ctx).
+		Table("profiles").
+		Select("COALESCE(display_name, '') AS display_name").
+		Where("user_id = ?", userID).
+		First(&result).Error
+	if err != nil || result.DisplayName == "" {
+		return userID
+	}
+	return result.DisplayName
 }

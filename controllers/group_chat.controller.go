@@ -303,3 +303,43 @@ func (ctrl *GroupChatController) RejectMemberRequest(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Bạn đã từ chối lời mời tham gia nhóm"})
 }
+
+func (ctrl *GroupChatController) ListGroups(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+
+	chats, err := ctrl.groupService.ListGroupChatsForUser(c.Request.Context(), userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.GroupChatListResponse{Data: chats})
+}
+
+func (ctrl *GroupChatController) LeaveGroup(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	var input struct {
+		LeaveMode   string `json:"leave_mode"`
+		HistoryMode string `json:"history_mode"`
+	}
+	_ = c.ShouldBindJSON(&input)
+
+	if err := ctrl.groupService.LeaveGroup(c.Request.Context(), chatID, userID, input.LeaveMode, input.HistoryMode); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Đã rời khỏi nhóm thành công"})
+}

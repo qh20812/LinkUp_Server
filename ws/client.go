@@ -144,6 +144,7 @@ func (c *Client) ReadPump() {
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
 				ReplyToMessageID: msg.ReplyToMessageID,
+				Type:             msg.Type,
 				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
 			}
@@ -446,16 +447,17 @@ func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePa
 			content = ""
 		}
 		result = append(result, dto.MessagePayload{
-			ID:        msg.ID,
-			ChatID:    msg.ChatID,
-			SenderID:  msg.SenderID,
-			Content:   content,
-			EmojiID:   msg.EmojiID,
-			MediaID:   msg.MediaID,
+			ID:               msg.ID,
+			ChatID:           msg.ChatID,
+			SenderID:         msg.SenderID,
+			Content:          content,
+			EmojiID:          msg.EmojiID,
+			MediaID:          msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
-			E2EVersion: msg.E2EVersion,
-			Deleted:   deleted,
-			CreatedAt: msg.CreatedAt,
+			Type:             msg.Type,
+			E2EVersion:       msg.E2EVersion,
+			Deleted:          deleted,
+			CreatedAt:        msg.CreatedAt,
 		})
 	}
 	return result

@@ -75,7 +75,7 @@ func (s *GroupMessageService) JoinRoom(ctx context.Context, userID, chatID strin
 func (s *GroupMessageService) SendMessage(
 	ctx context.Context,
 	userID, chatID, content string,
-	emojiID, mediaID, replyToMessageID *string,
+	emojiID, mediaID, gifURL, replyToMessageID *string,
 ) (*models.Message, error) {
 	chat, err := s.ensureGroupMember(ctx, userID, chatID)
 	if err != nil {
@@ -94,6 +94,22 @@ func (s *GroupMessageService) SendMessage(
 			expiresStr = "vĩnh viễn"
 		}
 		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
+	}
+
+	if gifURL != nil && *gifURL != "" {
+		gifMedia := models.Media{
+			ID:        utils.GenerateUUID(),
+			UserID:    userID,
+			FileURI:   *gifURL,
+			FileType:  "image/gif",
+			FileSize:  0,
+			Status:    models.MediaStatusApproved,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := s.mediaRepo.Create(ctx, &gifMedia); err != nil {
+			return nil, fmt.Errorf("create gif media: %w", err)
+		}
+		mediaID = &gifMedia.ID
 	}
 
 	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
@@ -250,6 +266,50 @@ func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, c
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	return s.chatRepo.CreateMessage(ctx, &msg)
+}
+
+func (s *GroupMessageService) DecryptMessageContent(ctx context.Context, msg *models.Message) error {
+	if msg.Content == "" {
+		return nil
+	}
+	key, err := s.chatRepo.GetEncryptionKey(ctx, msg.ChatID)
+	if err != nil {
+		return err
+	}
+	decrypted, err := utils.DecryptMessage(msg.Content, key)
+	if err != nil {
+		return err
+	}
+	msg.Content = decrypted
+	return nil
+}
+
+// GetMemberProfiles loads display_name and avatar_uri for a list of user IDs within a group.
+func (s *GroupMessageService) GetMemberProfiles(ctx context.Context, chatID string, userIDs []string) map[string]struct{ DisplayName, AvatarURI string } {
+	type profile struct {
+		UserID      string `gorm:"column:user_id"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+	}
+
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	var profiles []profile
+	err := s.groupRepo.GetMemberProfiles(ctx, chatID, userIDs, &profiles)
+	if err != nil {
+		return nil
+	}
+
+	result := make(map[string]struct{ DisplayName, AvatarURI string }, len(profiles))
+	for _, p := range profiles {
+		result[p.UserID] = struct{ DisplayName, AvatarURI string }{
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+		}
+	}
+	return result
 }
 
 func (s *GroupMessageService) SetGroupCallRepository(repo *repository.GroupCallRepository) {
