@@ -315,6 +315,8 @@ func (s *GroupChatService) GetSettings(ctx context.Context, chatID, userID strin
 		return nil, err
 	}
 
+	members, _ := s.groupRepo.GetGroupMembersWithProfiles(ctx, chatID)
+
 	return &dto.GroupChatSettingsResponse{
 		ChatID:         chatID,
 		Name:           chat.Name,
@@ -323,6 +325,7 @@ func (s *GroupChatService) GetSettings(ctx context.Context, chatID, userID strin
 		MemberSettings: dto.GroupChatMemberSettingsResponse{
 			NotificationsEnabled: memberSettings.NotificationsEnabled,
 		},
+		Members: members,
 	}, nil
 }
 

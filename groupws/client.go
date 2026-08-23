@@ -139,25 +139,42 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			for i := range history {
-				_ = c.messageService.DecryptMessageContent(c.ctx, &history[i])
-			}
+		for i := range history {
+			_ = c.messageService.DecryptMessageContent(c.ctx, &history[i])
+		}
 
-			msgs := make([]dto.MessagePayload, 0, len(history))
-			for _, m := range history {
-				msgs = append(msgs, dto.MessagePayload{
-					ID:               m.ID,
-					ChatID:           m.ChatID,
-					SenderID:         m.SenderID,
-					Content:          m.Content,
-					EmojiID:          m.EmojiID,
-					MediaID:          m.MediaID,
-					ReplyToMessageID: m.ReplyToMessageID,
-					IsAnonymized:     m.IsAnonymized,
-					AnonymousName:    m.AnonymousName,
-					CreatedAt:        m.CreatedAt,
-				})
+		senderIDs := make([]string, 0, len(history))
+		seen := make(map[string]struct{})
+		for _, m := range history {
+			if m.SenderID != "" && m.SenderID != "SYSTEM" {
+				if _, ok := seen[m.SenderID]; !ok {
+					senderIDs = append(senderIDs, m.SenderID)
+					seen[m.SenderID] = struct{}{}
+				}
 			}
+		}
+		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
+
+		msgs := make([]dto.MessagePayload, 0, len(history))
+		for _, m := range history {
+			p := dto.MessagePayload{
+				ID:               m.ID,
+				ChatID:           m.ChatID,
+				SenderID:         m.SenderID,
+				Content:          m.Content,
+				EmojiID:          m.EmojiID,
+				MediaID:          m.MediaID,
+				ReplyToMessageID: m.ReplyToMessageID,
+				IsAnonymized:     m.IsAnonymized,
+				AnonymousName:    m.AnonymousName,
+				CreatedAt:        m.CreatedAt,
+			}
+			if prof, ok := profiles[m.SenderID]; ok {
+				p.SenderName = prof.DisplayName
+				p.SenderAvatar = prof.AvatarURI
+			}
+			msgs = append(msgs, p)
+		}
 
 			callDocs, err := c.messageService.GetGroupCallsByChatID(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
@@ -195,35 +212,43 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.messageService.SendMessage(
-				c.ctx,
-				c.userID,
-				payload.ChatID,
-				payload.Content,
-				payload.EmojiID,
-				payload.MediaID,
-				payload.ReplyToMessageID,
-			)
+		msg, err := c.messageService.SendMessage(
+			c.ctx,
+			c.userID,
+			payload.ChatID,
+			payload.Content,
+			payload.EmojiID,
+			payload.MediaID,
+			payload.GifURL,
+			payload.ReplyToMessageID,
+		)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			_ = c.messageService.DecryptMessageContent(c.ctx, msg)
+		_ = c.messageService.DecryptMessageContent(c.ctx, msg)
 
-			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type: "group:message:new",
-				Payload: mustMarshal(dto.MessagePayload{
-					ID:               msg.ID,
-					ChatID:           msg.ChatID,
-					SenderID:         msg.SenderID,
-					Content:          msg.Content,
-					EmojiID:          msg.EmojiID,
-					MediaID:          msg.MediaID,
-					ReplyToMessageID: msg.ReplyToMessageID,
-					CreatedAt:        msg.CreatedAt,
-				}),
-			})
+		newPayload := dto.MessagePayload{
+			ID:               msg.ID,
+			ChatID:           msg.ChatID,
+			SenderID:         msg.SenderID,
+			Content:          msg.Content,
+			EmojiID:          msg.EmojiID,
+			MediaID:          msg.MediaID,
+			ReplyToMessageID: msg.ReplyToMessageID,
+			CreatedAt:        msg.CreatedAt,
+		}
+		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})
+		if prof, ok := profiles[msg.SenderID]; ok {
+			newPayload.SenderName = prof.DisplayName
+			newPayload.SenderAvatar = prof.AvatarURI
+		}
+
+		c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+			Type:    "group:message:new",
+			Payload: mustMarshal(newPayload),
+		})
 
 		case "group:typing:start", "group:typing:stop":
 			var payload dto.GroupTypingPayload

@@ -32,6 +32,8 @@ type MessagePayload struct {
 	EmojiID          *string   `json:"emoji_id,omitempty"`
 	MediaID          *string   `json:"media_id,omitempty"`
 	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
+	SenderName       string    `json:"sender_name,omitempty"`
+	SenderAvatar     string    `json:"sender_avatar,omitempty"`
 	IsAnonymized     bool      `json:"is_anonymized"`
 	AnonymousName    *string   `json:"anonymous_name,omitempty"`
 	E2EVersion       int       `json:"e2e_version,omitempty"`

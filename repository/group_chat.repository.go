@@ -365,6 +365,52 @@ func (r *GroupChatRepository) RejectMemberRequest(ctx context.Context, requestID
 		}).Error
 }
 
+func (r *GroupChatRepository) GetGroupMembersWithProfiles(ctx context.Context, chatID string) ([]dto.GroupChatMemberDTO, error) {
+	type row struct {
+		UserID      string `gorm:"column:user_id"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+		Role        string `gorm:"column:role"`
+	}
+
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Table("chat_participants AS cp").
+		Select(`cp.user_id,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri,
+			cp.role`).
+		Joins(`LEFT JOIN profiles AS p ON p.user_id = cp.user_id`).
+		Where("cp.chat_id = ?", chatID).
+		Order("cp.joined_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("lấy danh sách thành viên nhóm thất bại: %w", err)
+	}
+
+	members := make([]dto.GroupChatMemberDTO, 0, len(rows))
+	for _, r := range rows {
+		members = append(members, dto.GroupChatMemberDTO{
+			UserID:      r.UserID,
+			DisplayName: r.DisplayName,
+			AvatarURI:   r.AvatarURI,
+			Role:        r.Role,
+		})
+	}
+	return members, nil
+}
+
+func (r *GroupChatRepository) GetMemberProfiles(ctx context.Context, chatID string, userIDs []string, out interface{}) error {
+	return r.db.WithContext(ctx).
+		Table("chat_participants AS cp").
+		Select(`cp.user_id,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri`).
+		Joins(`LEFT JOIN profiles AS p ON p.user_id = cp.user_id`).
+		Where("cp.chat_id = ? AND cp.user_id IN ?", chatID, userIDs).
+		Scan(out).Error
+}
+
 func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID string) ([]dto.GroupChatConversationDTO, error) {
 	type row struct {
 		ChatID      string     `gorm:"column:chat_id"`
