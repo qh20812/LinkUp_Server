@@ -5,7 +5,6 @@ import (
 	"linkup/dto"
 	"linkup/models"
 	"linkup/services"
-	"linkup/validations"
 	"net/http"
 	"strconv"
 
@@ -41,19 +40,6 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	avatarURI := ""
 	file, err := c.FormFile("avatar")
 	if err == nil && file != nil {
-		src, err := file.Open()
-		if err == nil {
-			if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
-				MinWidth: 200, MinHeight: 200,
-				MaxWidth: 2048, MaxHeight: 2048,
-			}); err != nil {
-				src.Close()
-				errorsapp.Respond(c, http.StatusBadRequest, err)
-				return
-			}
-			src.Close()
-		}
-
 		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
 		if err != nil {
 			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed))
@@ -69,19 +55,6 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	backgroundURI := ""
 	bgFile, err := c.FormFile("background")
 	if err == nil && bgFile != nil {
-		src, err := bgFile.Open()
-		if err == nil {
-			if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
-				MinWidth: 800, MinHeight: 400,
-				MaxWidth: 4096, MaxHeight: 4096,
-			}); err != nil {
-				src.Close()
-				errorsapp.Respond(c, http.StatusBadRequest, err)
-				return
-			}
-			src.Close()
-		}
-
 		bgMedia, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), bgFile)
 		if err != nil {
 			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed))
@@ -633,6 +606,9 @@ func (ctrl *CommunityController) GetCommunityPosts(c *gin.Context) {
 		if len(parts) == 2 {
 			cursorCreatedAt = &parts[0]
 			cursorID = &parts[1]
+		} else {
+			// Bare UUID (no comma) — look up the post's created_at
+			cursorID = &cursorStr
 		}
 	}
 

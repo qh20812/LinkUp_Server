@@ -7,11 +7,13 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"log"
 	"math"
 	"path/filepath"
 	"strings"
 
 	errorsapp "linkup/errors"
+	_ "golang.org/x/image/webp"
 )
 
 type DimensionConstraint struct {
@@ -76,7 +78,8 @@ func contains(arr []string, str string) bool {
 func ValidateImageDimensions(r io.Reader, c DimensionConstraint) (width, height int, err error) {
 	config, _, err := image.DecodeConfig(r)
 	if err != nil {
-		return 0, 0, errorsapp.New(errorsapp.ErrCodeMediaImageDecode)
+		log.Printf("[media] image decode config failed (format may be unsupported): %v", err)
+		return 0, 0, nil
 	}
 
 	w, h := config.Width, config.Height
@@ -84,7 +87,9 @@ func ValidateImageDimensions(r io.Reader, c DimensionConstraint) (width, height 
 	if w < c.MinWidth || h < c.MinHeight {
 		return w, h, fmt.Errorf("%w: yêu cầu tối thiểu %dx%d, nhận được %dx%d", errorsapp.New(errorsapp.ErrCodeMediaImageTooSmall), c.MinWidth, c.MinHeight, w, h)
 	}
-	if w > c.MaxWidth || h > c.MaxHeight {
+	maxDim := math.Max(float64(w), float64(h))
+	maxAllowed := math.Max(float64(c.MaxWidth), float64(c.MaxHeight))
+	if maxDim > maxAllowed {
 		return w, h, fmt.Errorf("%w: yêu cầu tối đa %dx%d, nhận được %dx%d", errorsapp.New(errorsapp.ErrCodeMediaImageTooLarge), c.MaxWidth, c.MaxHeight, w, h)
 	}
 

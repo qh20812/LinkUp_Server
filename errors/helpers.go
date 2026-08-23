@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -31,10 +32,11 @@ func RespondErrorf(c *gin.Context, status int, code string, params map[string]an
 }
 
 // Respond sends an error response from a plain error.
-// If err is an *AppError, it uses the structured format.
+// If err is an *AppError (or wraps one), it uses the structured format.
 // Otherwise, it falls back to a generic HTTP error.
 func Respond(c *gin.Context, status int, err error) {
-	if appErr, ok := err.(*AppError); ok {
+	var appErr *AppError
+	if errors.As(err, &appErr) {
 		RespondError(c, status, appErr)
 		return
 	}
@@ -53,9 +55,10 @@ func RenderTemplate(template string, params map[string]any) string {
 	return result
 }
 
-// IsAppError checks if an error is an AppError and returns it.
+// IsAppError checks if an error is (or wraps) an AppError and returns it.
 func IsAppError(err error) (*AppError, bool) {
-	appErr, ok := err.(*AppError)
+	var appErr *AppError
+	ok := errors.As(err, &appErr)
 	return appErr, ok
 }
 

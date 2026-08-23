@@ -219,6 +219,7 @@ func newCommunityTestSeed(t *testing.T, autoApprove bool) communityTestSeed {
 
 	svc := &CommunityService{
 		repo:         communityRepo,
+		postRepo:     nil,
 		authRepo:     authRepo,
 		profileRepo:  profileRepo,
 		mediaService: nil,
@@ -259,6 +260,7 @@ func newCreateCommunityTestSeed(t *testing.T) communityTestSeed {
 
 	svc := &CommunityService{
 		repo:         communityRepo,
+		postRepo:     nil,
 		authRepo:     authRepo,
 		profileRepo:  profileRepo,
 		mediaService: nil,
@@ -284,7 +286,7 @@ func TestCreateCommunity_HappyPath(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Test Community", "Description", "", false)
+	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Test Community", "Description", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -309,7 +311,7 @@ func TestCreateCommunity_AutoApprove(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Approve", "", "", true)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Approve", "", "", "", models.PrivacyPublic, true)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -322,7 +324,7 @@ func TestCreateCommunity_AutoApproveDefault(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "No Auto Approve", "", "", false)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "No Auto Approve", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestCreateCommunity_VerifyDBState(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Verify DB", "", "", false)
+	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Verify DB", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -369,7 +371,7 @@ func TestCreateCommunity_EncryptionKey(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	_, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Enc Key", "", "", false)
+	_, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Enc Key", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -386,7 +388,7 @@ func TestCreateCommunity_RollbackOnFKFail(t *testing.T) {
 	ctx := context.Background()
 
 	fakeCreatorID := "non-existent-user-id"
-	_, _, err := seed.Service.CreateCommunity(ctx, fakeCreatorID, "Rollback", "", "", false)
+	_, _, err := seed.Service.CreateCommunity(ctx, fakeCreatorID, "Rollback", "", "", "", models.PrivacyPublic, false)
 	if err == nil {
 		t.Fatal("expected error for non-existent creator, got nil")
 	}
@@ -410,12 +412,12 @@ func TestCreateCommunity_NameTaken(t *testing.T) {
 
 	communityName := "Unique Community Name"
 
-	_, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", false)
+	_, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("first CreateCommunity: %v", err)
 	}
 
-	_, _, err = seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", false)
+	_, _, err = seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", "", models.PrivacyPublic, false)
 	if err == nil {
 		t.Fatal("expected error for duplicate name, got nil")
 	}
@@ -430,7 +432,7 @@ func TestRequestJoin_AutoApprove_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", true)
+	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", "", models.PrivacyPublic, true)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -468,7 +470,7 @@ func TestRequestJoin_AutoApprove_AlreadyMember(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", true)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", "", models.PrivacyPublic, true)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -491,7 +493,7 @@ func TestRequestJoin_AutoApprove_NoChat(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto NoChat", "", "", true)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto NoChat", "", "", "", models.PrivacyPublic, true)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -509,7 +511,7 @@ func TestRequestJoin_JoinRequest_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", false)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -545,7 +547,7 @@ func TestRequestJoin_JoinRequest_Duplicate(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", false)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -581,7 +583,7 @@ func TestRequestJoin_DeactivatedCode_Fails(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Deactivated Code", "", "", true)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Deactivated Code", "", "", "", models.PrivacyPublic, true)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -610,7 +612,7 @@ func TestApproveJoinRequest_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", false)
+	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -658,7 +660,7 @@ func TestApproveJoinRequest_AlreadyHandled(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", false)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -683,7 +685,7 @@ func TestApproveJoinRequest_NotAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", false)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -758,7 +760,7 @@ func TestCreateCommunity_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	_, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", false)
+	_, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -776,7 +778,7 @@ func TestRequestJoin_AutoApprove_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", true)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, true)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -802,7 +804,7 @@ func TestApproveJoinRequest_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", false)
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1243,5 +1245,744 @@ func TestRespondInvitation_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, validations.ErrInvitationNotFound) {
 		t.Errorf("error = %v, want ErrInvitationNotFound", err)
+	}
+}
+
+// ─── RejectJoinRequest integration tests ─────────────────────────
+
+func TestRejectJoinRequest_Success(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+
+	if err := seed.Service.RejectJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("RejectJoinRequest: %v", err)
+	}
+
+	var req models.CommunityJoinRequest
+	if err := seed.DB.Where("id = ?", result.RequestID).First(&req).Error; err != nil {
+		t.Fatalf("join request not found: %v", err)
+	}
+	if req.Status != models.JoinRequestStatusRejected {
+		t.Errorf("join request status = %q, want %q", req.Status, models.JoinRequestStatusRejected)
+	}
+	if req.RespondedAt == nil {
+		t.Fatal("RespondedAt is nil, want non-nil")
+	}
+
+	// member should NOT have been added
+	var gmCount int64
+	seed.DB.Model(&models.GroupMember{}).Where("community_id = ? AND user_id = ?", community.ID, seed.MemberID).Count(&gmCount)
+	if gmCount != 0 {
+		t.Errorf("group_members count for member = %d, want 0", gmCount)
+	}
+}
+
+func TestRejectJoinRequest_AlreadyHandled(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("ApproveJoinRequest: %v", err)
+	}
+
+	err = seed.Service.RejectJoinRequest(ctx, seed.CreatorID, result.RequestID)
+	if err == nil {
+		t.Fatal("expected error for already handled, got nil")
+	}
+	if !errors.Is(err, validations.ErrJoinRequestAlreadyHandled) {
+		t.Errorf("error = %v, want ErrJoinRequestAlreadyHandled", err)
+	}
+}
+
+func TestRejectJoinRequest_NotAdmin(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+
+	err = seed.Service.RejectJoinRequest(ctx, seed.MemberID, result.RequestID)
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+func TestRejectJoinRequest_NotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	err := seed.Service.RejectJoinRequest(ctx, seed.CreatorID, "non-existent-request-id")
+	if err == nil {
+		t.Fatal("expected error for non-existent request, got nil")
+	}
+	if !errors.Is(err, validations.ErrJoinRequestNotFound) {
+		t.Errorf("error = %v, want ErrJoinRequestNotFound", err)
+	}
+}
+
+func TestRejectJoinRequest_SendsNotification(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Notif Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+
+	if err := seed.Service.RejectJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("RejectJoinRequest: %v", err)
+	}
+
+	n := assertNotificationExists(t, seed.DB, seed.MemberID, models.NotificationTypeCommunityJoinRejected)
+	if n.Content == "" {
+		t.Error("notification content is empty")
+	}
+}
+
+// ─── ListPendingRequests integration tests ─────────────────────
+
+func TestListPendingRequests_HasRequests(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Pending Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+
+	resp, err := seed.Service.ListPendingRequests(ctx, seed.CreatorID, community.ID)
+	if err != nil {
+		t.Fatalf("ListPendingRequests: %v", err)
+	}
+	if len(resp.Requests) != 1 {
+		t.Fatalf("got %d requests, want 1", len(resp.Requests))
+	}
+	if resp.Requests[0].UserID != seed.MemberID {
+		t.Errorf("request UserID = %q, want %q", resp.Requests[0].UserID, seed.MemberID)
+	}
+	if resp.Requests[0].DisplayName == "" {
+		t.Error("DisplayName is empty, want profile display name")
+	}
+}
+
+func TestListPendingRequests_Empty(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Empty Pending", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	resp, err := seed.Service.ListPendingRequests(ctx, seed.CreatorID, community.ID)
+	if err != nil {
+		t.Fatalf("ListPendingRequests: %v", err)
+	}
+	if len(resp.Requests) != 0 {
+		t.Fatalf("got %d requests, want 0", len(resp.Requests))
+	}
+}
+
+func TestListPendingRequests_NotAdmin(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Pending Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	_, err = seed.Service.ListPendingRequests(ctx, seed.MemberID, community.ID)
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+// ─── GetCommunityMembers integration tests ─────────────────────
+
+func TestGetCommunityMembers_HasMembers(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	resp, err := seed.Service.GetCommunityMembers(ctx, seed.CommunityID)
+	if err != nil {
+		t.Fatalf("GetCommunityMembers: %v", err)
+	}
+	if len(resp.Members) != 1 {
+		t.Fatalf("got %d members, want 1", len(resp.Members))
+	}
+	if resp.Members[0].UserID != seed.CreatorID {
+		t.Errorf("member UserID = %q, want %q", resp.Members[0].UserID, seed.CreatorID)
+	}
+}
+
+func TestGetCommunityMembers_NotFound(t *testing.T) {
+	seed := newCommunityTestSeed(t, false)
+	ctx := context.Background()
+
+	_, err := seed.Service.GetCommunityMembers(ctx, "non-existent-community-id")
+	if err == nil {
+		t.Fatal("expected error for non-existent community, got nil")
+	}
+	if !errors.Is(err, validations.ErrCommunityNotFound) {
+		t.Errorf("error = %v, want ErrCommunityNotFound", err)
+	}
+}
+
+// ─── UpdateMemberRole integration tests ────────────────────────
+
+func TestUpdateMemberRole_HappyPath(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	_, err = seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, ""); err == nil {
+		// need the request ID
+	}
+
+	// Find the join request to get the request ID
+	var req models.CommunityJoinRequest
+	seed.DB.Where("community_id = ? AND user_id = ?", community.ID, seed.MemberID).First(&req)
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, req.ID); err != nil {
+		t.Fatalf("ApproveJoinRequest: %v", err)
+	}
+
+	if err := seed.Service.UpdateMemberRole(ctx, seed.CreatorID, community.ID, seed.MemberID, "GROUP_MOD"); err != nil {
+		t.Fatalf("UpdateMemberRole: %v", err)
+	}
+
+	// Verify role was updated
+	var userRole models.UserRole
+	seed.DB.Where("user_id = ? AND scope_id = ?", seed.MemberID, community.ID).First(&userRole)
+	var role models.Role
+	seed.DB.Where("id = ?", userRole.RoleID).First(&role)
+	if role.Name != models.RoleGroupMod {
+		t.Errorf("role name = %q, want %q", role.Name, models.RoleGroupMod)
+	}
+
+	// Verify notification
+	n := assertNotificationExists(t, seed.DB, seed.MemberID, models.NotificationTypeCommunityRoleChanged)
+	if n.Content == "" {
+		t.Error("notification content is empty")
+	}
+}
+
+func TestUpdateMemberRole_InvalidRole(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.UpdateMemberRole(ctx, seed.CreatorID, community.ID, seed.MemberID, "INVALID_ROLE")
+	if err == nil {
+		t.Fatal("expected error for invalid role, got nil")
+	}
+}
+
+func TestUpdateMemberRole_CommunityNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	err := seed.Service.UpdateMemberRole(ctx, seed.CreatorID, "non-existent", seed.MemberID, "GROUP_MOD")
+	if err == nil {
+		t.Fatal("expected error for non-existent community, got nil")
+	}
+	if !errors.Is(err, validations.ErrCommunityNotFound) {
+		t.Errorf("error = %v, want ErrCommunityNotFound", err)
+	}
+}
+
+func TestUpdateMemberRole_NotAdmin(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.UpdateMemberRole(ctx, seed.MemberID, community.ID, seed.CreatorID, "GROUP_MOD")
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+func TestUpdateMemberRole_CannotChangeOwnRole(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.UpdateMemberRole(ctx, seed.CreatorID, community.ID, seed.CreatorID, "GROUP_MOD")
+	if err == nil {
+		t.Fatal("expected error for self-role-change, got nil")
+	}
+	if !errors.Is(err, validations.ErrCannotChangeOwnRole) {
+		t.Errorf("error = %v, want ErrCannotChangeOwnRole", err)
+	}
+}
+
+func TestUpdateMemberRole_MemberNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.UpdateMemberRole(ctx, seed.CreatorID, community.ID, "non-existent-user", "GROUP_MOD")
+	if err == nil {
+		t.Fatal("expected error for non-existent member, got nil")
+	}
+	if !errors.Is(err, validations.ErrMemberNotFound) {
+		t.Errorf("error = %v, want ErrMemberNotFound", err)
+	}
+}
+
+func TestUpdateMemberRole_CannotTargetAdmin(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	// Creator is the community admin — cannot change own role
+	err = seed.Service.UpdateMemberRole(ctx, seed.CreatorID, community.ID, seed.CreatorID, "GROUP_MOD")
+	if err == nil {
+		t.Fatal("expected error for targeting admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrCannotChangeOwnRole) {
+		t.Errorf("error = %v, want ErrCannotChangeOwnRole", err)
+	}
+}
+
+// ─── KickMember integration tests ──────────────────────────────
+
+func TestKickMember_HappyPath(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	// Join as member
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("ApproveJoinRequest: %v", err)
+	}
+
+	if err := seed.Service.KickMember(ctx, seed.CreatorID, community.ID, seed.MemberID, "Violating rules"); err != nil {
+		t.Fatalf("KickMember: %v", err)
+	}
+
+	// Verify member was removed
+	var gmCount int64
+	seed.DB.Model(&models.GroupMember{}).Where("community_id = ? AND user_id = ?", community.ID, seed.MemberID).Count(&gmCount)
+	if gmCount != 0 {
+		t.Errorf("group_members count for member = %d, want 0", gmCount)
+	}
+
+	// Verify notification
+	n := assertNotificationExists(t, seed.DB, seed.MemberID, models.NotificationTypeCommunityMemberKicked)
+	if n.Content == "" {
+		t.Error("notification content is empty")
+	}
+}
+
+func TestKickMember_EmptyReason(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.KickMember(ctx, seed.CreatorID, community.ID, seed.MemberID, "")
+	if err == nil {
+		t.Fatal("expected error for empty reason, got nil")
+	}
+	if !errors.Is(err, validations.ErrKickReasonRequired) {
+		t.Errorf("error = %v, want ErrKickReasonRequired", err)
+	}
+}
+
+func TestKickMember_ReasonTooShort(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.KickMember(ctx, seed.CreatorID, community.ID, seed.MemberID, "ab")
+	if err == nil {
+		t.Fatal("expected error for short reason, got nil")
+	}
+	if !errors.Is(err, validations.ErrKickReasonTooShort) {
+		t.Errorf("error = %v, want ErrKickReasonTooShort", err)
+	}
+}
+
+func TestKickMember_CommunityNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	err := seed.Service.KickMember(ctx, seed.CreatorID, "non-existent", seed.MemberID, "Valid reason")
+	if err == nil {
+		t.Fatal("expected error for non-existent community, got nil")
+	}
+	if !errors.Is(err, validations.ErrCommunityNotFound) {
+		t.Errorf("error = %v, want ErrCommunityNotFound", err)
+	}
+}
+
+func TestKickMember_NotAdmin(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.KickMember(ctx, seed.MemberID, community.ID, seed.CreatorID, "Valid reason")
+	if err == nil {
+		t.Fatal("expected error for non-admin, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+func TestKickMember_CannotKickSelf(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.KickMember(ctx, seed.CreatorID, community.ID, seed.CreatorID, "Valid reason")
+	if err == nil {
+		t.Fatal("expected error for self-kick, got nil")
+	}
+	if !errors.Is(err, validations.ErrCannotChangeOwnRole) {
+		t.Errorf("error = %v, want ErrCannotChangeOwnRole", err)
+	}
+}
+
+func TestKickMember_MemberNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.KickMember(ctx, seed.CreatorID, community.ID, "non-existent-user", "Valid reason")
+	if err == nil {
+		t.Fatal("expected error for non-existent member, got nil")
+	}
+	if !errors.Is(err, validations.ErrMemberNotFound) {
+		t.Errorf("error = %v, want ErrMemberNotFound", err)
+	}
+}
+
+func TestKickMember_CannotKickCreator(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	// Add a second admin
+	thirdID := seedUser(t, seed.DB)
+	scopeType := models.ScopeTypeCommunity
+	seed.DB.Create(&models.UserRole{
+		ID:         utils.GenerateUUID(),
+		UserID:     thirdID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &community.ID,
+		ScopeType:  &scopeType,
+		AssignedAt: time.Now().UTC(),
+	})
+	seed.DB.Create(&models.GroupMember{
+		ID:          utils.GenerateUUID(),
+		CommunityID: community.ID,
+		UserID:      thirdID,
+		JoinedAt:    time.Now().UTC(),
+	})
+
+	// Second admin tries to kick creator — should fail
+	err = seed.Service.KickMember(ctx, thirdID, community.ID, seed.CreatorID, "Valid reason")
+	if err == nil {
+		t.Fatal("expected error for kicking creator, got nil")
+	}
+	if !errors.Is(err, validations.ErrCannotKickCreator) {
+		t.Errorf("error = %v, want ErrCannotKickCreator", err)
+	}
+}
+
+// ─── LeaveCommunity integration tests ──────────────────────────
+
+func TestLeaveCommunity_HappyPath(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("ApproveJoinRequest: %v", err)
+	}
+
+	if err := seed.Service.LeaveCommunity(ctx, seed.MemberID, community.ID, false); err != nil {
+		t.Fatalf("LeaveCommunity: %v", err)
+	}
+
+	// Verify member was removed
+	var gmCount int64
+	seed.DB.Model(&models.GroupMember{}).Where("community_id = ? AND user_id = ?", community.ID, seed.MemberID).Count(&gmCount)
+	if gmCount != 0 {
+		t.Errorf("group_members count for member = %d, want 0", gmCount)
+	}
+}
+
+func TestLeaveCommunity_CommunityNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	err := seed.Service.LeaveCommunity(ctx, seed.MemberID, "non-existent", false)
+	if err == nil {
+		t.Fatal("expected error for non-existent community, got nil")
+	}
+	if !errors.Is(err, validations.ErrCommunityNotFound) {
+		t.Errorf("error = %v, want ErrCommunityNotFound", err)
+	}
+}
+
+func TestLeaveCommunity_MemberNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.LeaveCommunity(ctx, seed.MemberID, community.ID, false)
+	if err == nil {
+		t.Fatal("expected error for non-member, got nil")
+	}
+	if !errors.Is(err, validations.ErrMemberNotFound) {
+		t.Errorf("error = %v, want ErrMemberNotFound", err)
+	}
+}
+
+func TestLeaveCommunity_CreatorCannotLeave(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.LeaveCommunity(ctx, seed.CreatorID, community.ID, false)
+	if err == nil {
+		t.Fatal("expected error for creator leaving, got nil")
+	}
+	if !errors.Is(err, validations.ErrCreatorCannotLeave) {
+		t.Errorf("error = %v, want ErrCreatorCannotLeave", err)
+	}
+}
+
+// ─── TransferOwnership integration tests ───────────────────────
+
+func TestTransferOwnership_HappyPath(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	// Add member
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("ApproveJoinRequest: %v", err)
+	}
+
+	if err := seed.Service.TransferOwnership(ctx, seed.CreatorID, community.ID, seed.MemberID, false); err != nil {
+		t.Fatalf("TransferOwnership: %v", err)
+	}
+
+	// Verify creator changed
+	var updated models.Community
+	seed.DB.Where("id = ?", community.ID).First(&updated)
+	if updated.CreatorID != seed.MemberID {
+		t.Errorf("CreatorID = %q, want %q", updated.CreatorID, seed.MemberID)
+	}
+
+	// Verify notification
+	n := assertNotificationExists(t, seed.DB, seed.MemberID, models.NotificationTypeCommunityRoleChanged)
+	if n.Content == "" {
+		t.Error("notification content is empty")
+	}
+}
+
+func TestTransferOwnership_SelfTransfer(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	err = seed.Service.TransferOwnership(ctx, seed.CreatorID, community.ID, seed.CreatorID, false)
+	if err == nil {
+		t.Fatal("expected error for self-transfer, got nil")
+	}
+}
+
+func TestTransferOwnership_CommunityNotFound(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	err := seed.Service.TransferOwnership(ctx, seed.CreatorID, "non-existent", seed.MemberID, false)
+	if err == nil {
+		t.Fatal("expected error for non-existent community, got nil")
+	}
+	if !errors.Is(err, validations.ErrCommunityNotFound) {
+		t.Errorf("error = %v, want ErrCommunityNotFound", err)
+	}
+}
+
+func TestTransferOwnership_NotCreator(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	// Add member
+	result, err := seed.Service.RequestJoin(ctx, seed.MemberID, community.ID, "", "")
+	if err != nil {
+		t.Fatalf("RequestJoin: %v", err)
+	}
+	if err := seed.Service.ApproveJoinRequest(ctx, seed.CreatorID, result.RequestID); err != nil {
+		t.Fatalf("ApproveJoinRequest: %v", err)
+	}
+
+	// Member tries to transfer — not creator
+	err = seed.Service.TransferOwnership(ctx, seed.MemberID, community.ID, seed.CreatorID, false)
+	if err == nil {
+		t.Fatal("expected error for non-creator, got nil")
+	}
+}
+
+func TestTransferOwnership_TargetNotMember(t *testing.T) {
+	seed := newCreateCommunityTestSeed(t)
+	ctx := context.Background()
+
+	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	if err != nil {
+		t.Fatalf("CreateCommunity: %v", err)
+	}
+
+	// MemberID is not a member of this community
+	err = seed.Service.TransferOwnership(ctx, seed.CreatorID, community.ID, seed.MemberID, false)
+	if err == nil {
+		t.Fatal("expected error for non-member target, got nil")
+	}
+	if !errors.Is(err, validations.ErrMemberNotFound) {
+		t.Errorf("error = %v, want ErrMemberNotFound", err)
 	}
 }

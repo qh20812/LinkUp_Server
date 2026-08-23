@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"errors"
+	"log"
 	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/models"
@@ -94,10 +95,10 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 
 	var communityAdminRole, groupAdminRole models.Role
 	if err := s.repo.FindRoleByName(ctx, models.RoleCommunityAdmin, &communityAdminRole); err != nil {
-		return nil, nil, err
+		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	if err := s.repo.FindRoleByName(ctx, models.RoleGroupAdmin, &groupAdminRole); err != nil {
-		return nil, nil, err
+		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	userRoles[0].RoleID = communityAdminRole.ID
 	userRoles[1].RoleID = groupAdminRole.ID
@@ -118,7 +119,7 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 	adminParticipant.JoinedAt = now
 
 	if err := s.repo.CreateCommunityWithDefaultGroupChat(ctx, &community, &adminMember, userRoles, &chat, []models.ChatParticipant{adminParticipant}); err != nil {
-		return nil, nil, err
+		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	s.notifService.Create(ctx, creatorID, nil,
@@ -146,21 +147,6 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 	if !user.IsActive() {
 		return errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
-
-	src, err := file.Open()
-	if err != nil {
-		return errorsapp.New(errorsapp.ErrCodeImageReadFailed)
-	}
-	if _, _, err := validations.ValidateImageDimensions(src, validations.DimensionConstraint{
-		MinWidth:  800,
-		MinHeight: 400,
-		MaxWidth:  4096,
-		MaxHeight: 4096,
-	}); err != nil {
-		src.Close()
-		return err
-	}
-	src.Close()
 
 	media, err := s.mediaService.UploadMedia(ctx, userID, file)
 	if err != nil {
@@ -229,7 +215,7 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 		}
 
 		if err := s.repo.AddCommunityMemberAndGroupChat(ctx, community.ID, userID, groupChat.ID); err != nil {
-			return nil, err
+			return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 		}
 
 		s.notifService.Create(ctx, userID, &community.CreatorID,
@@ -245,7 +231,9 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 		return nil, validations.ErrJoinRequestPending
 	}
 
-	s.repo.DeleteNonPendingJoinRequests(ctx, community.ID, userID)
+	if err := s.repo.DeleteNonPendingJoinRequests(ctx, community.ID, userID); err != nil {
+		log.Printf("[community] failed to delete non-pending join requests for community %s: %v", community.ID, err)
+	}
 
 	now := time.Now().UTC()
 	joinReq := models.NewCommunityJoinRequest(community.ID, userID)
@@ -281,7 +269,7 @@ func (s *CommunityService) joinByCode(ctx context.Context, userID string, commun
 	}
 
 	if err := s.repo.AddCommunityMemberAndGroupChat(ctx, community.ID, userID, groupChat.ID); err != nil {
-		return nil, err
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	s.repo.IncrementInviteCodeUsedCount(ctx, nil, inviteCode.ID)
@@ -318,10 +306,12 @@ func (s *CommunityService) joinByInvitation(ctx context.Context, userID string, 
 	}
 
 	if err := s.repo.AddCommunityMemberAndGroupChat(ctx, community.ID, userID, groupChat.ID); err != nil {
-		return nil, err
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
-	s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusAccepted)
+	if err := s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusAccepted); err != nil {
+		log.Printf("[community] failed to update invitation %s status to accepted: %v", invitationID, err)
+	}
 
 	s.notifService.Create(ctx, userID, &invitation.InviterID,
 		models.NotificationTypeCommunityInvitationAccepted,
@@ -333,7 +323,10 @@ func (s *CommunityService) joinByInvitation(ctx context.Context, userID string, 
 
 func (s *CommunityService) ListPendingRequests(ctx context.Context, adminID, communityID string) (dto.JoinRequestListResponse, error) {
 	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
-		return dto.JoinRequestListResponse{}, validations.ErrNotCommunityAdmin
+		if _, ok := errorsapp.IsAppError(err); ok {
+			return dto.JoinRequestListResponse{}, validations.ErrNotCommunityAdmin
+		}
+		return dto.JoinRequestListResponse{}, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	requests, err := s.repo.FindPendingJoinRequestsByCommunity(ctx, communityID)
@@ -373,7 +366,10 @@ func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requ
 	}
 
 	if err := s.groupRole.RequireRole(ctx, req.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
-		return validations.ErrNotCommunityAdmin
+		if _, ok := errorsapp.IsAppError(err); ok {
+			return validations.ErrNotCommunityAdmin
+		}
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	groupChat, err := s.repo.FindDefaultGroupChatByCommunity(ctx, req.CommunityID)
@@ -382,7 +378,7 @@ func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requ
 	}
 
 	if err := s.repo.ApproveJoinRequest(ctx, requestID, &groupChat.ID); err != nil {
-		return err
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	s.notifService.Create(ctx, req.UserID, &adminID,
@@ -403,11 +399,14 @@ func (s *CommunityService) RejectJoinRequest(ctx context.Context, adminID, reque
 	}
 
 	if err := s.groupRole.RequireRole(ctx, req.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
-		return validations.ErrNotCommunityAdmin
+		if _, ok := errorsapp.IsAppError(err); ok {
+			return validations.ErrNotCommunityAdmin
+		}
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	if err := s.repo.RejectJoinRequest(ctx, requestID); err != nil {
-		return err
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	s.notifService.Create(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinRejected, "đã từ chối yêu cầu tham gia cộng đồng", nil, &adminID, nil)
@@ -425,7 +424,10 @@ func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, commun
 	}
 
 	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
-		return validations.ErrNotCommunityAdmin
+		if _, ok := errorsapp.IsAppError(err); ok {
+			return validations.ErrNotCommunityAdmin
+		}
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	if adminID == memberID {
@@ -473,7 +475,10 @@ func (s *CommunityService) KickMember(ctx context.Context, adminID, communityID,
 	}
 
 	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
-		return validations.ErrNotCommunityAdmin
+		if _, ok := errorsapp.IsAppError(err); ok {
+			return validations.ErrNotCommunityAdmin
+		}
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	if adminID == memberID {
@@ -547,7 +552,7 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 	}
 
 	if err := s.repo.RemoveMember(ctx, communityID, userID); err != nil {
-		return err
+		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
 	if quiet {
@@ -788,17 +793,21 @@ func (s *CommunityService) RespondInvitation(ctx context.Context, userID, invita
 		}
 
 		if err := s.repo.AddCommunityMemberAndGroupChat(ctx, invitation.CommunityID, userID, groupChat.ID); err != nil {
-			return err
+			return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 		}
 
-		s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusAccepted)
+		if err := s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusAccepted); err != nil {
+			log.Printf("[community] failed to update invitation %s status to accepted: %v", invitationID, err)
+		}
 
 		s.notifService.Create(ctx, userID, &invitation.InviterID,
 			models.NotificationTypeCommunityInvitationAccepted,
 			"Bạn đã tham gia cộng đồng theo lời mời",
 			nil, &invitation.CommunityID, nil)
 	} else {
-		s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusDeclined)
+		if err := s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusDeclined); err != nil {
+			log.Printf("[community] failed to update invitation %s status to declined: %v", invitationID, err)
+		}
 	}
 
 	return nil
@@ -915,6 +924,13 @@ func (s *CommunityService) GetCommunityPosts(ctx context.Context, communityID, v
 		t, parseErr := time.Parse(time.RFC3339Nano, *cursorCreatedAt)
 		if parseErr == nil {
 			cursorTime = &t
+			cursorIDVal = cursorID
+		}
+	} else if cursorID != nil {
+		// Bare UUID cursor — look up the post's created_at
+		post, err := s.postRepo.FindByID(ctx, *cursorID)
+		if err == nil && post != nil {
+			cursorTime = &post.CreatedAt
 			cursorIDVal = cursorID
 		}
 	}
