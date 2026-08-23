@@ -252,6 +252,24 @@ func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, c
 	return s.chatRepo.CreateMessage(ctx, &msg)
 }
 
+// DecryptMessageContent解密单条消息的Content字段（原地修改）。
+// 用于WebSocket广播前将密文转为明文，使客户端直接显示。
+func (s *GroupMessageService) DecryptMessageContent(ctx context.Context, msg *models.Message) error {
+	if msg.Content == "" {
+		return nil
+	}
+	key, err := s.chatRepo.GetEncryptionKey(ctx, msg.ChatID)
+	if err != nil {
+		return err
+	}
+	decrypted, err := utils.DecryptMessage(msg.Content, key)
+	if err != nil {
+		return err
+	}
+	msg.Content = decrypted
+	return nil
+}
+
 func (s *GroupMessageService) SetGroupCallRepository(repo *repository.GroupCallRepository) {
 	s.groupCallRepo = repo
 }

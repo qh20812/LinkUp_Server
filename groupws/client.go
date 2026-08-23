@@ -139,6 +139,10 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			for i := range history {
+				_ = c.messageService.DecryptMessageContent(c.ctx, &history[i])
+			}
+
 			msgs := make([]dto.MessagePayload, 0, len(history))
 			for _, m := range history {
 				msgs = append(msgs, dto.MessagePayload{
@@ -204,6 +208,8 @@ func (c *Client) ReadPump() {
 				c.sendError(err.Error())
 				continue
 			}
+
+			_ = c.messageService.DecryptMessageContent(c.ctx, msg)
 
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
 				Type: "group:message:new",

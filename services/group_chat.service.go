@@ -656,3 +656,26 @@ func (s *GroupChatService) EnsureGroupMember(ctx context.Context, chatID, userID
 	}
 	return nil
 }
+
+func (s *GroupChatService) ListGroupChatsForUser(ctx context.Context, userID string) ([]dto.GroupChatConversationDTO, error) {
+	chats, err := s.groupRepo.ListUserGroupChats(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range chats {
+		if chats[i].LastMessage == nil || chats[i].LastMessage.Content == "" {
+			continue
+		}
+		key, keyErr := s.chatRepo.GetEncryptionKey(ctx, chats[i].ChatID)
+		if keyErr != nil {
+			continue
+		}
+		decrypted, decErr := utils.DecryptMessage(chats[i].LastMessage.Content, key)
+		if decErr == nil {
+			chats[i].LastMessage.Content = decrypted
+		}
+	}
+
+	return chats, nil
+}

@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 type CreateGroupInput struct {
 	Name      string   `json:"name" binding:"required,min=3,max=50"`
 	AvatarURI string   `json:"avatar_uri"`
@@ -60,4 +62,17 @@ type UnmuteMemberInput struct {
 type GroupChatTransferOwnershipInput struct {
 	TargetUserID string `json:"target_user_id" binding:"required"`
 	KeepAdmin    bool   `json:"keep_admin"`
+}
+
+type GroupChatConversationDTO struct {
+	ChatID      string          `json:"chat_id"`
+	Name        string          `json:"name"`
+	AvatarURI   string          `json:"avatar_uri"`
+	MemberCount int             `json:"member_count"`
+	LastMessage *MessagePayload `json:"last_message,omitempty"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type GroupChatListResponse struct {
+	Data []GroupChatConversationDTO `json:"data"`
 }
