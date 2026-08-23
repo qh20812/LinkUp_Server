@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"linkup/dto"
 	errorsapp "linkup/errors"
@@ -16,17 +17,29 @@ import (
 	"gorm.io/gorm"
 )
 
+type GroupInviteContent struct {
+	RequestID    string `json:"request_id"`
+	ChatID       string `json:"chat_id"`
+	GroupName    string `json:"group_name"`
+	GroupAvatar  string `json:"group_avatar"`
+	RequesterID  string `json:"requester_id"`
+	RequesterName string `json:"requester_name"`
+	Status       string `json:"status"` // pending, accepted, rejected
+}
+
 type GroupChatService struct {
 	groupRepo    *repository.GroupChatRepository
-	chatRepo     *repository.ChatRepository // Inject thêm để hỗ trợ một số kiểm tra chéo nếu cần
+	chatRepo     *repository.ChatRepository
+	chatService  *ChatService
 	notifService *NotificationService
 	validation   *validations.GroupChatValidation
 }
 
-func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *repository.ChatRepository, notifService *NotificationService, validation *validations.GroupChatValidation) *GroupChatService {
+func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *repository.ChatRepository, chatService *ChatService, notifService *NotificationService, validation *validations.GroupChatValidation) *GroupChatService {
 	return &GroupChatService{
 		groupRepo:    groupRepo,
 		chatRepo:     chatRepo,
+		chatService:  chatService,
 		notifService: notifService,
 		validation:   validation,
 	}
@@ -282,7 +295,75 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 	requesterName := s.getDisplayName(ctx, requesterID)
 	s.createSystemMessage(ctx, chatID, fmt.Sprintf("%s đã được mời vào nhóm", requesterName), "member_invited")
 
+	_ = s.createGroupInviteMessage(ctx, chatID, req.ID, requesterID, newMemberID, requesterName)
+
 	return req.ID, nil
+}
+
+func (s *GroupChatService) createGroupInviteMessage(ctx context.Context, groupChatID, requestID, requesterID, targetUserID, requesterName string) error {
+	chat, err := s.chatRepo.FindChatByID(ctx, groupChatID)
+	if err != nil {
+		return err
+	}
+
+	directChat, _, err := s.chatService.GetOrCreateDirectChat(ctx, requesterID, targetUserID)
+	if err != nil {
+		return err
+	}
+
+	content := GroupInviteContent{
+		RequestID:     requestID,
+		ChatID:        groupChatID,
+		GroupName:     chat.Name,
+		GroupAvatar:   chat.AvatarURI,
+		RequesterID:   requesterID,
+		RequesterName: requesterName,
+		Status:        "pending",
+	}
+	contentJSON, _ := json.Marshal(content)
+
+	msg := models.NewMessage(directChat.ID, requesterID, string(contentJSON), nil, nil)
+	msg.ID = utils.GenerateUUID()
+	msg.Type = "group_invite"
+	msg.CreatedAt = time.Now().UTC()
+	_, err = s.chatRepo.CreateMessage(ctx, &msg)
+	return err
+}
+
+func (s *GroupChatService) updateGroupInviteStatus(ctx context.Context, requestID, status, requesterID, targetUserID string) error {
+	directChat, _, err := s.chatService.GetOrCreateDirectChat(ctx, requesterID, targetUserID)
+	if err != nil {
+		return err
+	}
+
+	type msgRow struct {
+		ID      string `gorm:"column:id"`
+		Content string `gorm:"column:content"`
+	}
+	var row msgRow
+	err = s.chatRepo.DB().WithContext(ctx).
+		Table("messages").
+		Select("id, content").
+		Where("chat_id = ? AND type = ? AND deleted_at IS NULL", directChat.ID, "group_invite").
+		Where("content LIKE ?", fmt.Sprintf("%%\"request_id\":\"%s\"%%", requestID)).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return err
+	}
+
+	var content GroupInviteContent
+	if err := json.Unmarshal([]byte(row.Content), &content); err != nil {
+		return err
+	}
+	content.Status = status
+	updatedJSON, _ := json.Marshal(content)
+
+	return s.chatRepo.DB().WithContext(ctx).
+		Model(&models.Message{}).
+		Where("id = ?", row.ID).
+		Update("content", string(updatedJSON)).Error
 }
 
 func (s *GroupChatService) AddMember(ctx context.Context, chatID, requesterID, newMemberID string) error {
@@ -605,6 +686,8 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 		return err
 	}
 
+	_ = s.updateGroupInviteStatus(ctx, requestID, "accepted", req.RequesterID, targetUserID)
+
 	if s.notifService != nil {
 		_, _ = s.notifService.Create(
 			ctx,
@@ -647,6 +730,8 @@ func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targ
 	if err := s.groupRepo.RejectMemberRequest(ctx, requestID); err != nil {
 		return err
 	}
+
+	_ = s.updateGroupInviteStatus(ctx, requestID, "rejected", req.RequesterID, targetUserID)
 
 	if s.notifService != nil {
 		_, _ = s.notifService.Create(ctx, req.RequesterID, &targetUserID, models.NotificationTypeMessage, "lời mời tham gia nhóm của bạn đã bị từ chối", nil, &targetUserID, &chatID)

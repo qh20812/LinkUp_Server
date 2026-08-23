@@ -22,6 +22,10 @@ func NewChatRepository(db *gorm.DB) *ChatRepository {
 	return &ChatRepository{db: db}
 }
 
+func (r *ChatRepository) DB() *gorm.DB {
+	return r.db
+}
+
 func (r *ChatRepository) FindChatByID(ctx context.Context, chatID string) (*models.Chat, error) {
 	var chat models.Chat
 	err := r.db.WithContext(ctx).Where("id = ?", chatID).First(&chat).Error
