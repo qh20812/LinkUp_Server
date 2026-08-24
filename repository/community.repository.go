@@ -181,6 +181,21 @@ func (r *CommunityRepository) UpdateBackground(ctx context.Context, communityID,
 		Update("background_uri", backgroundURI).Error
 }
 
+// UpdateCommunity cập nhật các trường của community (partial update).
+func (r *CommunityRepository) UpdateCommunity(ctx context.Context, communityID string, fields map[string]interface{}) error {
+	result := r.db.WithContext(ctx).
+		Model(&models.Community{}).
+		Where("id = ?", communityID).
+		Updates(fields)
+	if result.Error != nil {
+		return fmt.Errorf("cập nhật cộng đồng thất bại: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("không tìm thấy cộng đồng cần cập nhật")
+	}
+	return nil
+}
+
 // IsUserAdmin kiểm tra user có phải admin của community không (dựa trên user_roles).
 func (r *CommunityRepository) IsUserAdmin(ctx context.Context, communityID, userID string) (bool, error) {
 	var count int64

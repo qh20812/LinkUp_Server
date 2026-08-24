@@ -66,6 +66,8 @@ const (
 	ErrCodeBackgroundUploadFailed   = "community.BACKGROUND_UPLOAD_FAILED"
 	ErrCodeBackgroundRejected       = "community.BACKGROUND_REJECTED"
 	ErrCodeBackgroundUpdateFailed   = "community.BACKGROUND_UPDATE_FAILED"
+	ErrCodeCommunityUpdateFailed    = "community.UPDATE_FAILED"
+	ErrCodeCommunityUpdateNoFields  = "community.UPDATE_NO_FIELDS"
 	ErrCodeImageReadFailed          = "community.IMAGE_READ_FAILED"
 	ErrCodeJoinRequestFailed        = "community.JOIN_REQUEST_FAILED"
 	ErrCodeInviteCodeRequired       = "community.INVITE_CODE_REQUIRED"

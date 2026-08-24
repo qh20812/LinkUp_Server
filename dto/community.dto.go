@@ -101,6 +101,14 @@ type CommunityTransferOwnershipInput struct {
 	KeepAdmin    bool   `json:"keep_admin"`
 }
 
+// UpdateCommunityInput là input cho tính năng cập nhật thông tin cộng đồng.
+type UpdateCommunityInput struct {
+	Name        string  `json:"name" binding:"omitempty,min=3,max=100"`
+	Description *string `json:"description" binding:"omitempty,max=500"`
+	Privacy     *string `json:"privacy" binding:"omitempty,oneof=public code invitation_only"`
+	AutoApprove *bool   `json:"auto_approve" binding:"omitempty"`
+}
+
 // ── User-facing Community List/Detail ──
 
 type CommunityListItem struct {

@@ -116,6 +116,31 @@ func (ctrl *CommunityController) SetCommunityBackground(c *gin.Context) {
 	})
 }
 
+func (ctrl *CommunityController) UpdateCommunity(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+
+	communityID := c.Param("communityID")
+
+	var input dto.UpdateCommunityInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
+		return
+	}
+
+	if err := ctrl.communityService.UpdateCommunity(c.Request.Context(), userID.(string), communityID, input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Cập nhật cộng đồng thành công!",
+	})
+}
+
 func (ctrl *CommunityController) RequestJoin(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {

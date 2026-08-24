@@ -115,6 +115,8 @@ var Messages = map[string]string{
 	"community.BACKGROUND_UPLOAD_FAILED": "Tải ảnh background thất bại",
 	"community.BACKGROUND_REJECTED":    "Ảnh background vi phạm tiêu chuẩn cộng đồng",
 	"community.BACKGROUND_UPDATE_FAILED": "Cập nhật background cộng đồng thất bại",
+	"community.UPDATE_FAILED":           "Cập nhật cộng đồng thất bại",
+	"community.UPDATE_NO_FIELDS":        "Không có trường nào để cập nhật",
 	"community.IMAGE_READ_FAILED":      "Không thể đọc file ảnh",
 	"community.JOIN_REQUEST_FAILED":    "Gửi yêu cầu tham gia thất bại",
 	"community.INVITE_CODE_REQUIRED":   "Mã mời là bắt buộc",

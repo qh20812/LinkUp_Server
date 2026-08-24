@@ -64,6 +64,20 @@ func (v *CommunityValidation) ValidateCreateCommunity(name, description, avatarU
 	return nil
 }
 
+func (v *CommunityValidation) ValidateUpdateCommunity(name string, description *string) error {
+	if name != "" {
+		if err := v.ValidateName(name); err != nil {
+			return err
+		}
+	}
+	if description != nil {
+		if err := v.ValidateDescription(*description); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (v *CommunityValidation) ValidateName(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {

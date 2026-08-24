@@ -21,6 +21,7 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 		communityGroup.GET("/joined", ctrl.ListJoinedCommunities)
 		communityGroup.GET("/created", ctrl.ListCreatedCommunities)
 		communityGroup.POST("", ctrl.CreateCommunity)
+		communityGroup.PUT("/:communityID", ctrl.UpdateCommunity)
 		communityGroup.PUT("/:communityID/background", ctrl.SetCommunityBackground)
 		communityGroup.POST("/:communityID/join", ctrl.RequestJoin)
 		communityGroup.GET("/:communityID/join-requests", ctrl.ListPendingJoinRequests)

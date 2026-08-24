@@ -168,6 +168,57 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 	return nil
 }
 
+func (s *CommunityService) UpdateCommunity(ctx context.Context, userID, communityID string, input dto.UpdateCommunityInput) error {
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+		return err
+	}
+
+	if err := s.validation.ValidateUpdateCommunity(input.Name, input.Description); err != nil {
+		return err
+	}
+
+	fields := make(map[string]interface{})
+
+	if input.Name != "" {
+		community, err := s.repo.FindByID(ctx, communityID)
+		if err != nil {
+			return errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
+		}
+		if community.Name != input.Name {
+			taken, err := s.repo.IsNameTaken(ctx, input.Name)
+			if err != nil {
+				return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+			}
+			if taken {
+				return validations.ErrCommunityNameExists
+			}
+		}
+		fields["name"] = input.Name
+	}
+
+	if input.Description != nil {
+		fields["description"] = *input.Description
+	}
+
+	if input.Privacy != nil {
+		fields["privacy"] = models.ParseCommunityPrivacy(*input.Privacy)
+	}
+
+	if input.AutoApprove != nil {
+		fields["auto_approve"] = *input.AutoApprove
+	}
+
+	if len(fields) == 0 {
+		return errorsapp.New(errorsapp.ErrCodeCommunityUpdateNoFields)
+	}
+
+	if err := s.repo.UpdateCommunity(ctx, communityID, fields); err != nil {
+		return errorsapp.New(errorsapp.ErrCodeCommunityUpdateFailed)
+	}
+
+	return nil
+}
+
 func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID, inviteCode, invitationID string) (*dto.JoinResult, error) {
 	user, err := s.authRepo.FindByID(ctx, userID)
 	if err != nil {
