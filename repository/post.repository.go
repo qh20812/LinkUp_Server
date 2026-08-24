@@ -724,7 +724,7 @@ func (r *PostRepository) UnpinPost(ctx context.Context, postID string) error {
 }
 
 func (r *PostRepository) FetchMediaByUserID(ctx context.Context, userID string, offset, limit int) ([]models.Media, error) {
-	var media []models.Media
+	media := make([]models.Media, 0)
 	tx := r.db.WithContext(ctx).
 		Raw(`SELECT m.id, m.post_id, m.file_uri, m.file_type, m.file_size, m.created_at
 			FROM media m
