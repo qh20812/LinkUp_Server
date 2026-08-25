@@ -10,6 +10,7 @@ import (
 
 	"linkup/dto"
 	"linkup/services"
+	"linkup/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -177,6 +178,29 @@ func (c *Client) ReadPump() {
 			msgs = append(msgs, p)
 		}
 
+		replyIDs := make([]string, 0)
+		for _, m := range msgs {
+			if m.ReplyToMessageID != nil && *m.ReplyToMessageID != "" {
+				replyIDs = append(replyIDs, *m.ReplyToMessageID)
+			}
+		}
+		if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs); previews != nil {
+			if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
+				for _, preview := range previews {
+					if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+						preview.Content = decrypted
+					}
+				}
+			}
+			for i := range msgs {
+				if msgs[i].ReplyToMessageID != nil {
+					if preview, ok := previews[*msgs[i].ReplyToMessageID]; ok {
+						msgs[i].ReplyTo = preview
+					}
+				}
+			}
+		}
+
 			callDocs, err := c.messageService.GetGroupCallsByChatID(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
 				c.sendError(fmt.Sprintf("lấy lịch sử cuộc gọi thất bại: %v", err))
@@ -245,6 +269,18 @@ func (c *Client) ReadPump() {
 		if prof, ok := profiles[msg.SenderID]; ok {
 			newPayload.SenderName = prof.DisplayName
 			newPayload.SenderAvatar = prof.AvatarURI
+		}
+		if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
+			if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
+				if preview, ok := previews[*msg.ReplyToMessageID]; ok {
+					if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
+						if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+							preview.Content = decrypted
+						}
+					}
+					newPayload.ReplyTo = preview
+				}
+			}
 		}
 
 		c.hub.Broadcast(payload.ChatID, dto.WsEvent{

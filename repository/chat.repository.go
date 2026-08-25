@@ -157,6 +157,44 @@ func (r *ChatRepository) GetMessages(ctx context.Context, chatID, userID string)
 	return messages, nil
 }
 
+func (r *ChatRepository) GetReplyPreviews(ctx context.Context, messageIDs []string) map[string]*dto.ReplyPreview {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	type row struct {
+		ID          string `gorm:"column:id"`
+		Content     string `gorm:"column:content"`
+		SenderID    string `gorm:"column:sender_id"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Table("messages AS m").
+		Select(`m.id,
+			m.content,
+			m.sender_id,
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(p.avatar_uri, '') AS avatar_uri`).
+		Joins(`LEFT JOIN profiles AS p ON p.user_id = m.sender_id`).
+		Where("m.id IN ?", messageIDs).
+		Scan(&rows).Error
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]*dto.ReplyPreview, len(rows))
+	for _, r := range rows {
+		result[r.ID] = &dto.ReplyPreview{
+			ID:           r.ID,
+			Content:      r.Content,
+			SenderID:     r.SenderID,
+			SenderName:   r.DisplayName,
+			SenderAvatar: r.AvatarURI,
+		}
+	}
+	return result
+}
+
 func (r *ChatRepository) GetParticipantIDs(ctx context.Context, chatID string) ([]string, error) {
 	var userIDs []string
 	err := r.db.WithContext(ctx).

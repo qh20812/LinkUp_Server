@@ -320,6 +320,10 @@ func (s *GroupMessageService) SetGroupCallRepository(repo *repository.GroupCallR
 	s.groupCallRepo = repo
 }
 
+func (s *GroupMessageService) GetChatRepo() *repository.ChatRepository {
+	return s.chatRepo
+}
+
 func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {
 	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
 		return nil, err
