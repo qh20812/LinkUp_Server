@@ -172,6 +172,10 @@ func (s *GroupMessageService) SendMessage(
 			if participantID == userID {
 				continue
 			}
+			memberSettings, _ := s.groupRepo.GetMemberSettings(ctx, chatID, participantID)
+			if memberSettings != nil && !memberSettings.NotificationsEnabled {
+				continue
+			}
 			_, _ = s.notifService.Create(
 				ctx,
 				participantID,

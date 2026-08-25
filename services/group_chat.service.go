@@ -83,15 +83,17 @@ func (s *GroupChatService) CreateGroup(ctx context.Context, userID string, name,
 	}
 
 	if s.notifService != nil {
-		var addedIDs []string
+		var enabledIDs []string
 		for _, memberID := range memberIDs {
 			if memberID == userID || memberID == "" {
 				continue
 			}
-			addedIDs = append(addedIDs, memberID)
+			if s.isNotificationsEnabled(ctx, group.ID, memberID) {
+				enabledIDs = append(enabledIDs, memberID)
+			}
 		}
-		if len(addedIDs) > 0 {
-			_, _ = s.notifService.CreateBulk(ctx, addedIDs, &userID, models.NotificationTypeMessage, "đã thêm bạn vào nhóm "+group.Name, nil, &userID, &group.ID)
+		if len(enabledIDs) > 0 {
+			_, _ = s.notifService.CreateBulk(ctx, enabledIDs, &userID, models.NotificationTypeMessage, "đã thêm bạn vào nhóm "+group.Name, nil, &userID, &group.ID)
 		}
 	}
 
@@ -157,16 +159,24 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID, leave
 			content = "một thành viên đã công khai rời nhóm"
 		}
 
-		_, _ = s.notifService.CreateBulk(
-			ctx,
-			filtered,
-			&userID,
-			models.NotificationTypeMessage,
-			content,
-			nil,
-			nil,
-			nil,
-		)
+		var enabledIDs []string
+		for _, id := range filtered {
+			if s.isNotificationsEnabled(ctx, chatID, id) {
+				enabledIDs = append(enabledIDs, id)
+			}
+		}
+		if len(enabledIDs) > 0 {
+			_, _ = s.notifService.CreateBulk(
+				ctx,
+				enabledIDs,
+				&userID,
+				models.NotificationTypeMessage,
+				content,
+				nil,
+				nil,
+				nil,
+			)
+		}
 	}
 
 	return nil
@@ -206,7 +216,7 @@ func (s *GroupChatService) BanMember(ctx context.Context, chatID, adminID, targe
 		return err
 	}
 
-	if s.notifService != nil {
+	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, targetUserID) {
 		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, "bạn đã bị chặn khỏi nhóm chat", nil, &adminID, &chatID)
 	}
 
@@ -279,7 +289,7 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		return "", err
 	}
 
-	if s.notifService != nil {
+	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, newMemberID) {
 		_, _ = s.notifService.Create(
 			ctx,
 			newMemberID,
@@ -531,7 +541,7 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 		return err
 	}
 
-	if s.notifService != nil {
+	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, targetUserID) {
 		_, _ = s.notifService.Create(ctx, targetUserID, &requestID, models.NotificationTypeMessage, "bạn đã được chuyển quyền quản trị nhóm", nil, &requestID, &chatID)
 	}
 
@@ -568,7 +578,7 @@ func (s *GroupChatService) TransferOwnership(ctx context.Context, chatID, reques
 		return err
 	}
 
-	if s.notifService != nil {
+	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, targetUserID) {
 		_, _ = s.notifService.Create(ctx, targetUserID, &requesterID, models.NotificationTypeMessage, "bạn đã được chuyển quyền sở hữu nhóm", nil, &requesterID, &chatID)
 	}
 
@@ -627,7 +637,9 @@ func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targ
 		expiresStr = expiresAt.UTC().Format(time.RFC3339)
 	}
 	content := fmt.Sprintf("Bạn đã bị tắt tiếng trong nhóm (lý do: %s). Hết hạn: %s", reason, expiresStr)
-	_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+	if s.isNotificationsEnabled(ctx, chatID, targetUserID) {
+		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+	}
 
 	return mute, nil
 }
@@ -646,7 +658,9 @@ func (s *GroupChatService) UnmuteMember(ctx context.Context, chatID, adminID, ta
 	}
 
 	content := "Quyền gửi tin nhắn đã được mở lại trong nhóm."
-	_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+	if s.isNotificationsEnabled(ctx, chatID, targetUserID) {
+		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+	}
 	return nil
 }
 
@@ -688,7 +702,7 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 
 	_ = s.updateGroupInviteStatus(ctx, requestID, "accepted", req.RequesterID, targetUserID)
 
-	if s.notifService != nil {
+	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, req.RequesterID) {
 		_, _ = s.notifService.Create(
 			ctx,
 			req.RequesterID,
@@ -733,7 +747,7 @@ func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targ
 
 	_ = s.updateGroupInviteStatus(ctx, requestID, "rejected", req.RequesterID, targetUserID)
 
-	if s.notifService != nil {
+	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, req.RequesterID) {
 		_, _ = s.notifService.Create(ctx, req.RequesterID, &targetUserID, models.NotificationTypeMessage, "lời mời tham gia nhóm của bạn đã bị từ chối", nil, &targetUserID, &chatID)
 	}
 
@@ -784,4 +798,12 @@ func (s *GroupChatService) createSystemMessage(ctx context.Context, chatID, cont
 
 func (s *GroupChatService) getDisplayName(ctx context.Context, userID string) string {
 	return s.chatRepo.GetDisplayName(ctx, userID)
+}
+
+func (s *GroupChatService) isNotificationsEnabled(ctx context.Context, chatID, userID string) bool {
+	settings, err := s.groupRepo.GetMemberSettings(ctx, chatID, userID)
+	if err != nil || settings == nil {
+		return true
+	}
+	return settings.NotificationsEnabled
 }
