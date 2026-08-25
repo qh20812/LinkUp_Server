@@ -41,10 +41,12 @@ type GroupChatMemberSettingsResponse struct {
 }
 
 type GroupChatMemberDTO struct {
-	UserID      string `json:"user_id"`
-	DisplayName string `json:"display_name"`
-	AvatarURI   string `json:"avatar_uri"`
-	Role        string `json:"role"`
+	UserID      string     `json:"user_id"`
+	DisplayName string     `json:"display_name"`
+	AvatarURI   string     `json:"avatar_uri"`
+	Role        string     `json:"role"`
+	IsMuted     bool       `json:"is_muted"`
+	JoinedAt    time.Time  `json:"joined_at"`
 }
 
 type GroupChatSettingsResponse struct {
