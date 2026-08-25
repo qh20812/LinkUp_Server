@@ -9,7 +9,6 @@ type CommunityPrivacy string
 
 const (
 	PrivacyPublic         CommunityPrivacy = "public"
-	PrivacyCode           CommunityPrivacy = "code"
 	PrivacyInvitationOnly CommunityPrivacy = "invitation_only"
 )
 
@@ -67,8 +66,6 @@ func ParseCommunityStatus(value string) CommunityStatus {
 
 func ParseCommunityPrivacy(value string) CommunityPrivacy {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(PrivacyCode):
-		return PrivacyCode
 	case string(PrivacyInvitationOnly):
 		return PrivacyInvitationOnly
 	default:

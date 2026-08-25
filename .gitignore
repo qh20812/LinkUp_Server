@@ -1,4 +1,3 @@
-
 # Environment / secrets
 .env
 .env.*
@@ -16,7 +15,6 @@ private/
 
 # Build artifacts
 tmp/
-tmp/*
 bin/
 build/
 dist/
@@ -25,8 +23,6 @@ dist/
 *.dll
 *.so
 *.dylib
-tmp/main
-tmp/main.exe
 build-errors.log
 *.log
 
@@ -38,7 +34,6 @@ vendor/
 node_modules/
 .next/
 out/
-dist/
 
 # IDE / OS files
 .DS_Store
@@ -52,10 +47,9 @@ coverage.out
 coverage/
 *.coverprofile
 
+# Tool data (not part of app)
+.ua/
+gif-library/
 
-.env*
-.flaskenv*
-!.env.project
-!.env.vault
-
+# Agent instructions
 AGENTS.md

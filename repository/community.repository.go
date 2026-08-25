@@ -870,6 +870,7 @@ func mapRoleNameToGroupRole(name models.RoleName) models.GroupRole {
 func (r *CommunityRepository) ListCommunities(ctx context.Context, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
 	type communityRow struct {
 		ID          string    `gorm:"column:id"`
+		CreatorID   string    `gorm:"column:creator_id"`
 		Name        string    `gorm:"column:name"`
 		Description string    `gorm:"column:description"`
 		AvatarURI   string    `gorm:"column:avatar_uri"`
@@ -880,7 +881,7 @@ func (r *CommunityRepository) ListCommunities(ctx context.Context, keyword strin
 
 	query := r.db.WithContext(ctx).
 		Table("communities").
-		Select(`communities.id, communities.name, communities.description, communities.avatar_uri,
+		Select(`communities.id, communities.creator_id, communities.name, communities.description, communities.avatar_uri,
 			communities.privacy, communities.created_at,
 			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
 		Where("communities.status = ?", models.CommunityStatusActive)
@@ -905,6 +906,7 @@ func (r *CommunityRepository) ListCommunities(ctx context.Context, keyword strin
 	for _, row := range rows {
 		items = append(items, dto.CommunityListItem{
 			ID:          row.ID,
+			CreatorID:   row.CreatorID,
 			Name:        row.Name,
 			Description: row.Description,
 			AvatarURI:   row.AvatarURI,

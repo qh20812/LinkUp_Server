@@ -135,19 +135,20 @@ go build -o ./tmp/main.exe ./cmd
 │   ├── seed/                   # Seed database (main.go + schema/, internal/, 10 sub-packages)
 │   └── cloudinary-check/       # Standalone (không dùng trong app)
 ├── config/                     # Env parser (custom, singleton guard)
-├── controllers/                # HTTP handlers (Gin) — 22 files
-├── db/                         # Kết nối MySQL (*sql.DB)
+├── controllers/                # HTTP handlers (Gin) — 28 files
+├── db/                         # Kết nối MySQL (*sql.DB) + MongoDB (group calls)
 ├── docs/                       # Tài liệu (designs/, migrations/, postman/, test-case/)
+├── dto/                        # Data transfer objects — 27 files
 ├── errors/                     # App error codes & messages (errorsapp package)
 ├── groupws/                    # Group chat WebSocket Hub (riêng, không phải ws.Hub)
 ├── middlewares/                # Auth (JWT), RBAC, Prometheus metrics
-├── models/                     # GORM models — 57 files
-├── repository/                 # Database access layer (GORM + raw SQL)
-├── routes/                     # Route registration — 25 files
-├── services/                   # Business logic (PostService, etc. là interfaces)
-├── tests/                      # Validation tests (community, contribution, call)
+├── models/                     # GORM models — 58 files
+├── repository/                 # Database access layer (GORM + raw SQL) — 34 files
+├── routes/                     # Route registration — 26 files
+├── services/                   # Business logic (PostService, etc. là interfaces) — 34 files
+├── tests/                      # Validation tests (auth, call, community, contribution, settings)
 ├── utils/                      # JWT, encryption (AES-256-GCM), hash, UUID, email
-├── validations/                # Input validation — 13 validators (struct methods)
+├── validations/                # Input validation — 15 validators (struct methods)
 └── ws/                         # WebSocket hub, client, chat/call service interfaces
 ```
 
@@ -451,6 +452,12 @@ go test ./tests/contribution/... -v
 
 # Validation tests — call (DTO, model, history)
 go test ./tests/call/... -v
+
+# Validation tests — auth
+go test ./tests/auth/... -v
+
+# Validation tests — settings
+go test ./tests/settings/... -v
 
 # Service tests (một số cần TEST_DSN env var)
 go test ./services/... -v

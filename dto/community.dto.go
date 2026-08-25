@@ -105,7 +105,7 @@ type CommunityTransferOwnershipInput struct {
 type UpdateCommunityInput struct {
 	Name        string  `json:"name" binding:"omitempty,min=3,max=100"`
 	Description *string `json:"description" binding:"omitempty,max=500"`
-	Privacy     *string `json:"privacy" binding:"omitempty,oneof=public code invitation_only"`
+	Privacy     *string `json:"privacy" binding:"omitempty,oneof=public invitation_only"`
 	AutoApprove *bool   `json:"auto_approve" binding:"omitempty"`
 }
 
@@ -113,11 +113,13 @@ type UpdateCommunityInput struct {
 
 type CommunityListItem struct {
 	ID          string    `json:"id"`
+	CreatorID   string    `json:"-"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	AvatarURI   string    `json:"avatar_uri"`
 	Privacy     string    `json:"privacy"`
 	MemberCount int       `json:"member_count"`
+	IsCreator   bool      `json:"is_creator"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

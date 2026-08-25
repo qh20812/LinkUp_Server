@@ -1591,7 +1591,7 @@ func (s *AdminService) ListCommunities(ctx context.Context, userID string, input
 	privacy := strings.TrimSpace(strings.ToLower(input.Privacy))
 	if privacy != "" {
 		switch privacy {
-		case string(models.PrivacyPublic), string(models.PrivacyCode), string(models.PrivacyInvitationOnly):
+		case string(models.PrivacyPublic), string(models.PrivacyInvitationOnly):
 		default:
 			return dto.AdminCommunityListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}

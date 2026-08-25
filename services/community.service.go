@@ -242,8 +242,6 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID,
 	}
 
 	switch community.Privacy {
-	case models.PrivacyCode:
-		return s.joinByCode(ctx, userID, community, inviteCode)
 	case models.PrivacyInvitationOnly:
 		return s.joinByInvitation(ctx, userID, community, invitationID)
 	default:

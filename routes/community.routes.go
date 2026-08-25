@@ -10,8 +10,8 @@ import (
 )
 
 func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityController, env config.Env, db *gorm.DB) {
-	// Public routes — OptionalAuth so membership_status is returned when token present
-	router.GET("/api/communities", ctrl.ListCommunities)
+	// Public routes — OptionalAuth so membership_status and is_creator are returned when token present
+	router.GET("/api/communities", middlewares.OptionalAuth(env, db), ctrl.ListCommunities)
 	router.GET("/api/communities/:communityID", middlewares.OptionalAuth(env, db), ctrl.GetCommunityDetail)
 	router.GET("/api/communities/:communityID/posts", middlewares.OptionalAuth(env, db), ctrl.GetCommunityPosts)
 

@@ -529,6 +529,13 @@ func (ctrl *CommunityController) ListCommunities(c *gin.Context) {
 		return
 	}
 
+	userID, _ := c.Get("userID")
+	if uid, ok := userID.(string); ok && uid != "" {
+		for i := range result.Communities {
+			result.Communities[i].IsCreator = result.Communities[i].CreatorID == uid
+		}
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
