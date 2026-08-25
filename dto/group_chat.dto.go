@@ -23,6 +23,7 @@ type SendGroupMessageInput struct {
 	EmojiID          *string `json:"emoji_id"`
 	MediaID          *string `json:"media_id"`
 	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
+	SharedPostID     *string `json:"shared_post_id,omitempty"`
 }
 
 type GroupChatSettingsDTO struct {

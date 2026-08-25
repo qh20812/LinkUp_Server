@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
 	errorsapp "linkup/errors"
 	"linkup/repository"
@@ -16,6 +17,7 @@ type GroupMessageService struct {
 	chatRepo       *repository.ChatRepository
 	groupRepo      *repository.GroupChatRepository
 	mediaRepo      *repository.MediaRepository
+	postRepo       *repository.PostRepository
 	notifService   *NotificationService
 	validation     *validations.ChatValidation
 	groupCallRepo  *repository.GroupCallRepository
@@ -25,6 +27,7 @@ func NewGroupMessageService(
 	chatRepo *repository.ChatRepository,
 	groupRepo *repository.GroupChatRepository,
 	mediaRepo *repository.MediaRepository,
+	postRepo *repository.PostRepository,
 	notifService *NotificationService,
 	validation *validations.ChatValidation,
 ) *GroupMessageService {
@@ -32,6 +35,7 @@ func NewGroupMessageService(
 		chatRepo:     chatRepo,
 		groupRepo:    groupRepo,
 		mediaRepo:    mediaRepo,
+		postRepo:     postRepo,
 		notifService: notifService,
 		validation:   validation,
 	}
@@ -75,7 +79,7 @@ func (s *GroupMessageService) JoinRoom(ctx context.Context, userID, chatID strin
 func (s *GroupMessageService) SendMessage(
 	ctx context.Context,
 	userID, chatID, content string,
-	emojiID, mediaID, gifURL, replyToMessageID *string,
+	emojiID, mediaID, gifURL, replyToMessageID, sharedPostID *string,
 ) (*models.Message, error) {
 	chat, err := s.ensureGroupMember(ctx, userID, chatID)
 	if err != nil {
@@ -112,8 +116,16 @@ func (s *GroupMessageService) SendMessage(
 		mediaID = &gifMedia.ID
 	}
 
-	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
-		return nil, err
+	// Validate shared post first — a shared post IS the message content.
+	if sharedPostID != nil && *sharedPostID != "" {
+		post, err := s.postRepo.FindByID(ctx, *sharedPostID)
+		if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
+			return nil, fmt.Errorf("bài viết không tồn tại hoặc không khả dụng")
+		}
+	} else {
+		if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
+			return nil, err
+		}
 	}
 
 	if emojiID != nil && *emojiID != "" {
@@ -160,6 +172,10 @@ func (s *GroupMessageService) SendMessage(
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+	if sharedPostID != nil && *sharedPostID != "" {
+		msg.SharedPostID = sharedPostID
+		msg.Type = "shared_post"
+	}
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
 	if err != nil {
@@ -324,4 +340,42 @@ func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID,
 		return nil, nil
 	}
 	return s.groupCallRepo.FindByChatID(ctx, chatID)
+}
+
+func (s *GroupMessageService) LoadSharedPosts(ctx context.Context, messages []models.Message) map[string]*dto.SharedPostPayload {
+	postIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		if m.SharedPostID != nil && *m.SharedPostID != "" {
+			if _, ok := seen[*m.SharedPostID]; !ok {
+				postIDs = append(postIDs, *m.SharedPostID)
+				seen[*m.SharedPostID] = struct{}{}
+			}
+		}
+	}
+	if len(postIDs) == 0 {
+		return nil
+	}
+	posts, err := s.postRepo.FindByIDs(ctx, postIDs)
+	if err != nil || len(posts) == 0 {
+		return nil
+	}
+	result := make(map[string]*dto.SharedPostPayload, len(posts))
+	for i := range posts {
+		p := &posts[i]
+		result[p.ID] = &dto.SharedPostPayload{
+			ID:          p.ID,
+			UserID:      p.UserID,
+			Username:    p.Username,
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+			Title:       p.Title,
+			Content:     p.Content,
+		}
+		if len(p.Media) > 0 {
+			result[p.ID].MediaURI = p.Media[0].FileURI
+			result[p.ID].MediaType = p.Media[0].FileType
+		}
+	}
+	return result
 }

@@ -93,7 +93,7 @@ func (ctrl *VoiceCallController) HandleWebsocket(c *gin.Context) {
 		return
 	}
 
-	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, nil, ctrl.callService, userID)
+	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, nil, ctrl.callService, nil, userID)
 	ctrl.hub.RegisterClient(client)
 
 	go client.WritePump()

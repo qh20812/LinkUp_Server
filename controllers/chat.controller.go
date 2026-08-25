@@ -19,13 +19,15 @@ import (
 type ChatController struct {
 	hub         *ws.Hub
 	chatService *services.ChatService
+	postRepo    *repository.PostRepository
 	env         config.Env
 }
 
-func NewChatController(hub *ws.Hub, chatService *services.ChatService, env config.Env) *ChatController {
+func NewChatController(hub *ws.Hub, chatService *services.ChatService, postRepo *repository.PostRepository, env config.Env) *ChatController {
 	return &ChatController{
 		hub:         hub,
 		chatService: chatService,
+		postRepo:    postRepo,
 		env:         env,
 	}
 }
@@ -61,7 +63,7 @@ func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
 		return
 	}
 
-	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, claims.UserID)
+	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, ctrl.postRepo, claims.UserID)
 	ctrl.hub.RegisterClient(client)
 
 	go client.WritePump()
@@ -217,4 +219,37 @@ func (ctrl *ChatController) DeleteChat(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"error": "Xóa phòng chat thành công"})
+}
+
+type SharePostInput struct {
+	TargetUserID string `json:"target_user_id" binding:"required"`
+	SharedPostID string `json:"shared_post_id" binding:"required"`
+}
+
+func (ctrl *ChatController) SharePost(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	var input SharePostInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	chat, _, err := ctrl.chatService.GetOrCreateDirectChat(c.Request.Context(), userID, input.TargetUserID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	sharedPostID := input.SharedPostID
+	msg, err := ctrl.chatService.SendMessage(c.Request.Context(), userID, chat.ID, "", 0, nil, nil, nil, nil, &sharedPostID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Chia sẻ bài viết thành công",
+		"data":    msg,
+	})
 }

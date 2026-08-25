@@ -22,18 +22,20 @@ type ChatService struct {
 	friendRepo       *repository.FriendRepository
 	inviteRepo       *repository.ChatInvitationRepository
 	mediaRepo        *repository.MediaRepository
+	postRepo         *repository.PostRepository
 	userSettingsRepo *repository.UserSettingsRepository
 	profileRepo      *repository.ProfileRepository
 	notifService     *NotificationService
 	validation       *validations.ChatValidation
 }
 
-func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, userSettingsRepo *repository.UserSettingsRepository, profileRepo *repository.ProfileRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
+func NewChatService(chatRepo *repository.ChatRepository, friendRepo *repository.FriendRepository, inviteRepo *repository.ChatInvitationRepository, mediaRepo *repository.MediaRepository, postRepo *repository.PostRepository, userSettingsRepo *repository.UserSettingsRepository, profileRepo *repository.ProfileRepository, notifService *NotificationService, validation *validations.ChatValidation) *ChatService {
 	return &ChatService{
 		chatRepo:         chatRepo,
 		friendRepo:       friendRepo,
 		inviteRepo:       inviteRepo,
 		mediaRepo:        mediaRepo,
+		postRepo:         postRepo,
 		userSettingsRepo: userSettingsRepo,
 		profileRepo:      profileRepo,
 		notifService:     notifService,
@@ -52,7 +54,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID *string) (*models.Message, error) {
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID, sharedPostID *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -99,16 +101,25 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		mediaID = &gifMedia.ID
 	}
 
-	// Với tin nhắn E2E (e2eVersion == 1), nội dung đã được client mã hóa đầu cuối,
-	// server chỉ lưu ciphertext mà không thể (và không được phép) đọc. Bỏ qua
-	// giới hạn độ dài plaintext vì ciphertext luôn dài hơn.
-	validateErr := s.validation.ValidateSendMessage(content, emojiID, mediaID)
-	if validateErr != nil {
-		if e2eVersion != 1 {
-			return nil, validateErr
+	// Validate shared post first — a shared post IS the message content.
+	// When sharedPostID is provided, skip content/emoji/media validation.
+	if sharedPostID != nil && *sharedPostID != "" {
+		post, err := s.postRepo.FindByID(ctx, *sharedPostID)
+		if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
+			return nil, fmt.Errorf("bài viết không tồn tại hoặc không khả dụng")
 		}
-		if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
-			return nil, validateErr
+	} else {
+		// Với tin nhắn E2E (e2eVersion == 1), nội dung đã được client mã hóa đầu cuối,
+		// server chỉ lưu ciphertext mà không thể (và không được phép) đọc. Bỏ qua
+		// giới hạn độ dài plaintext vì ciphertext luôn dài hơn.
+		validateErr := s.validation.ValidateSendMessage(content, emojiID, mediaID)
+		if validateErr != nil {
+			if e2eVersion != 1 {
+				return nil, validateErr
+			}
+			if strings.TrimSpace(content) == "" && emojiID == nil && mediaID == nil {
+				return nil, validateErr
+			}
 		}
 	}
 
@@ -146,6 +157,10 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+	if sharedPostID != nil && *sharedPostID != "" {
+		msg.SharedPostID = sharedPostID
+		msg.Type = "shared_post"
+	}
 
 	if e2eVersion == 1 {
 		// E2E: lưu ciphertext client-gửi nguyên trạng, server không mã hóa lại.

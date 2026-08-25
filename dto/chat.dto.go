@@ -21,6 +21,7 @@ type SendMessagePayload struct {
 	MediaID          *string `json:"media_id,omitempty"`
 	GifURL           *string `json:"gif_url,omitempty"`
 	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
+	SharedPostID     *string `json:"shared_post_id,omitempty"`
 	E2EVersion       int     `json:"e2e_version,omitempty"`
 }
 
@@ -32,6 +33,8 @@ type MessagePayload struct {
 	EmojiID          *string   `json:"emoji_id,omitempty"`
 	MediaID          *string   `json:"media_id,omitempty"`
 	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
+	SharedPostID     *string   `json:"shared_post_id,omitempty"`
+	SharedPost       *SharedPostPayload `json:"shared_post,omitempty"`
 	SenderName       string    `json:"sender_name,omitempty"`
 	SenderAvatar     string    `json:"sender_avatar,omitempty"`
 	Type             string    `json:"type,omitempty"`
@@ -40,6 +43,18 @@ type MessagePayload struct {
 	E2EVersion       int       `json:"e2e_version,omitempty"`
 	Deleted          bool      `json:"deleted"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+type SharedPostPayload struct {
+	ID          string  `json:"id"`
+	UserID      string  `json:"user_id"`
+	Username    string  `json:"username"`
+	DisplayName string  `json:"display_name"`
+	AvatarURI   string  `json:"avatar_uri"`
+	Title       string  `json:"title"`
+	Content     string  `json:"content"`
+	MediaURI    string  `json:"media_uri,omitempty"`
+	MediaType   string  `json:"media_type,omitempty"`
 }
 
 type TypingPayload struct {

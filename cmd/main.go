@@ -205,10 +205,10 @@ func main() {
 		friendRepository = repository.NewFriendRepository(gormDB)
 		inviteRepository := repository.NewChatInvitationRepository(gormDB)
 		chatValidation := validations.NewChatValidation()
-		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, userSettingsRepository, profileRepository, notificationService, chatValidation)
+		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, postRepository, userSettingsRepository, profileRepository, notificationService, chatValidation)
 		chatHub := ws.NewHub()
 		go chatHub.Run()
-		chatController := controllers.NewChatController(chatHub, chatService, env)
+		chatController := controllers.NewChatController(chatHub, chatService, postRepository, env)
 		routes.RegisterChatRoutes(router, chatController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG PRESENCE (ONLINE/OFFLINE STATUS) =====
@@ -231,7 +231,7 @@ func main() {
 		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, chatService, notificationService, validations.NewGroupChatValidation())
 		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env, gormDB)
-		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, notificationService, chatValidation)
+		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, postRepository, notificationService, chatValidation)
 		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env, gormDB)
 
 		// ===== KHỞI TẠO COMMUNITY (NHÓM CỘNG ĐỒNG BÀI VIẾT) =====

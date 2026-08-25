@@ -10,6 +10,7 @@ import (
 
 	"linkup/dto"
 	"linkup/models"
+	"linkup/repository"
 
 	"github.com/gorilla/websocket"
 )
@@ -27,19 +28,21 @@ type Client struct {
 	hub         *Hub
 	service     ChatService
 	callService CallService
+	postRepo    *repository.PostRepository
 	userID      string
 	send        chan []byte
 	joinedChats map[string]struct{}
 	typingChats map[string]bool
 }
 
-func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, callService CallService, userID string) *Client {
+func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, callService CallService, postRepo *repository.PostRepository, userID string) *Client {
 	return &Client{
 		ctx:         ctx,
 		conn:        conn,
 		hub:         hub,
 		service:     service,
 		callService: callService,
+		postRepo:    postRepo,
 		userID:      userID,
 		send:        make(chan []byte, 256),
 		joinedChats: make(map[string]struct{}),
@@ -102,11 +105,16 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			var sharedPosts map[string]*dto.SharedPostPayload
+			if c.postRepo != nil {
+				sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
+			}
+
 			resp, _ := json.Marshal(dto.WsEvent{
 				Type: "message:history",
 				Payload: mustMarshal(map[string]any{
 					"chat_id":  payload.ChatID,
-					"messages": toMessagePayloads(history, c.userID),
+					"messages": toMessagePayloads(history, c.userID, sharedPosts),
 				}),
 			})
 			c.send <- resp
@@ -118,7 +126,7 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID, payload.SharedPostID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
@@ -144,9 +152,18 @@ func (c *Client) ReadPump() {
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
 				ReplyToMessageID: msg.ReplyToMessageID,
+				SharedPostID:     msg.SharedPostID,
 				Type:             msg.Type,
 				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
+			}
+
+			if msg.SharedPostID != nil && *msg.SharedPostID != "" && c.postRepo != nil {
+				if sharedPosts := loadSharedPostsForMessages(c.ctx, []models.Message{*msg}, c.postRepo); sharedPosts != nil {
+					if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
+						messagePayload.SharedPost = sp
+					}
+				}
 			}
 
 			resp, _ := json.Marshal(dto.WsEvent{
@@ -438,7 +455,11 @@ func mustMarshal(v any) json.RawMessage {
 	return out
 }
 
-func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePayload {
+func toMessagePayloads(messages []models.Message, userID string, sharedPosts ...map[string]*dto.SharedPostPayload) []dto.MessagePayload {
+	var postsMap map[string]*dto.SharedPostPayload
+	if len(sharedPosts) > 0 {
+		postsMap = sharedPosts[0]
+	}
 	result := make([]dto.MessagePayload, 0, len(messages))
 	for _, msg := range messages {
 		deleted := isMessageDeletedFor(msg, userID)
@@ -446,7 +467,7 @@ func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePa
 		if deleted {
 			content = ""
 		}
-		result = append(result, dto.MessagePayload{
+		payload := dto.MessagePayload{
 			ID:               msg.ID,
 			ChatID:           msg.ChatID,
 			SenderID:         msg.SenderID,
@@ -454,11 +475,56 @@ func toMessagePayloads(messages []models.Message, userID string) []dto.MessagePa
 			EmojiID:          msg.EmojiID,
 			MediaID:          msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
+			SharedPostID:     msg.SharedPostID,
 			Type:             msg.Type,
 			E2EVersion:       msg.E2EVersion,
 			Deleted:          deleted,
 			CreatedAt:        msg.CreatedAt,
-		})
+		}
+		if postsMap != nil && msg.SharedPostID != nil {
+			if sp, ok := postsMap[*msg.SharedPostID]; ok {
+				payload.SharedPost = sp
+			}
+		}
+		result = append(result, payload)
+	}
+	return result
+}
+
+func loadSharedPostsForMessages(ctx context.Context, messages []models.Message, postRepo *repository.PostRepository) map[string]*dto.SharedPostPayload {
+	postIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		if m.SharedPostID != nil && *m.SharedPostID != "" {
+			if _, ok := seen[*m.SharedPostID]; !ok {
+				postIDs = append(postIDs, *m.SharedPostID)
+				seen[*m.SharedPostID] = struct{}{}
+			}
+		}
+	}
+	if len(postIDs) == 0 {
+		return nil
+	}
+	posts, err := postRepo.FindByIDs(ctx, postIDs)
+	if err != nil || len(posts) == 0 {
+		return nil
+	}
+	result := make(map[string]*dto.SharedPostPayload, len(posts))
+	for i := range posts {
+		p := &posts[i]
+		result[p.ID] = &dto.SharedPostPayload{
+			ID:          p.ID,
+			UserID:      p.UserID,
+			Username:    p.Username,
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+			Title:       p.Title,
+			Content:     p.Content,
+		}
+		if len(p.Media) > 0 {
+			result[p.ID].MediaURI = p.Media[0].FileURI
+			result[p.ID].MediaType = p.Media[0].FileType
+		}
 	}
 	return result
 }

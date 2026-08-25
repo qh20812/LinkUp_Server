@@ -278,6 +278,41 @@ func (r *PostRepository) BatchCheckShared(ctx context.Context, userID string, po
 	return m, nil
 }
 
+// BatchLoadSharedPosts loads the original posts for reposts (shared_from_post_id IS NOT NULL).
+// Returns a map[sharedPostID]originalPost.
+func (r *PostRepository) BatchLoadSharedPosts(ctx context.Context, posts []models.Post) (map[string]*models.Post, error) {
+	var originalIDs []string
+	for _, p := range posts {
+		if p.SharedFromPostID != nil && *p.SharedFromPostID != "" {
+			originalIDs = append(originalIDs, *p.SharedFromPostID)
+		}
+	}
+	if len(originalIDs) == 0 {
+		return map[string]*models.Post{}, nil
+	}
+
+	var originals []models.Post
+	err := r.db.WithContext(ctx).
+		Table("posts").
+		Select(`posts.*,
+			users.username,
+			COALESCE(profiles.display_name, users.username) AS display_name,
+			COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
+		Where("posts.id IN ? AND posts.status = ?", originalIDs, models.PostStatusPublic).
+		Find(&originals).Error
+	if err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]*models.Post, len(originals))
+	for i := range originals {
+		m[originals[i].ID] = &originals[i]
+	}
+	return m, nil
+}
+
 func (r *PostRepository) CountActive(ctx context.Context, userID *string) (int64, error) {
 	var count int64
 	q := r.db.WithContext(ctx).Model(&models.Post{}).
@@ -304,6 +339,36 @@ func (r *PostRepository) FindByID(ctx context.Context, id string) (*models.Post,
 		return nil, err
 	}
 	return &post, nil
+}
+
+func (r *PostRepository) FindByIDs(ctx context.Context, ids []string) ([]models.Post, error) {
+	var posts []models.Post
+	err := r.db.WithContext(ctx).
+		Table("posts").
+		Select(`posts.*,
+			(SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
+			(SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
+			(SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count,
+			users.username,
+			COALESCE(profiles.display_name, users.username) AS display_name,
+			COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
+		Where("posts.id IN ?", ids).
+		Find(&posts).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(posts) > 0 {
+		mediaRepo := NewMediaRepository(r.db)
+		mediaMap, _ := mediaRepo.GetByPostIDs(ctx, ids)
+		for i := range posts {
+			if media, ok := mediaMap[posts[i].ID]; ok {
+				posts[i].Media = media
+			}
+		}
+	}
+	return posts, nil
 }
 
 func (r *PostRepository) IncrementViewsCount(ctx context.Context, id string) error {

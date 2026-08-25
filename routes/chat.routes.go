@@ -24,5 +24,6 @@ func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, en
 
 		chatGroup.GET("/messages/:messageID/download", ctrl.DownloadMessageMedia)
 		chatGroup.DELETE("/:chatID", ctrl.DeleteChat)
+		chatGroup.POST("/share", ctrl.SharePost)
 	}
 }

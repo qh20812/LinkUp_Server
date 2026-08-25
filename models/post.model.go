@@ -28,6 +28,9 @@ type Post struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
 
+	SharedFromPostID *string `json:"shared_from_post_id,omitempty"`
+	ShareContent     *string `json:"share_content,omitempty"`
+
 	LikesCount    int `json:"likes_count" gorm:"->"`
 	CommentsCount int `json:"comments_count" gorm:"->"`
 	SharesCount   int `json:"shares_count" gorm:"->"`
@@ -36,7 +39,8 @@ type Post struct {
 	DisplayName string `json:"display_name" gorm:"->"`
 	AvatarURI   string `json:"avatar_uri" gorm:"->"`
 
-	Media []Media `json:"media" gorm:"-"`
+	Media      []Media `json:"media" gorm:"-"`
+	SharedPost *Post   `json:"shared_post,omitempty" gorm:"-"`
 
 	IsLiked     bool `json:"is_liked" gorm:"->"`
 	IsSaved     bool `json:"is_saved" gorm:"->"`

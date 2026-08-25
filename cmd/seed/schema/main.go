@@ -883,6 +883,10 @@ func Run(env config.Env) error {
 	if err := addColumnIfMissing(database, "messages", "e2e_version", "INT NOT NULL DEFAULT 0"); err != nil {
 		return fmt.Errorf("schema: add e2e_version: %w", err)
 	}
+	// 31c. Message type column (text, shared_post, member_invited, etc.)
+	if err := addColumnIfMissing(database, "messages", "type", "VARCHAR(20) NOT NULL DEFAULT 'text'"); err != nil {
+		return fmt.Errorf("schema: add messages.type: %w", err)
+	}
 
 	// Phase 1: Admin Manage Groups/Communities — idempotent column additions
 
@@ -1001,6 +1005,31 @@ func Run(env config.Env) error {
 	// Self deactivation column (user deactivates own account; reactivates on login)
 	if err := addColumnIfMissing(database, "users", "self_deactivated_at", "DATETIME NULL"); err != nil {
 		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)
+	}
+
+	// Share-to-chat column on messages
+	if err := addColumnIfMissing(database, "messages", "shared_post_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add messages.shared_post_id: %w", err)
+	}
+	if err := addForeignKeyIfMissing(database, "messages", "fk_messages_shared_post",
+		"CONSTRAINT fk_messages_shared_post FOREIGN KEY (shared_post_id) REFERENCES posts(id) ON DELETE SET NULL"); err != nil {
+		return fmt.Errorf("schema: add fk_messages_shared_post: %w", err)
+	}
+
+	// Repost / Share-to-timeline columns on posts
+	if err := addColumnIfMissing(database, "posts", "shared_from_post_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.shared_from_post_id: %w", err)
+	}
+	if err := addColumnIfMissing(database, "posts", "share_content", "TEXT NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.share_content: %w", err)
+	}
+	if err := addIndexIfMissing(database, "posts", "idx_posts_shared_from",
+		"INDEX idx_posts_shared_from (shared_from_post_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_posts_shared_from: %w", err)
+	}
+	if err := addForeignKeyIfMissing(database, "posts", "fk_posts_shared_from",
+		"CONSTRAINT fk_posts_shared_from FOREIGN KEY (shared_from_post_id) REFERENCES posts(id) ON DELETE CASCADE"); err != nil {
+		return fmt.Errorf("schema: add fk_posts_shared_from: %w", err)
 	}
 
 	return nil

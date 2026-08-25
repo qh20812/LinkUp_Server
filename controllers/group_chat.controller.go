@@ -125,6 +125,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		input.MediaID,
 		nil,
 		input.ReplyToMessageID,
+		input.SharedPostID,
 	)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)

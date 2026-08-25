@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"linkup/dto"
+	"linkup/models"
 	"linkup/services"
 
 	"github.com/gorilla/websocket"
@@ -154,6 +155,7 @@ func (c *Client) ReadPump() {
 			}
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
+		sharedPosts := c.messageService.LoadSharedPosts(c.ctx, history)
 
 		msgs := make([]dto.MessagePayload, 0, len(history))
 		for _, m := range history {
@@ -165,6 +167,7 @@ func (c *Client) ReadPump() {
 				EmojiID:          m.EmojiID,
 				MediaID:          m.MediaID,
 				ReplyToMessageID: m.ReplyToMessageID,
+				SharedPostID:     m.SharedPostID,
 				Type:             m.Type,
 				IsAnonymized:     m.IsAnonymized,
 				AnonymousName:    m.AnonymousName,
@@ -173,6 +176,11 @@ func (c *Client) ReadPump() {
 			if prof, ok := profiles[m.SenderID]; ok {
 				p.SenderName = prof.DisplayName
 				p.SenderAvatar = prof.AvatarURI
+			}
+			if sharedPosts != nil && m.SharedPostID != nil {
+				if sp, ok := sharedPosts[*m.SharedPostID]; ok {
+					p.SharedPost = sp
+				}
 			}
 			msgs = append(msgs, p)
 		}
@@ -222,6 +230,7 @@ func (c *Client) ReadPump() {
 			payload.MediaID,
 			payload.GifURL,
 			payload.ReplyToMessageID,
+			payload.SharedPostID,
 		)
 			if err != nil {
 				c.sendError(err.Error())
@@ -238,6 +247,7 @@ func (c *Client) ReadPump() {
 			EmojiID:          msg.EmojiID,
 			MediaID:          msg.MediaID,
 			ReplyToMessageID: msg.ReplyToMessageID,
+			SharedPostID:     msg.SharedPostID,
 			Type:             msg.Type,
 			CreatedAt:        msg.CreatedAt,
 		}
@@ -245,6 +255,14 @@ func (c *Client) ReadPump() {
 		if prof, ok := profiles[msg.SenderID]; ok {
 			newPayload.SenderName = prof.DisplayName
 			newPayload.SenderAvatar = prof.AvatarURI
+		}
+
+		if msg.SharedPostID != nil && *msg.SharedPostID != "" {
+			if sharedPosts := c.messageService.LoadSharedPosts(c.ctx, []models.Message{*msg}); sharedPosts != nil {
+				if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
+					newPayload.SharedPost = sp
+				}
+			}
 		}
 
 		c.hub.Broadcast(payload.ChatID, dto.WsEvent{

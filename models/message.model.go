@@ -10,6 +10,7 @@ type Message struct {
 	MediaID            *string    `json:"media_id,omitempty" db:"media_id"`
 	EmojiID            *string    `json:"emoji_id,omitempty" db:"emoji_id"`
 	ReplyToMessageID   *string    `json:"reply_to_message_id,omitempty" db:"reply_to_message_id"`
+	SharedPostID       *string    `json:"shared_post_id,omitempty" db:"shared_post_id"`
 	IsAnonymized       bool       `json:"is_anonymized" db:"is_anonymized"`
 	AnonymousName      *string    `json:"anonymous_name,omitempty" db:"anonymous_name"`
 	E2EVersion         int        `json:"e2e_version" db:"e2e_version" gorm:"column:e2e_version"`

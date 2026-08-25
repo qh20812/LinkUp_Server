@@ -254,6 +254,8 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 				}
 			}
 		}
+
+		s.loadSharedPosts(ctx, posts)
 	}
 
 	var nextCursor string
@@ -344,6 +346,8 @@ func (s *postService) GetSavedPosts(ctx context.Context, userID string, cursor s
 				}
 			}
 		}
+
+		s.loadSharedPosts(ctx, posts)
 	}
 
 	var nextCursor string
@@ -448,6 +452,8 @@ func (s *postService) GetUserPosts(ctx context.Context, targetUserID, viewerID, 
 				}
 			}
 		}
+
+		s.loadSharedPosts(ctx, posts)
 	}
 
 	var nextCursor string
@@ -479,6 +485,11 @@ func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models
 				post.Media = m
 			}
 		}
+	}
+
+	// Load shared post (repost)
+	if post.SharedFromPostID != nil {
+		s.loadSharedPosts(ctx, []models.Post{*post})
 	}
 
 	return post, nil
@@ -640,6 +651,22 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 		return errorsapp.New(errorsapp.ErrCodePostAlreadyShared)
 	}
 
+	// Tạo post mới trên timeline (repost)
+	sharedFromPostID := postID
+	sharedPost := models.NewPost(userID, "", content, models.PostStatusPublic)
+	sharedPost.ID = utils.GenerateUUID()
+	sharedPost.CreatedAt = time.Now()
+	sharedPost.SharedFromPostID = &sharedFromPostID
+	if content != "" {
+		sharedPost.ShareContent = &content
+	}
+	sharedPost.Title = ""
+
+	if err := s.repo.Create(ctx, &sharedPost); err != nil {
+		return err
+	}
+
+	// Vẫn tạo PostShare record để đếm share count + check is_shared
 	share := models.NewPostShare(userID, postID, content)
 	share.ID = utils.GenerateUUID()
 	share.CreatedAt = time.Now()
@@ -653,6 +680,47 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 	}
 
 	return nil
+}
+
+// loadSharedPosts batch-loads original posts for reposts and attaches media.
+func (s *postService) loadSharedPosts(ctx context.Context, posts []models.Post) {
+	sharedMap, err := s.repo.BatchLoadSharedPosts(ctx, posts)
+	if err != nil || len(sharedMap) == 0 {
+		return
+	}
+
+	// Thu thập ID bài gốc để batch-load media
+	var originalIDs []string
+	for _, p := range posts {
+		if p.SharedFromPostID != nil {
+			if orig, ok := sharedMap[*p.SharedFromPostID]; ok {
+				originalIDs = append(originalIDs, orig.ID)
+			}
+		}
+	}
+
+	mediaMap := map[string][]models.Media{}
+	if s.mediaService != nil && len(originalIDs) > 0 {
+		if m, errM := s.mediaService.GetByPostIDs(ctx, originalIDs); errM == nil {
+			mediaMap = m
+		}
+	}
+
+	for i := range posts {
+		if posts[i].SharedFromPostID == nil {
+			continue
+		}
+		orig, ok := sharedMap[*posts[i].SharedFromPostID]
+		if !ok {
+			continue
+		}
+		if m, ok := mediaMap[orig.ID]; ok {
+			orig.Media = m
+		} else {
+			orig.Media = []models.Media{}
+		}
+		posts[i].SharedPost = orig
+	}
 }
 
 // Bấm lưu bài viết lần nữa hệ thống tự hiểu và xóa (Toggle Bookmark)
