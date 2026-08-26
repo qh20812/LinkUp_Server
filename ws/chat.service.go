@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"linkup/dto"
 	"linkup/models"
 )
 
@@ -13,4 +14,6 @@ type ChatService interface {
 	SearchMessages(ctx context.Context, userID, chatID, keyword string) ([]models.Message, error)
 	GetAllMessagesDecrypted(ctx context.Context, userID, chatID string) ([]models.Message, error)
 	DecryptMessage(ctx context.Context, chatID, encryptedContent string) (string, error)
+	GetEncryptionKey(ctx context.Context, chatID string) (string, error)
+	GetReplyPreviews(ctx context.Context, messageIDs []string) map[string]*dto.ReplyPreview
 }

@@ -26,23 +26,32 @@ type SendMessagePayload struct {
 }
 
 type MessagePayload struct {
-	ID               string    `json:"id"`
-	ChatID           string    `json:"chat_id"`
-	SenderID         string    `json:"sender_id"`
-	Content          string    `json:"content"`
-	EmojiID          *string   `json:"emoji_id,omitempty"`
-	MediaID          *string   `json:"media_id,omitempty"`
-	ReplyToMessageID *string   `json:"reply_to_message_id,omitempty"`
-	SharedPostID     *string   `json:"shared_post_id,omitempty"`
-	SharedPost       *SharedPostPayload `json:"shared_post,omitempty"`
-	SenderName       string    `json:"sender_name,omitempty"`
-	SenderAvatar     string    `json:"sender_avatar,omitempty"`
-	Type             string    `json:"type,omitempty"`
-	IsAnonymized     bool      `json:"is_anonymized"`
-	AnonymousName    *string   `json:"anonymous_name,omitempty"`
-	E2EVersion       int       `json:"e2e_version,omitempty"`
-	Deleted          bool      `json:"deleted"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID               string              `json:"id"`
+	ChatID           string              `json:"chat_id"`
+	SenderID         string              `json:"sender_id"`
+	Content          string              `json:"content"`
+	EmojiID          *string             `json:"emoji_id,omitempty"`
+	MediaID          *string             `json:"media_id,omitempty"`
+	ReplyToMessageID *string             `json:"reply_to_message_id,omitempty"`
+	ReplyTo          *ReplyPreview       `json:"reply_to,omitempty"`
+	SharedPostID     *string             `json:"shared_post_id,omitempty"`
+	SharedPost       *SharedPostPayload  `json:"shared_post,omitempty"`
+	SenderName       string              `json:"sender_name,omitempty"`
+	SenderAvatar     string              `json:"sender_avatar,omitempty"`
+	Type             string              `json:"type,omitempty"`
+	IsAnonymized     bool                `json:"is_anonymized"`
+	AnonymousName    *string             `json:"anonymous_name,omitempty"`
+	E2EVersion       int                 `json:"e2e_version,omitempty"`
+	Deleted          bool                `json:"deleted"`
+	CreatedAt        time.Time           `json:"created_at"`
+}
+
+type ReplyPreview struct {
+	ID           string `json:"id"`
+	Content      string `json:"content"`
+	SenderID     string `json:"sender_id"`
+	SenderName   string `json:"sender_name"`
+	SenderAvatar string `json:"sender_avatar"`
 }
 
 type SharedPostPayload struct {

@@ -188,6 +188,10 @@ func (s *GroupMessageService) SendMessage(
 			if participantID == userID {
 				continue
 			}
+			memberSettings, _ := s.groupRepo.GetMemberSettings(ctx, chatID, participantID)
+			if memberSettings != nil && !memberSettings.NotificationsEnabled {
+				continue
+			}
 			_, _ = s.notifService.Create(
 				ctx,
 				participantID,
@@ -330,6 +334,10 @@ func (s *GroupMessageService) GetMemberProfiles(ctx context.Context, chatID stri
 
 func (s *GroupMessageService) SetGroupCallRepository(repo *repository.GroupCallRepository) {
 	s.groupCallRepo = repo
+}
+
+func (s *GroupMessageService) GetChatRepo() *repository.ChatRepository {
+	return s.chatRepo
 }
 
 func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {

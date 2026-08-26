@@ -226,6 +226,14 @@ func (s *ChatService) GetAllMessagesDecrypted(ctx context.Context, userID, chatI
 	return messages, nil
 }
 
+func (s *ChatService) GetReplyPreviews(ctx context.Context, messageIDs []string) map[string]*dto.ReplyPreview {
+	return s.chatRepo.GetReplyPreviews(ctx, messageIDs)
+}
+
+func (s *ChatService) GetEncryptionKey(ctx context.Context, chatID string) (string, error) {
+	return s.chatRepo.GetEncryptionKey(ctx, chatID)
+}
+
 func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetUserID string) (*models.Chat, bool, error) {
 	if err := s.validation.ValidateDirectChat(userID, targetUserID); err != nil {
 		return nil, false, err

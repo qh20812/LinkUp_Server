@@ -367,10 +367,12 @@ func (r *GroupChatRepository) RejectMemberRequest(ctx context.Context, requestID
 
 func (r *GroupChatRepository) GetGroupMembersWithProfiles(ctx context.Context, chatID string) ([]dto.GroupChatMemberDTO, error) {
 	type row struct {
-		UserID      string `gorm:"column:user_id"`
-		DisplayName string `gorm:"column:display_name"`
-		AvatarURI   string `gorm:"column:avatar_uri"`
-		Role        string `gorm:"column:role"`
+		UserID      string    `gorm:"column:user_id"`
+		DisplayName string    `gorm:"column:display_name"`
+		AvatarURI   string    `gorm:"column:avatar_uri"`
+		Role        string    `gorm:"column:role"`
+		IsMuted     bool      `gorm:"column:is_muted"`
+		JoinedAt    time.Time `gorm:"column:joined_at"`
 	}
 
 	var rows []row
@@ -379,8 +381,11 @@ func (r *GroupChatRepository) GetGroupMembersWithProfiles(ctx context.Context, c
 		Select(`cp.user_id,
 			COALESCE(p.display_name, '') AS display_name,
 			COALESCE(p.avatar_uri, '') AS avatar_uri,
-			cp.role`).
+			cp.role,
+			CASE WHEN gm.id IS NOT NULL THEN true ELSE false END AS is_muted,
+			cp.joined_at`).
 		Joins(`LEFT JOIN profiles AS p ON p.user_id = cp.user_id`).
+		Joins(`LEFT JOIN group_chat_mutes AS gm ON gm.chat_id = cp.chat_id AND gm.user_id = cp.user_id`).
 		Where("cp.chat_id = ?", chatID).
 		Order("cp.joined_at ASC").
 		Scan(&rows).Error
@@ -395,6 +400,8 @@ func (r *GroupChatRepository) GetGroupMembersWithProfiles(ctx context.Context, c
 			DisplayName: r.DisplayName,
 			AvatarURI:   r.AvatarURI,
 			Role:        r.Role,
+			IsMuted:     r.IsMuted,
+			JoinedAt:    r.JoinedAt,
 		})
 	}
 	return members, nil

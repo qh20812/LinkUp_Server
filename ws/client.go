@@ -11,6 +11,7 @@ import (
 	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -109,12 +110,37 @@ func (c *Client) ReadPump() {
 			if c.postRepo != nil {
 				sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
 			}
+			payloads := toMessagePayloads(history, c.userID, sharedPosts)
+
+			replyIDs := make([]string, 0)
+			for _, p := range payloads {
+				if p.ReplyToMessageID != nil && *p.ReplyToMessageID != "" {
+					replyIDs = append(replyIDs, *p.ReplyToMessageID)
+				}
+			}
+			if previews := c.service.GetReplyPreviews(c.ctx, replyIDs); previews != nil {
+				encKey, _ := c.service.GetEncryptionKey(c.ctx, payload.ChatID)
+				for _, preview := range previews {
+					if encKey != "" {
+						if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+							preview.Content = decrypted
+						}
+					}
+				}
+				for i := range payloads {
+					if payloads[i].ReplyToMessageID != nil {
+						if preview, ok := previews[*payloads[i].ReplyToMessageID]; ok {
+							payloads[i].ReplyTo = preview
+						}
+					}
+				}
+			}
 
 			resp, _ := json.Marshal(dto.WsEvent{
 				Type: "message:history",
 				Payload: mustMarshal(map[string]any{
 					"chat_id":  payload.ChatID,
-					"messages": toMessagePayloads(history, c.userID, sharedPosts),
+					"messages": payloads,
 				}),
 			})
 			c.send <- resp
@@ -156,6 +182,19 @@ func (c *Client) ReadPump() {
 				Type:             msg.Type,
 				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
+			}
+			if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
+				if previews := c.service.GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
+					if preview, ok := previews[*msg.ReplyToMessageID]; ok {
+						encKey, _ := c.service.GetEncryptionKey(c.ctx, msg.ChatID)
+						if encKey != "" {
+							if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+								preview.Content = decrypted
+							}
+						}
+						messagePayload.ReplyTo = preview
+					}
+				}
 			}
 
 			if msg.SharedPostID != nil && *msg.SharedPostID != "" && c.postRepo != nil {
