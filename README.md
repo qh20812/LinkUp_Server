@@ -37,6 +37,7 @@ Backend API cho mạng xã hội LinkUp — hỗ trợ bài viết, story 24h, t
 
 - Go 1.26+
 - MySQL 8.0+
+- Docker Desktop (nếu dùng Docker dev)
 - (Tùy chọn) Air — hot reload: `go install github.com/air-verse/air@latest`
 
 ### Cài đặt
@@ -114,7 +115,27 @@ Lệnh này xóa toàn bộ dữ liệu cũ và tạo lại 46 bảng với dữ
 
 ## Chạy ứng dụng
 
-### Development (hot reload)
+### Development (Docker — khuyến nghị)
+
+Server chạy liên tục trong container, hot-reload qua Air, Go build cache được giữ giữa các lần rebuild:
+
+```bash
+# Lần đầu — build image + start
+docker compose -f docker-compose.dev.yml up -d
+
+# Xem logs
+docker logs -f linkup-server-dev
+
+# Dừng server
+docker compose -f docker-compose.dev.yml down
+
+# Rebuild nếu sửa go.mod / Dockerfile
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
+Container chạy liên tục (`restart: unless-stopped`), tự restart khi crash. Web connect qua `localhost:8080`.
+
+### Development (trực tiếp — Windows)
 
 ```bash
 air
@@ -507,10 +528,29 @@ Client → Router (Gin) → Middleware (Auth/RBAC) → Controller → Service �
 
 ## Docker
 
+### Production build
+
 ```bash
 docker build -t linkup-server .
 docker run -p 8080:8080 --env-file .env linkup-server
 ```
+
+### Development (hot-reload)
+
+Dùng `docker-compose.dev.yml` — source code được mount vào container, Air auto-rebuild khi code thay đổi:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+**Files liên quan:**
+
+| File | Mô tả |
+|---|---|
+| `Dockerfile` | Production multi-stage build |
+| `Dockerfile.dev` | Dev image với Air pre-install |
+| `.air.docker.toml` | Air config cho Linux (khác `.air.toml` Windows) |
+| `docker-compose.dev.yml` | Dev compose (volume mounts + build cache) |
 
 ## Giấy phép
 
