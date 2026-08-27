@@ -172,6 +172,7 @@ func (c *Client) ReadPump() {
 				Type:             m.Type,
 				IsAnonymized:     m.IsAnonymized,
 				AnonymousName:    m.AnonymousName,
+				Deleted:          m.DeletedAt != nil,
 				CreatedAt:        m.CreatedAt,
 			}
 			if prof, ok := profiles[m.SenderID]; ok {
@@ -354,11 +355,42 @@ func (c *Client) ReadPump() {
 				})
 			}
 
-			c.sendEvent("group:message:search_result", map[string]any{
-				"chat_id":  payload.ChatID,
-				"keyword":  payload.Keyword,
-				"messages": out,
+		c.sendEvent("group:message:search_result", map[string]any{
+			"chat_id":  payload.ChatID,
+			"keyword":  payload.Keyword,
+			"messages": out,
+		})
+
+		case "group:message:delete":
+			var payload dto.DeleteMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu xóa không hợp lệ")
+				continue
+			}
+
+			msg, err := c.messageService.DeleteMessage(c.ctx, c.userID, payload.MessageID, payload.Mode)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			deletedPayload := dto.MessageDeletedPayload{
+				ChatID:    msg.ChatID,
+				MessageID: msg.ID,
+				DeletedBy: c.userID,
+				Mode:      payload.Mode,
+			}
+
+			ack, _ := json.Marshal(dto.WsEvent{
+				Type:    "group:message:deleted",
+				Payload: mustMarshal(deletedPayload),
 			})
+
+			if strings.EqualFold(payload.Mode, "all") {
+				c.hub.broadcast <- &BroadcastMessage{ChatID: msg.ChatID, Data: ack}
+			} else {
+				c.send <- ack
+			}
 
 		case "group:leave":
 			var payload dto.GroupLeavePayload

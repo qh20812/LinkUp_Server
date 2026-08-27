@@ -208,6 +208,46 @@ func (s *GroupMessageService) SendMessage(
 	return savedMsg, nil
 }
 
+func (s *GroupMessageService) DeleteMessage(ctx context.Context, userID, messageID, mode string) (*models.Message, error) {
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.ensureGroupMember(ctx, userID, msg.ChatID); err != nil {
+		return nil, err
+	}
+
+	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, mode); err != nil {
+		return nil, err
+	}
+	if err := s.validation.ValidateDeleteMode(mode); err != nil {
+		return nil, err
+	}
+
+	deleteForAll := strings.EqualFold(mode, "all")
+
+	if deleteForAll {
+		if msg.DeletedAt != nil {
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+		}
+		deletedAt := time.Now().UTC()
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	if msg.SenderID == userID {
+		if msg.DeletedForSender {
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+		}
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+	}
+
+	if msg.DeletedForReceiver {
+		return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+	}
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, false, true, nil)
+}
+
 func (s *GroupMessageService) GetAllMessagesDecrypted(
 	ctx context.Context,
 	userID, chatID string,
