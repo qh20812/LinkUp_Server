@@ -21,6 +21,7 @@ type Comment struct {
 	Content      string         `json:"content"`
 	Status       CommentStatus  `json:"status"`
 	ReviewReason *string        `json:"review_reason,omitempty"`
+	LikesCount   int            `json:"likes_count" gorm:"default:0"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    *time.Time     `json:"updated_at,omitempty"`
 

@@ -482,9 +482,9 @@ func (r *PostRepository) HideCommentsByIDs(ctx context.Context, ids []string, re
 		}).Error
 }
 
-func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int) ([]models.Comment, error) {
+func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int, sort string) ([]models.Comment, error) {
 	var comments []models.Comment
-	err := r.db.WithContext(ctx).
+	query := r.db.WithContext(ctx).
 		Table("comments").
 		Select(`comments.*,
             users.username,
@@ -492,11 +492,22 @@ func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID strin
             COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
 		Joins("LEFT JOIN users ON users.id = comments.user_id").
 		Joins("LEFT JOIN profiles ON profiles.user_id = comments.user_id").
-		Where("comments.post_id = ? AND comments.status != ?", postID, models.CommentStatusHidden).
-		Order("comments.created_at DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&comments).Error
+		Where("comments.post_id = ? AND comments.status != ?", postID, models.CommentStatusHidden)
+
+	switch sort {
+	case "oldest":
+		query = query.Order("comments.created_at ASC")
+	case "relevant":
+		query = query.Order(`(
+			comments.likes_count * 2 +
+			(SELECT COUNT(*) FROM comments c2 WHERE c2.parent_id = comments.id AND c2.status != 'hidden') * 3 +
+			GREATEST(0, 168 - TIMESTAMPDIFF(HOUR, comments.created_at, NOW()))
+		) DESC`)
+	default:
+		query = query.Order("comments.created_at DESC")
+	}
+
+	err := query.Limit(limit).Offset(offset).Find(&comments).Error
 	return comments, err
 }
 
@@ -816,4 +827,32 @@ func (r *PostRepository) CountMediaByUserID(ctx context.Context, userID string) 
 		return 0, fmt.Errorf("count media by user: %w", tx.Error)
 	}
 	return count, nil
+}
+
+func (r *PostRepository) FindCommentReactionByUserAndComment(ctx context.Context, userID, commentID string) (*models.CommentReaction, error) {
+	var reaction models.CommentReaction
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND comment_id = ?", userID, commentID).
+		First(&reaction).Error
+	if err != nil {
+		return nil, err
+	}
+	return &reaction, nil
+}
+
+func (r *PostRepository) CreateCommentReaction(ctx context.Context, reaction *models.CommentReaction) error {
+	return r.db.WithContext(ctx).Create(reaction).Error
+}
+
+func (r *PostRepository) DeleteCommentReaction(ctx context.Context, userID, commentID string) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ? AND comment_id = ?", userID, commentID).
+		Delete(&models.CommentReaction{}).Error
+}
+
+func (r *PostRepository) UpdateCommentLikesCount(ctx context.Context, commentID string, delta int) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Comment{}).
+		Where("id = ?", commentID).
+		UpdateColumn("likes_count", gorm.Expr("likes_count + ?", delta)).Error
 }

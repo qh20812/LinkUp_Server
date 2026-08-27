@@ -244,8 +244,9 @@ func (ctrl *PostController) GetComments(c *gin.Context) {
 	postID := c.Param("id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
+	sort := c.DefaultQuery("sort", "newest")
 
-	comments, total, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize)
+	comments, total, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize, sort)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -257,6 +258,32 @@ func (ctrl *PostController) GetComments(c *gin.Context) {
 		"total":     total,
 		"data":      comments,
 	})
+}
+
+func (ctrl *PostController) ToggleCommentReaction(c *gin.Context) {
+	commentID := c.Param("commentID")
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+	userID := fmt.Sprintf("%v", val)
+
+	var input struct {
+		EmojiID string `json:"emoji_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	action, err := ctrl.service.ToggleCommentReaction(c.Request.Context(), userID, commentID, input.EmojiID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"action": action})
 }
 
 func (ctrl *PostController) SharePost(c *gin.Context) {

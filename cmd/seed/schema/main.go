@@ -840,6 +840,20 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_chat_e2e_keys_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// comment_reactions — depends on users, comments, emojis
+		`CREATE TABLE IF NOT EXISTS comment_reactions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			comment_id VARCHAR(36) NOT NULL,
+			emoji_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			UNIQUE INDEX idx_comment_reaction (user_id, comment_id),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE,
+			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE CASCADE,
+			INDEX idx_comment_reactions_comment_id (comment_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
@@ -979,6 +993,15 @@ func Run(env config.Env) error {
 	if err := addIndexIfMissing(database, "comments", "idx_comments_status",
 		"INDEX idx_comments_status (status)"); err != nil {
 		return fmt.Errorf("schema: add idx_comments_status: %w", err)
+	}
+
+	// Comment likes count for relevance sorting
+	if err := addColumnIfMissing(database, "comments", "likes_count", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add comments.likes_count: %w", err)
+	}
+	if err := addIndexIfMissing(database, "comments", "idx_comments_likes_count",
+		"INDEX idx_comments_likes_count (likes_count)"); err != nil {
+		return fmt.Errorf("schema: add idx_comments_likes_count: %w", err)
 	}
 
 	// Login attempt tracking columns (max_login_attempts lockout)

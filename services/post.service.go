@@ -24,10 +24,11 @@ type PostService interface {
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
-	GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, int64, error)
+	GetCommentList(ctx context.Context, postID string, page, pageSize int, sort string) ([]models.Comment, int64, error)
 	SharePost(ctx context.Context, userID, postID, content string) error
 	SavePost(ctx context.Context, userID, postID string) (action string, err error)
 	DeletePost(ctx context.Context, userID, postID string) error
+	ToggleCommentReaction(ctx context.Context, userID, commentID, emojiID string) (action string, err error)
 	GetPostsByHashtag(ctx context.Context, hashtag string, page, pageSize int) ([]models.Post, error)
 	ListEmojis(ctx context.Context) ([]models.Emoji, error)
 	SetMediaService(mediaService MediaService)
@@ -614,10 +615,14 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 	return s.repo.FindCommentsByPostID(ctx, postID)
 }
 
-func (s *postService) GetCommentList(ctx context.Context, postID string, page, pageSize int) ([]models.Comment, int64, error) {
+func (s *postService) GetCommentList(ctx context.Context, postID string, page, pageSize int, sort string) ([]models.Comment, int64, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
 		return nil, 0, errorsapp.New(errorsapp.ErrCodePostNotAccessible)
+	}
+
+	if sort != "newest" && sort != "oldest" && sort != "relevant" {
+		sort = "newest"
 	}
 
 	page, pageSize = s.validation.NormalizePagination(page, pageSize)
@@ -628,7 +633,7 @@ func (s *postService) GetCommentList(ctx context.Context, postID string, page, p
 		return nil, 0, err
 	}
 
-	comments, err := s.repo.FetchCommentsByPostID(ctx, postID, pageSize, offset)
+	comments, err := s.repo.FetchCommentsByPostID(ctx, postID, pageSize, offset, sort)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -680,6 +685,39 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 	}
 
 	return nil
+}
+
+func (s *postService) ToggleCommentReaction(ctx context.Context, userID, commentID, emojiID string) (string, error) {
+	comment, err := s.repo.FindActiveCommentByID(ctx, commentID)
+	if err != nil {
+		return "", errorsapp.New(errorsapp.ErrCodeNotFound)
+	}
+
+	existing, err := s.repo.FindCommentReactionByUserAndComment(ctx, userID, commentID)
+	if err == nil && existing != nil {
+		if err := s.repo.DeleteCommentReaction(ctx, userID, commentID); err != nil {
+			return "", err
+		}
+		if err := s.repo.UpdateCommentLikesCount(ctx, commentID, -1); err != nil {
+			return "", err
+		}
+		_ = comment
+		return "removed", nil
+	}
+
+	reaction := models.NewCommentReaction(userID, commentID, emojiID)
+	reaction.ID = utils.GenerateUUID()
+	reaction.CreatedAt = time.Now()
+
+	if err := s.repo.CreateCommentReaction(ctx, &reaction); err != nil {
+		return "", err
+	}
+	if err := s.repo.UpdateCommentLikesCount(ctx, commentID, 1); err != nil {
+		return "", err
+	}
+
+	_ = comment
+	return "created", nil
 }
 
 // loadSharedPosts batch-loads original posts for reposts and attaches media.
