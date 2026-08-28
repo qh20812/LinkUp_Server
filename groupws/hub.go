@@ -718,7 +718,7 @@ func (h *Hub) CleanupStaleCalls() {
 
 		// Persist a system message into the group chat so members see the end notification.
 		if h.messageService != nil {
-			_, err := h.messageService.CreateSystemMessage(context.Background(), session.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc do hết thời gian chờ (call %s)", session.CallID))
+			_, err := h.messageService.CreateSystemMessage(context.Background(), session.ChatID, "call_timeout", "call_timeout", "")
 			if err != nil {
 				log.Printf("group call: create system message: %v", err)
 			}

@@ -229,7 +229,7 @@ func main() {
 		go groupHub.Run()
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
 		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, chatService, notificationService, validations.NewGroupChatValidation())
-		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
+		groupChatController := controllers.NewGroupChatController(groupChatService, chatService, groupHub)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env, gormDB)
 		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, postRepository, notificationService, chatValidation)
 		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env, gormDB)

@@ -208,6 +208,46 @@ func (s *GroupMessageService) SendMessage(
 	return savedMsg, nil
 }
 
+func (s *GroupMessageService) DeleteMessage(ctx context.Context, userID, messageID, mode string) (*models.Message, error) {
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.ensureGroupMember(ctx, userID, msg.ChatID); err != nil {
+		return nil, err
+	}
+
+	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, mode); err != nil {
+		return nil, err
+	}
+	if err := s.validation.ValidateDeleteMode(mode); err != nil {
+		return nil, err
+	}
+
+	deleteForAll := strings.EqualFold(mode, "all")
+
+	if deleteForAll {
+		if msg.DeletedAt != nil {
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+		}
+		deletedAt := time.Now().UTC()
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	if msg.SenderID == userID {
+		if msg.DeletedForSender {
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+		}
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+	}
+
+	if msg.DeletedForReceiver {
+		return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+	}
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, false, true, nil)
+}
+
 func (s *GroupMessageService) GetAllMessagesDecrypted(
 	ctx context.Context,
 	userID, chatID string,
@@ -281,9 +321,18 @@ func (s *GroupMessageService) ListGroupMemberIDs(ctx context.Context, userID, ch
 	return s.chatRepo.GetParticipantIDs(ctx, chatID)
 }
 
-func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, content string) (*models.Message, error) {
-	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, translationKey, msgType, actorID string, extra ...string) (*models.Message, error) {
+	content := translationKey
+	if actorID != "" {
+		content += "|" + actorID
+	}
+	if len(extra) > 0 && extra[0] != "" {
+		content += "|" + extra[0]
+	}
+	msg := models.NewMessage(chatID, actorID, content, nil, nil)
 	msg.ID = utils.GenerateUUID()
+	msg.Type = msgType
+	msg.MessageCategory = "system"
 	msg.CreatedAt = time.Now().UTC()
 	return s.chatRepo.CreateMessage(ctx, &msg)
 }

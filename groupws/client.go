@@ -147,11 +147,22 @@ func (c *Client) ReadPump() {
 
 		senderIDs := make([]string, 0, len(history))
 		seen := make(map[string]struct{})
+		actorIDs := make(map[string]string)
 		for _, m := range history {
-			if m.SenderID != "" && m.SenderID != "SYSTEM" {
+			if m.MessageCategory != "system" {
 				if _, ok := seen[m.SenderID]; !ok {
 					senderIDs = append(senderIDs, m.SenderID)
 					seen[m.SenderID] = struct{}{}
+				}
+			}
+			if m.MessageCategory == "system" && strings.Contains(m.Content, "|") {
+				parts := strings.SplitN(m.Content, "|", 3)
+				if len(parts) >= 2 {
+					actorIDs[m.ID] = parts[1]
+					if _, ok := seen[parts[1]]; !ok {
+						senderIDs = append(senderIDs, parts[1])
+						seen[parts[1]] = struct{}{}
+					}
 				}
 			}
 		}
@@ -170,13 +181,20 @@ func (c *Client) ReadPump() {
 				ReplyToMessageID: m.ReplyToMessageID,
 				SharedPostID:     m.SharedPostID,
 				Type:             m.Type,
+				MessageCategory:  m.MessageCategory,
 				IsAnonymized:     m.IsAnonymized,
 				AnonymousName:    m.AnonymousName,
+				Deleted:          m.DeletedAt != nil,
 				CreatedAt:        m.CreatedAt,
 			}
 			if prof, ok := profiles[m.SenderID]; ok {
 				p.SenderName = prof.DisplayName
 				p.SenderAvatar = prof.AvatarURI
+			}
+			if m.MessageCategory == "system" {
+				if actorID, ok := actorIDs[m.ID]; ok {
+					p.SenderName = actorID
+				}
 			}
 			if sharedPosts != nil && m.SharedPostID != nil {
 				if sp, ok := sharedPosts[*m.SharedPostID]; ok {
@@ -354,11 +372,42 @@ func (c *Client) ReadPump() {
 				})
 			}
 
-			c.sendEvent("group:message:search_result", map[string]any{
-				"chat_id":  payload.ChatID,
-				"keyword":  payload.Keyword,
-				"messages": out,
+		c.sendEvent("group:message:search_result", map[string]any{
+			"chat_id":  payload.ChatID,
+			"keyword":  payload.Keyword,
+			"messages": out,
+		})
+
+		case "group:message:delete":
+			var payload dto.DeleteMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu xóa không hợp lệ")
+				continue
+			}
+
+			msg, err := c.messageService.DeleteMessage(c.ctx, c.userID, payload.MessageID, payload.Mode)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			deletedPayload := dto.MessageDeletedPayload{
+				ChatID:    msg.ChatID,
+				MessageID: msg.ID,
+				DeletedBy: c.userID,
+				Mode:      payload.Mode,
+			}
+
+			ack, _ := json.Marshal(dto.WsEvent{
+				Type:    "group:message:deleted",
+				Payload: mustMarshal(deletedPayload),
 			})
+
+			if strings.EqualFold(payload.Mode, "all") {
+				c.hub.broadcast <- &BroadcastMessage{ChatID: msg.ChatID, Data: ack}
+			} else {
+				c.send <- ack
+			}
 
 		case "group:leave":
 			var payload dto.GroupLeavePayload
@@ -488,12 +537,14 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			targetName := c.groupService.GetDisplayName(c.ctx, payload.TargetUserID)
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
 				Type: "group:admin:transferred",
 				Payload: mustMarshal(map[string]any{
 					"chat_id":        payload.ChatID,
 					"target_user_id": payload.TargetUserID,
 					"by":             c.userID,
+					"actor_name":     targetName,
 				}),
 			})
 
@@ -515,9 +566,30 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			actorName := c.groupService.GetDisplayName(c.ctx, c.userID)
+			detail := ""
+			text := ""
+
+			if payload.Name != nil {
+				detail = "name_changed"
+				text = fmt.Sprintf("%s đã đổi tên nhóm thành \"%s\"", actorName, *payload.Name)
+			}
+			if payload.AvatarURI != nil {
+				detail = "avatar_changed"
+				text = fmt.Sprintf("%s đã đổi ảnh nhóm", actorName)
+			}
+
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type:    "group:settings:updated",
-				Payload: mustMarshal(settings),
+				Type: "group:settings:updated",
+				Payload: mustMarshal(map[string]any{
+					"chat_id":    payload.ChatID,
+					"name":       settings.Name,
+					"avatar_uri": settings.AvatarURI,
+					"by":         c.userID,
+					"actor_name": actorName,
+					"detail":     detail,
+					"text":       text,
+				}),
 			})
 
 		case "group:call:create":
@@ -578,7 +650,7 @@ func (c *Client) ReadPump() {
 					Payload: mustMarshal(createdPayload),
 				})
 			}
-			c.sendGroupChatSystemMessage(payload.ChatID, "Cuộc gọi đã được bắt đầu")
+			c.sendGroupChatSystemMessage(payload.ChatID, "call_started", "call_started", c.userID)
 
 		case "group:call:request-join":
 			var payload dto.GroupCallJoinRequestPayload
@@ -770,7 +842,7 @@ func (c *Client) ReadPump() {
 				if c.groupChatHub != nil {
 					c.groupChatHub.Broadcast(result.ChatID, event)
 				}
-				c.sendGroupChatSystemMessage(result.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc bởi %s", c.userID))
+				c.sendGroupChatSystemMessage(result.ChatID, "call_ended", "call_ended", c.userID)
 			} else {
 				event := dto.WsEvent{
 					Type: "group:call:left",
@@ -1015,7 +1087,7 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 			if c.groupChatHub != nil {
 				c.groupChatHub.Broadcast(result.ChatID, event)
 			}
-			c.sendGroupChatSystemMessage(result.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc bởi %s", c.userID))
+			c.sendGroupChatSystemMessage(result.ChatID, "call_ended", "call_ended", c.userID)
 			continue
 		}
 
@@ -1032,9 +1104,9 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 	c.clearActiveCall()
 }
 
-func (c *Client) sendGroupChatSystemMessage(chatID, content string) {
+func (c *Client) sendGroupChatSystemMessage(chatID, translationKey, msgType, actorID string, extra ...string) {
 	if c.messageService == nil {
 		return
 	}
-	_, _ = c.messageService.CreateSystemMessage(c.ctx, chatID, content)
+	_, _ = c.messageService.CreateSystemMessage(c.ctx, chatID, translationKey, msgType, actorID, extra...)
 }

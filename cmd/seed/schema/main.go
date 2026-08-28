@@ -898,8 +898,12 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add e2e_version: %w", err)
 	}
 	// 31c. Message type column (text, shared_post, member_invited, etc.)
-	if err := addColumnIfMissing(database, "messages", "type", "VARCHAR(20) NOT NULL DEFAULT 'text'"); err != nil {
+	if err := addColumnIfMissing(database, "messages", "type", "VARCHAR(30) NOT NULL DEFAULT 'text'"); err != nil {
 		return fmt.Errorf("schema: add messages.type: %w", err)
+	}
+	// 31d. Message category column (user, system, call)
+	if err := addColumnIfMissing(database, "messages", "message_category", "VARCHAR(20) NOT NULL DEFAULT 'user'"); err != nil {
+		return fmt.Errorf("schema: add messages.message_category: %w", err)
 	}
 
 	// Phase 1: Admin Manage Groups/Communities — idempotent column additions
