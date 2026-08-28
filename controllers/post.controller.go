@@ -246,7 +246,13 @@ func (ctrl *PostController) GetComments(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 	sort := c.DefaultQuery("sort", "newest")
 
-	comments, total, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize, sort)
+	var userIDPtr *string
+	if val, exists := c.Get("userID"); exists {
+		uid := fmt.Sprintf("%v", val)
+		userIDPtr = &uid
+	}
+
+	comments, total, err := ctrl.service.GetCommentList(c.Request.Context(), postID, page, pageSize, sort, userIDPtr)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return

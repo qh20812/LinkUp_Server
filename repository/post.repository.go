@@ -482,14 +482,16 @@ func (r *PostRepository) HideCommentsByIDs(ctx context.Context, ids []string, re
 		}).Error
 }
 
-func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int, sort string) ([]models.Comment, error) {
+func (r *PostRepository) FetchCommentsByPostID(ctx context.Context, postID string, limit, offset int, sort string, userID *string) ([]models.Comment, error) {
 	var comments []models.Comment
 	query := r.db.WithContext(ctx).
 		Table("comments").
 		Select(`comments.*,
+            CASE WHEN cr.id IS NOT NULL THEN true ELSE false END AS is_liked,
             users.username,
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN comment_reactions cr ON cr.comment_id = comments.id AND cr.user_id = ?", userID).
 		Joins("LEFT JOIN users ON users.id = comments.user_id").
 		Joins("LEFT JOIN profiles ON profiles.user_id = comments.user_id").
 		Where("comments.post_id = ? AND comments.status != ?", postID, models.CommentStatusHidden)

@@ -31,6 +31,7 @@ func Run(db *gorm.DB) {
 		&models.UserSession{},
 		&models.UserE2EKey{},
 		&models.ChatE2EKey{},
+		&models.CommentReaction{},
 	)
 	if err != nil {
 		log.Printf("Warning: Migration failed: %v", err)
@@ -53,6 +54,9 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "profiles", "education", "VARCHAR(255) NOT NULL DEFAULT ''")
 	ensureColumn(db, "profiles", "website", "VARCHAR(255) NOT NULL DEFAULT ''")
 
+	// Thêm cột likes_count vào comments cho comment reactions
+	ensureColumn(db, "comments", "likes_count", "INT NOT NULL DEFAULT 0")
+
 	// Thêm cột last_seen vào users cho online/offline presence
 	ensureColumn(db, "users", "last_seen", "DATETIME NULL")
 	ensureIndex(db, "users", "idx_users_last_seen", "last_seen")
@@ -63,7 +67,7 @@ func Run(db *gorm.DB) {
 
 	// Đồng bộ collation toàn bảng GORM về utf8mb4_unicode_ci (idempotent).
 	// "ads" do seed tạo đã là unicode_ci nhưng chạy lại cũng an toàn.
-	for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts"} {
+	for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts", "comment_reactions"} {
 		if db.Migrator().HasTable(table) {
 			_ = db.Exec("ALTER TABLE " + table + " CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
 		}
