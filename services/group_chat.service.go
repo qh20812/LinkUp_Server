@@ -132,6 +132,10 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID, leave
 		}
 	}
 
+	if leaveMode == "public" {
+		s.createSystemMessage(ctx, chatID, "member_left", "member_left", userID)
+	}
+
 	if err := s.groupRepo.LeaveGroup(ctx, chatID, userID); err != nil {
 		return err
 	}
@@ -302,9 +306,9 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		)
 	}
 
-	requesterName := s.getDisplayName(ctx, requesterID)
-	s.createSystemMessage(ctx, chatID, fmt.Sprintf("%s đã được mời vào nhóm", requesterName), "member_invited")
+	s.createSystemMessage(ctx, chatID, "member_invited", "member_invited", requesterID)
 
+	requesterName := s.GetDisplayName(ctx, requesterID)
 	_ = s.createGroupInviteMessage(ctx, chatID, req.ID, requesterID, newMemberID, requesterName)
 
 	return req.ID, nil
@@ -490,9 +494,11 @@ func (s *GroupChatService) UpdateSettings(ctx context.Context, chatID, requestID
 			}
 			if input.Name != nil {
 				chat.Name = *input.Name
+				s.createSystemMessage(ctx, chatID, "group_name_changed", "group_settings_updated", requestID, *input.Name)
 			}
 			if input.AvatarURI != nil {
 				chat.AvatarURI = *input.AvatarURI
+				s.createSystemMessage(ctx, chatID, "group_avatar_changed", "group_settings_updated", requestID)
 			}
 			if err := s.chatRepo.UpdateChat(ctx, chat); err != nil {
 				return nil, err
@@ -540,6 +546,8 @@ func (s *GroupChatService) TransferAdmin(ctx context.Context, chatID, requestID,
 	if err := s.groupRepo.TransferAdmin(ctx, chatID, requestID, targetUserID, time.Now().UTC()); err != nil {
 		return err
 	}
+
+	s.createSystemMessage(ctx, chatID, "admin_transferred", "admin_transferred", targetUserID)
 
 	if s.notifService != nil && s.isNotificationsEnabled(ctx, chatID, targetUserID) {
 		_, _ = s.notifService.Create(ctx, targetUserID, &requestID, models.NotificationTypeMessage, "bạn đã được chuyển quyền quản trị nhóm", nil, &requestID, &chatID)
@@ -715,8 +723,7 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 		)
 	}
 
-	targetName := s.getDisplayName(ctx, targetUserID)
-	s.createSystemMessage(ctx, chatID, fmt.Sprintf("%s đã tham gia nhóm", targetName), "member_joined")
+	s.createSystemMessage(ctx, chatID, "member_joined", "member_joined", targetUserID)
 
 	return nil
 }
@@ -788,15 +795,23 @@ func (s *GroupChatService) ListGroupChatsForUser(ctx context.Context, userID str
 	return chats, nil
 }
 
-func (s *GroupChatService) createSystemMessage(ctx context.Context, chatID, content, msgType string) {
-	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+func (s *GroupChatService) createSystemMessage(ctx context.Context, chatID, translationKey, msgType, actorID string, extra ...string) {
+	content := translationKey
+	if actorID != "" {
+		content += "|" + actorID
+	}
+	if len(extra) > 0 && extra[0] != "" {
+		content += "|" + extra[0]
+	}
+	msg := models.NewMessage(chatID, actorID, content, nil, nil)
 	msg.ID = utils.GenerateUUID()
 	msg.Type = msgType
+	msg.MessageCategory = "system"
 	msg.CreatedAt = time.Now().UTC()
 	_, _ = s.chatRepo.CreateMessage(ctx, &msg)
 }
 
-func (s *GroupChatService) getDisplayName(ctx context.Context, userID string) string {
+func (s *GroupChatService) GetDisplayName(ctx context.Context, userID string) string {
 	return s.chatRepo.GetDisplayName(ctx, userID)
 }
 

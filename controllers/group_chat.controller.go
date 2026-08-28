@@ -1,11 +1,15 @@
 package controllers
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"linkup/dto"
 	errorsapp "linkup/errors"
+	"linkup/groupws"
 	"linkup/services"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,12 +17,14 @@ import (
 type GroupChatController struct {
 	groupService *services.GroupChatService
 	chatService  *services.ChatService
+	groupHub     *groupws.Hub
 }
 
-func NewGroupChatController(groupService *services.GroupChatService, chatService *services.ChatService) *GroupChatController {
+func NewGroupChatController(groupService *services.GroupChatService, chatService *services.ChatService, groupHub *groupws.Hub) *GroupChatController {
 	return &GroupChatController{
 		groupService: groupService,
 		chatService:  chatService,
+		groupHub:     groupHub,
 	}
 }
 
@@ -68,6 +74,15 @@ func (ctrl *GroupChatController) AddMember(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
+
+	ctrl.broadcastToChat(chatID, dto.WsEvent{
+		Type: "group:member:added",
+		Payload: mustMarshalCtrl(map[string]any{
+			"chat_id": chatID,
+			"user_id": input.UserID,
+			"by":      requesterID,
+		}),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Đã gửi lời mời tham gia nhóm. Chờ người dùng xác nhận.",
@@ -175,6 +190,35 @@ func (ctrl *GroupChatController) UpdateSettings(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
+
+	if input.Name != nil || input.AvatarURI != nil {
+		actorName := ctrl.getActorName(c.Request.Context(), userID)
+		detail := ""
+		text := ""
+
+		if input.Name != nil {
+			detail = "name_changed"
+			text = fmt.Sprintf("%s đã đổi tên nhóm thành \"%s\"", actorName, *input.Name)
+		}
+		if input.AvatarURI != nil {
+			detail = "avatar_changed"
+			text = fmt.Sprintf("%s đã đổi ảnh nhóm", actorName)
+		}
+
+		ctrl.broadcastToChat(chatID, dto.WsEvent{
+			Type: "group:settings:updated",
+			Payload: mustMarshalCtrl(map[string]any{
+				"chat_id":   chatID,
+				"name":      settings.Name,
+				"avatar_uri": settings.AvatarURI,
+				"by":        userID,
+				"actor_name": actorName,
+				"detail":    detail,
+				"text":      text,
+			}),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"error": "Cập nhật cấu hình nhóm thành công", "data": settings})
 }
 
@@ -197,6 +241,18 @@ func (ctrl *GroupChatController) TransferAdmin(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
+
+	targetName := ctrl.getActorName(c.Request.Context(), input.TargetUserID)
+	ctrl.broadcastToChat(chatID, dto.WsEvent{
+		Type: "group:admin:transferred",
+		Payload: mustMarshalCtrl(map[string]any{
+			"chat_id":        chatID,
+			"target_user_id": input.TargetUserID,
+			"by":             userID,
+			"actor_name":     targetName,
+		}),
+	})
+
 	c.JSON(http.StatusOK, gin.H{"message": "Đã chuyển quyền admin thành công"})
 }
 
@@ -284,6 +340,18 @@ func (ctrl *GroupChatController) ApproveMemberRequest(c *gin.Context) {
 		return
 	}
 
+	memberName := ctrl.getActorName(c.Request.Context(), userID)
+	ctrl.broadcastToChat(chatID, dto.WsEvent{
+		Type: "group:member:added",
+		Payload: mustMarshalCtrl(map[string]any{
+			"chat_id":     chatID,
+			"user_id":     userID,
+			"user_name":   memberName,
+			"by":          userID,
+			"member_name": memberName,
+		}),
+	})
+
 	c.JSON(http.StatusOK, gin.H{"message": "Bạn đã tham gia nhóm thành công"})
 }
 
@@ -342,5 +410,32 @@ func (ctrl *GroupChatController) LeaveGroup(c *gin.Context) {
 		return
 	}
 
+	if strings.EqualFold(strings.TrimSpace(input.LeaveMode), "public") {
+		ctrl.broadcastToChat(chatID, dto.WsEvent{
+			Type: "group:member:left",
+			Payload: mustMarshalCtrl(map[string]any{
+				"chat_id":    chatID,
+				"user_id":    userID,
+				"leave_mode": input.LeaveMode,
+			}),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Đã rời khỏi nhóm thành công"})
+}
+
+func (ctrl *GroupChatController) broadcastToChat(chatID string, event dto.WsEvent) {
+	if ctrl.groupHub == nil {
+		return
+	}
+	ctrl.groupHub.Broadcast(chatID, event)
+}
+
+func (ctrl *GroupChatController) getActorName(ctx context.Context, userID string) string {
+	return ctrl.groupService.GetDisplayName(ctx, userID)
+}
+
+func mustMarshalCtrl(v any) []byte {
+	out, _ := json.Marshal(v)
+	return out
 }

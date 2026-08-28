@@ -321,9 +321,18 @@ func (s *GroupMessageService) ListGroupMemberIDs(ctx context.Context, userID, ch
 	return s.chatRepo.GetParticipantIDs(ctx, chatID)
 }
 
-func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, content string) (*models.Message, error) {
-	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, translationKey, msgType, actorID string, extra ...string) (*models.Message, error) {
+	content := translationKey
+	if actorID != "" {
+		content += "|" + actorID
+	}
+	if len(extra) > 0 && extra[0] != "" {
+		content += "|" + extra[0]
+	}
+	msg := models.NewMessage(chatID, actorID, content, nil, nil)
 	msg.ID = utils.GenerateUUID()
+	msg.Type = msgType
+	msg.MessageCategory = "system"
 	msg.CreatedAt = time.Now().UTC()
 	return s.chatRepo.CreateMessage(ctx, &msg)
 }
