@@ -157,6 +157,22 @@ func (r *ChatRepository) GetMessages(ctx context.Context, chatID, userID string)
 	return messages, nil
 }
 
+func (r *ChatRepository) GetMessagesPaged(ctx context.Context, chatID string, beforeCreatedAt *time.Time, beforeID string, limit int) ([]models.Message, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	q := r.db.WithContext(ctx).Where("chat_id = ?", chatID)
+	if beforeCreatedAt != nil {
+		q = q.Where("(created_at < ? OR (created_at = ? AND id < ?))", *beforeCreatedAt, *beforeCreatedAt, beforeID)
+	}
+	var messages []models.Message
+	err := q.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&messages).Error
+	if err != nil {
+		return nil, fmt.Errorf("list messages: %w", err)
+	}
+	return messages, nil
+}
+
 func (r *ChatRepository) GetReplyPreviews(ctx context.Context, messageIDs []string) map[string]*dto.ReplyPreview {
 	if len(messageIDs) == 0 {
 		return nil

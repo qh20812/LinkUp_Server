@@ -8,6 +8,7 @@ import (
 	"linkup/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type E2ERepository struct {
@@ -38,10 +39,16 @@ func (r *E2ERepository) GetUserKey(ctx context.Context, userID string) (*models.
 	return &key, nil
 }
 
+// UpsertChatKey persists a wrapped chat key entry. First-writer-wins: một khi
+// (chat_id, user_id) đã tồn tại thì không ghi đè — bảo đảm hai client tạo khóa
+// đồng thời không ghi đè khóa của nhau, cả hai cùng quy về khóa duy nhất.
 func (r *E2ERepository) UpsertChatKey(ctx context.Context, key *models.ChatE2EKey) error {
-	tx := r.db.WithContext(ctx).Save(key)
+	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "chat_id"}, {Name: "user_id"}},
+		DoNothing: true,
+	}).Create(key)
 	if tx.Error != nil {
-		return fmt.Errorf("upsert chat e2e key: %w", tx.Error)
+		return fmt.Errorf("insert chat e2e key: %w", tx.Error)
 	}
 	return nil
 }
@@ -50,9 +57,12 @@ func (r *E2ERepository) UpsertChatKeys(ctx context.Context, keys []models.ChatE2
 	if len(keys) == 0 {
 		return nil
 	}
-	tx := r.db.WithContext(ctx).Save(&keys)
+	tx := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "chat_id"}, {Name: "user_id"}},
+		DoNothing: true,
+	}).Create(&keys)
 	if tx.Error != nil {
-		return fmt.Errorf("upsert chat e2e keys: %w", tx.Error)
+		return fmt.Errorf("insert chat e2e keys: %w", tx.Error)
 	}
 	return nil
 }

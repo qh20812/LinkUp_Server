@@ -17,10 +17,12 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 8192
+	writeWait             = 10 * time.Second
+	pongWait              = 60 * time.Second
+	pingPeriod            = (pongWait * 9) / 10
+	maxMessageSize        = 8192
+	defaultHistoryLimit   = 30
+	maxHistoryLimit       = 100
 )
 
 type Client struct {
@@ -81,7 +83,7 @@ func (c *Client) ReadPump() {
 		// Chat events cần ChatService. Call events có nil check riêng.
 		if c.service == nil {
 			switch event.Type {
-			case "chat:join", "message:send", "typing:start", "typing:stop", "message:delete", "message:search", "message:pin", "message:unpin":
+			case "chat:join", "chat:history:more", "message:send", "typing:start", "typing:stop", "message:delete", "message:search", "message:pin", "message:unpin":
 				continue
 			}
 		}
@@ -100,50 +102,7 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
-			history, err := c.service.GetAllMessagesDecrypted(c.ctx, c.userID, payload.ChatID)
-			if err != nil {
-				c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
-				continue
-			}
-
-			var sharedPosts map[string]*dto.SharedPostPayload
-			if c.postRepo != nil {
-				sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
-			}
-			payloads := toMessagePayloads(history, c.userID, sharedPosts)
-
-			replyIDs := make([]string, 0)
-			for _, p := range payloads {
-				if p.ReplyToMessageID != nil && *p.ReplyToMessageID != "" {
-					replyIDs = append(replyIDs, *p.ReplyToMessageID)
-				}
-			}
-			if previews := c.service.GetReplyPreviews(c.ctx, replyIDs); previews != nil {
-				encKey, _ := c.service.GetEncryptionKey(c.ctx, payload.ChatID)
-				for _, preview := range previews {
-					if encKey != "" {
-						if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
-							preview.Content = decrypted
-						}
-					}
-				}
-				for i := range payloads {
-					if payloads[i].ReplyToMessageID != nil {
-						if preview, ok := previews[*payloads[i].ReplyToMessageID]; ok {
-							payloads[i].ReplyTo = preview
-						}
-					}
-				}
-			}
-
-			resp, _ := json.Marshal(dto.WsEvent{
-				Type: "message:history",
-				Payload: mustMarshal(map[string]any{
-					"chat_id":  payload.ChatID,
-					"messages": payloads,
-				}),
-			})
-			c.send <- resp
+			c.sendChatHistory("message:history", payload.ChatID, payload.BeforeCursor, resolveHistoryLimit(payload.Limit))
 
 			// Gửi danh sách tin nhắn đã ghim
 			if pins, err := c.service.GetPinnedMessages(c.ctx, c.userID, payload.ChatID); err == nil && len(pins) > 0 {
@@ -153,6 +112,22 @@ func (c *Client) ReadPump() {
 				})
 				c.send <- pinResp
 			}
+
+		case "chat:history:more":
+			var payload dto.ChatHistoryMorePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tải lịch sử không hợp lệ")
+				continue
+			}
+			if _, ok := c.joinedChats[payload.ChatID]; !ok {
+				if err := c.service.JoinChat(c.ctx, c.userID, payload.ChatID); err != nil {
+					c.sendError(err.Error())
+					continue
+				}
+				c.joinedChats[payload.ChatID] = struct{}{}
+				c.hub.JoinChat(payload.ChatID, c)
+			}
+			c.sendChatHistory("message:history_more", payload.ChatID, &payload.Cursor, resolveHistoryLimit(payload.Limit))
 
 		case "message:send":
 			var payload dto.SendMessagePayload
@@ -619,6 +594,79 @@ func isMessageDeletedFor(msg models.Message, userID string) bool {
 		return msg.DeletedForSender
 	}
 	return msg.DeletedForReceiver
+}
+
+func resolveHistoryLimit(limit *int) int {
+	if limit == nil || *limit <= 0 {
+		return defaultHistoryLimit
+	}
+	if *limit > maxHistoryLimit {
+		return maxHistoryLimit
+	}
+	return *limit
+}
+
+// sendChatHistory tải một trang lịch sử (mới → cũ theo cursor), enrich reply
+// previews + shared posts rồi gửi qua WS. eventType = "message:history" (lần
+// đầu) hoặc "message:history_more" (tải thêm trang cũ hơn).
+func (c *Client) sendChatHistory(eventType, chatID string, cursor *dto.HistoryCursor, limit int) {
+	history, err := c.service.GetMessagesHistory(c.ctx, c.userID, chatID, cursor, limit)
+	if err != nil {
+		c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
+		return
+	}
+
+	hasMore := false
+	var nextCursor *dto.HistoryCursor
+	if len(history) > limit {
+		history = history[:limit]
+		hasMore = true
+	}
+	if len(history) > 0 {
+		oldest := history[len(history)-1]
+		nextCursor = &dto.HistoryCursor{CreatedAt: oldest.CreatedAt, ID: oldest.ID}
+	}
+
+	var sharedPosts map[string]*dto.SharedPostPayload
+	if c.postRepo != nil {
+		sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
+	}
+	payloads := toMessagePayloads(history, c.userID, sharedPosts)
+
+	replyIDs := make([]string, 0)
+	for _, p := range payloads {
+		if p.ReplyToMessageID != nil && *p.ReplyToMessageID != "" {
+			replyIDs = append(replyIDs, *p.ReplyToMessageID)
+		}
+	}
+	if previews := c.service.GetReplyPreviews(c.ctx, replyIDs); previews != nil {
+		encKey, _ := c.service.GetEncryptionKey(c.ctx, chatID)
+		for _, preview := range previews {
+			if encKey != "" {
+				if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+					preview.Content = decrypted
+				}
+			}
+		}
+		for i := range payloads {
+			if payloads[i].ReplyToMessageID != nil {
+				if preview, ok := previews[*payloads[i].ReplyToMessageID]; ok {
+					payloads[i].ReplyTo = preview
+				}
+			}
+		}
+	}
+
+	resp, _ := json.Marshal(dto.WsEvent{
+		Type: eventType,
+		Payload: mustMarshal(map[string]any{
+			"chat_id":     chatID,
+			"messages":    payloads,
+			"has_more":    hasMore,
+			"next_cursor": nextCursor,
+		}),
+	})
+	c.send <- resp
 }
 
 func (c *Client) handleTypingEvent(chatID, eventType string) bool {

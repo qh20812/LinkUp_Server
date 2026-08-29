@@ -230,6 +230,46 @@ func (s *ChatService) GetReplyPreviews(ctx context.Context, messageIDs []string)
 	return s.chatRepo.GetReplyPreviews(ctx, messageIDs)
 }
 
+func (s *ChatService) GetMessagesHistory(ctx context.Context, userID, chatID string, cursor *dto.HistoryCursor, limit int) ([]models.Message, error) {
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+
+	var beforeCreatedAt *time.Time
+	var beforeID string
+	if cursor != nil {
+		t := cursor.CreatedAt
+		beforeCreatedAt = &t
+		beforeID = cursor.ID
+	}
+
+	messages, err := s.chatRepo.GetMessagesPaged(ctx, chatID, beforeCreatedAt, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range messages {
+		// Chỉ giải mã tin nhắn legacy (e2e_version = 0). Tin nhắn E2E
+		// (e2e_version = 1) giữ nguyên ciphertext — client tự giải mã.
+		if messages[i].E2EVersion != 0 {
+			continue
+		}
+		decrypted, err := utils.DecryptMessage(messages[i].Content, encryptionKey)
+		if err != nil {
+			fmt.Printf("failed to decrypt message %s: %v\n", messages[i].ID, err)
+			continue
+		}
+		messages[i].Content = decrypted
+	}
+
+	return messages, nil
+}
+
 func (s *ChatService) GetEncryptionKey(ctx context.Context, chatID string) (string, error) {
 	return s.chatRepo.GetEncryptionKey(ctx, chatID)
 }

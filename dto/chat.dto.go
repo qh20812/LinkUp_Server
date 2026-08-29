@@ -10,8 +10,21 @@ type WsEvent struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+type HistoryCursor struct {
+	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+}
+
 type ChatJoinPayload struct {
-	ChatID string `json:"chat_id"`
+	ChatID       string         `json:"chat_id"`
+	Limit        *int           `json:"limit,omitempty"`
+	BeforeCursor *HistoryCursor `json:"before_cursor,omitempty"`
+}
+
+type ChatHistoryMorePayload struct {
+	ChatID string        `json:"chat_id"`
+	Cursor HistoryCursor `json:"cursor"`
+	Limit  *int          `json:"limit,omitempty"`
 }
 
 type SendMessagePayload struct {
