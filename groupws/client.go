@@ -256,6 +256,11 @@ func (c *Client) ReadPump() {
 				Calls:    callItems,
 			})
 
+			// Gửi danh sách tin nhắn đã ghim
+			if pins, err := c.messageService.GetPinnedMessages(c.ctx, c.userID, payload.ChatID); err == nil && len(pins) > 0 {
+				c.sendEvent("group:message:pinned_list", map[string]any{"pinned_messages": pins})
+			}
+
 		case "group:message:send":
 			var payload dto.GroupSendMessagePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -377,6 +382,41 @@ func (c *Client) ReadPump() {
 			"keyword":  payload.Keyword,
 			"messages": out,
 		})
+
+		case "group:message:pin":
+			var payload dto.PinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu ghim không hợp lệ")
+				continue
+			}
+
+			pinDTO, err := c.messageService.PinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:message:pinned",
+				Payload: mustMarshal(pinDTO),
+			})
+
+		case "group:message:unpin":
+			var payload dto.UnpinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu bỏ ghim không hợp lệ")
+				continue
+			}
+
+			if err := c.messageService.UnpinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:message:unpinned",
+				Payload: mustMarshal(dto.MessageUnpinnedPayload{ChatID: payload.ChatID, MessageID: payload.MessageID}),
+			})
 
 		case "group:message:delete":
 			var payload dto.DeleteMessagePayload
