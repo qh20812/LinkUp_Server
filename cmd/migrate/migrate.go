@@ -90,6 +90,23 @@ func Run(db *gorm.DB) {
 		}
 	}
 
+	// ===== Pinned Messages table =====
+	if !db.Migrator().HasTable(&models.PinnedMessage{}) {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS pinned_messages (
+			id VARCHAR(36) PRIMARY KEY,
+			chat_id VARCHAR(36) NOT NULL,
+			message_id VARCHAR(36) NOT NULL,
+			pinned_by VARCHAR(36) NOT NULL,
+			pinned_at DATETIME NOT NULL,
+			UNIQUE INDEX idx_pinned_messages_chat_msg (chat_id, message_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create pinned_messages table: %v", err)
+		}
+	}
+	ensureForeignKey(db, "pinned_messages", "fk_pinned_chat", "chat_id", "chats", "id")
+	ensureForeignKey(db, "pinned_messages", "fk_pinned_message", "message_id", "messages", "id")
+	ensureForeignKey(db, "pinned_messages", "fk_pinned_by", "pinned_by", "users", "id")
+
 	// Seed dữ liệu mặc định cho các Gói Quảng Cáo
 	seedAdPackages(db)
 }

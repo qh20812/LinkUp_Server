@@ -436,3 +436,123 @@ func (s *GroupMessageService) LoadSharedPosts(ctx context.Context, messages []mo
 	}
 	return result
 }
+
+// ── Pin Message ────────────────────────────────────────────────────────────
+
+func (s *GroupMessageService) PinMessage(ctx context.Context, userID, chatID, messageID string) (*dto.PinnedMessageDTO, error) {
+	// Validate group membership
+	chat, err := s.ensureGroupMember(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	_ = chat
+
+	// Check permission: admin OR message sender
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("không tìm thấy tin nhắn")
+	}
+	if msg.ChatID != chatID {
+		return nil, fmt.Errorf("tin nhắn không thuộc nhóm này")
+	}
+	if msg.DeletedAt != nil {
+		return nil, fmt.Errorf("không thể ghim tin nhắn đã xóa")
+	}
+
+	if !isAdmin && msg.SenderID != userID {
+		return nil, fmt.Errorf("chỉ admin hoặc người gửi tin nhắn mới có thể ghim")
+	}
+
+	// Check if already pinned
+	pinned, err := s.chatRepo.IsMessagePinned(ctx, chatID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if pinned {
+		return nil, fmt.Errorf("tin nhắn đã được ghim")
+	}
+
+	// Auto-unpin oldest if at max
+	count, err := s.chatRepo.CountPinnedMessages(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if count >= 2 {
+		if err := s.chatRepo.AutoUnpinOldest(ctx, chatID); err != nil {
+			return nil, err
+		}
+	}
+
+	pm, err := s.chatRepo.PinMessage(ctx, chatID, messageID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt content
+	content := msg.Content
+	if err := s.DecryptMessageContent(ctx, msg); err == nil {
+		content = msg.Content
+	}
+
+	senderName := s.chatRepo.GetDisplayName(ctx, msg.SenderID)
+
+	return &dto.PinnedMessageDTO{
+		ID:         pm.ID,
+		MessageID:  pm.MessageID,
+		PinnedBy:   pm.PinnedBy,
+		PinnedAt:   pm.PinnedAt,
+		Content:    content,
+		SenderID:   msg.SenderID,
+		SenderName: senderName,
+	}, nil
+}
+
+func (s *GroupMessageService) UnpinMessage(ctx context.Context, userID, chatID, messageID string) error {
+	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
+		return err
+	}
+
+	// Check permission: admin OR the person who originally pinned it
+	// (simplified: allow admin or message sender to unpin)
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, userID)
+	if err != nil {
+		return err
+	}
+
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("không tìm thấy tin nhắn")
+	}
+
+	if !isAdmin && msg.SenderID != userID {
+		return fmt.Errorf("chỉ admin hoặc người gửi tin nhắn mới có thể bỏ ghim")
+	}
+
+	return s.chatRepo.UnpinMessage(ctx, chatID, messageID)
+}
+
+func (s *GroupMessageService) GetPinnedMessages(ctx context.Context, userID, chatID string) ([]dto.PinnedMessageDTO, error) {
+	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+
+	pins, err := s.chatRepo.GetPinnedMessages(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt content for each pinned message
+	for i := range pins {
+		tmpMsg := &models.Message{Content: pins[i].Content}
+		if err := s.DecryptMessageContent(ctx, tmpMsg); err == nil {
+			pins[i].Content = tmpMsg.Content
+		}
+	}
+
+	return pins, nil
+}

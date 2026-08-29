@@ -494,3 +494,128 @@ func (r *ChatRepository) GetDisplayName(ctx context.Context, userID string) stri
 	}
 	return result.DisplayName
 }
+
+// ── Pinned Messages ────────────────────────────────────────────────────────
+
+const maxPinnedPerChat = 2
+
+// PinMessage ghim tin nhắn vào chat. Trả về lỗi nếu chat đã đủ 2 tin ghim.
+// Khi đầy, phải gọi AutoUnpinOldest trước.
+func (r *ChatRepository) PinMessage(ctx context.Context, chatID, messageID, pinnedBy string) (*models.PinnedMessage, error) {
+	// Đếm số tin đã ghim trong chat
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("pinned_messages").
+		Where("chat_id = ?", chatID).
+		Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("count pinned messages: %w", err)
+	}
+	if count >= maxPinnedPerChat {
+		return nil, fmt.Errorf("chat đã đạt tối đa %d tin nhắn ghim", maxPinnedPerChat)
+	}
+
+	pm := &models.PinnedMessage{
+		ID:        utils.GenerateUUID(),
+		ChatID:    chatID,
+		MessageID: messageID,
+		PinnedBy:  pinnedBy,
+		PinnedAt:  time.Now().UTC(),
+	}
+	if err := r.db.WithContext(ctx).Create(pm).Error; err != nil {
+		return nil, fmt.Errorf("pin message: %w", err)
+	}
+	return pm, nil
+}
+
+// AutoUnpinOldest bỏ ghim tin nhắn cũ nhất trong chat (dùng khi muốn ghim thêm
+// mà đã đạt max).
+func (r *ChatRepository) AutoUnpinOldest(ctx context.Context, chatID string) error {
+	var oldest models.PinnedMessage
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ?", chatID).
+		Order("pinned_at ASC").
+		First(&oldest).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("find oldest pin: %w", err)
+	}
+	return r.db.WithContext(ctx).Where("id = ?", oldest.ID).Delete(&models.PinnedMessage{}).Error
+}
+
+// UnpinMessage bỏ ghim một tin nhắn trong chat.
+func (r *ChatRepository) UnpinMessage(ctx context.Context, chatID, messageID string) error {
+	tx := r.db.WithContext(ctx).
+		Where("chat_id = ? AND message_id = ?", chatID, messageID).
+		Delete(&models.PinnedMessage{})
+	if tx.Error != nil {
+		return fmt.Errorf("unpin message: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("tin nhắn chưa được ghim")
+	}
+	return nil
+}
+
+// GetPinnedMessages lấy danh sách tin nhắn đã ghim trong chat, kèm nội dung đã
+// giải mã và tên người gửi.
+func (r *ChatRepository) GetPinnedMessages(ctx context.Context, chatID string) ([]dto.PinnedMessageDTO, error) {
+	type pinRow struct {
+		ID           string `gorm:"column:id"`
+		MessageID    string `gorm:"column:message_id"`
+		PinnedBy     string `gorm:"column:pinned_by"`
+		PinnedAt     time.Time `gorm:"column:pinned_at"`
+		Content      string `gorm:"column:content"`
+		SenderID     string `gorm:"column:sender_id"`
+		DisplayName  string `gorm:"column:display_name"`
+	}
+	var rows []pinRow
+	err := r.db.WithContext(ctx).
+		Table("pinned_messages AS pm").
+		Select(`pm.id, pm.message_id, pm.pinned_by, pm.pinned_at,
+			m.content, m.sender_id,
+			COALESCE(p.display_name, '') AS display_name`).
+		Joins("JOIN messages AS m ON m.id = pm.message_id").
+		Joins("LEFT JOIN profiles AS p ON p.user_id = m.sender_id").
+		Where("pm.chat_id = ?", chatID).
+		Order("pm.pinned_at DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("get pinned messages: %w", err)
+	}
+
+	result := make([]dto.PinnedMessageDTO, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, dto.PinnedMessageDTO{
+			ID:         row.ID,
+			MessageID:  row.MessageID,
+			PinnedBy:   row.PinnedBy,
+			PinnedAt:   row.PinnedAt,
+			Content:    row.Content,
+			SenderID:   row.SenderID,
+			SenderName: row.DisplayName,
+		})
+	}
+	return result, nil
+}
+
+// CountPinnedMessages đếm số tin đã ghim trong chat.
+func (r *ChatRepository) CountPinnedMessages(ctx context.Context, chatID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("pinned_messages").
+		Where("chat_id = ?", chatID).
+		Count(&count).Error
+	return count, err
+}
+
+// IsMessagePinned kiểm tra tin nhắn đã được ghim chưa.
+func (r *ChatRepository) IsMessagePinned(ctx context.Context, chatID, messageID string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("pinned_messages").
+		Where("chat_id = ? AND message_id = ?", chatID, messageID).
+		Count(&count).Error
+	return count > 0, err
+}

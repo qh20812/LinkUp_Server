@@ -620,3 +620,136 @@ func (s *ChatService) DeleteChat(ctx context.Context, userID, chatID string) err
 
 	return s.chatRepo.DeleteChat(ctx, chatID)
 }
+
+// ── Pin Message ────────────────────────────────────────────────────────────
+
+func (s *ChatService) PinMessage(ctx context.Context, userID, chatID, messageID string) (*dto.PinnedMessageDTO, error) {
+	// Validate chat exists
+	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if chat.Type != models.ChatTypeDirect {
+		return nil, fmt.Errorf("không phải chat trực tiếp")
+	}
+
+	// Validate user is participant
+	ok, err := s.chatRepo.IsUserParticipant(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
+	}
+
+	// Validate message exists in this chat
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("không tìm thấy tin nhắn")
+	}
+	if msg.ChatID != chatID {
+		return nil, fmt.Errorf("tin nhắn không thuộc chat này")
+	}
+	if msg.DeletedAt != nil {
+		return nil, fmt.Errorf("không thể ghim tin nhắn đã xóa")
+	}
+
+	// Check if already pinned
+	pinned, err := s.chatRepo.IsMessagePinned(ctx, chatID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if pinned {
+		return nil, fmt.Errorf("tin nhắn đã được ghim")
+	}
+
+	// Auto-unpin oldest if at max
+	count, err := s.chatRepo.CountPinnedMessages(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if count >= 2 {
+		if err := s.chatRepo.AutoUnpinOldest(ctx, chatID); err != nil {
+			return nil, err
+		}
+	}
+
+	pm, err := s.chatRepo.PinMessage(ctx, chatID, messageID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt content for the DTO
+	content := msg.Content
+	if msg.E2EVersion == 0 {
+		decrypted, dErr := s.chatRepo.GetEncryptionKey(ctx, chatID)
+		if dErr == nil && decrypted != "" {
+			if dec, e := utils.DecryptMessage(content, decrypted); e == nil {
+				content = dec
+			}
+		}
+	}
+
+	senderName := s.chatRepo.GetDisplayName(ctx, msg.SenderID)
+
+	return &dto.PinnedMessageDTO{
+		ID:         pm.ID,
+		MessageID:  pm.MessageID,
+		PinnedBy:   pm.PinnedBy,
+		PinnedAt:   pm.PinnedAt,
+		Content:    content,
+		SenderID:   msg.SenderID,
+		SenderName: senderName,
+	}, nil
+}
+
+func (s *ChatService) UnpinMessage(ctx context.Context, userID, chatID, messageID string) error {
+	// Validate chat exists
+	if _, err := s.chatRepo.FindChatByID(ctx, chatID); err != nil {
+		return err
+	}
+
+	// Validate user is participant
+	ok, err := s.chatRepo.IsUserParticipant(ctx, chatID, userID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
+	}
+
+	return s.chatRepo.UnpinMessage(ctx, chatID, messageID)
+}
+
+func (s *ChatService) GetPinnedMessages(ctx context.Context, userID, chatID string) ([]dto.PinnedMessageDTO, error) {
+	// Validate chat exists
+	if _, err := s.chatRepo.FindChatByID(ctx, chatID); err != nil {
+		return nil, err
+	}
+
+	// Validate user is participant
+	ok, err := s.chatRepo.IsUserParticipant(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
+	}
+
+	pins, err := s.chatRepo.GetPinnedMessages(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt content for each pinned message
+	encKey, _ := s.chatRepo.GetEncryptionKey(ctx, chatID)
+	for i := range pins {
+		if encKey != "" {
+			if decrypted, e := utils.DecryptMessage(pins[i].Content, encKey); e == nil {
+				pins[i].Content = decrypted
+			}
+		}
+	}
+
+	return pins, nil
+}

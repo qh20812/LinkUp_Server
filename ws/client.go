@@ -81,7 +81,7 @@ func (c *Client) ReadPump() {
 		// Chat events cần ChatService. Call events có nil check riêng.
 		if c.service == nil {
 			switch event.Type {
-			case "chat:join", "message:send", "typing:start", "typing:stop", "message:delete", "message:search":
+			case "chat:join", "message:send", "typing:start", "typing:stop", "message:delete", "message:search", "message:pin", "message:unpin":
 				continue
 			}
 		}
@@ -144,6 +144,15 @@ func (c *Client) ReadPump() {
 				}),
 			})
 			c.send <- resp
+
+			// Gửi danh sách tin nhắn đã ghim
+			if pins, err := c.service.GetPinnedMessages(c.ctx, c.userID, payload.ChatID); err == nil && len(pins) > 0 {
+				pinResp, _ := json.Marshal(dto.WsEvent{
+					Type:    "message:pinned_list",
+					Payload: mustMarshal(map[string]any{"pinned_messages": pins}),
+				})
+				c.send <- pinResp
+			}
 
 		case "message:send":
 			var payload dto.SendMessagePayload
@@ -293,6 +302,43 @@ func (c *Client) ReadPump() {
 				}),
 			})
 			c.send <- resp
+
+		case "message:pin":
+			var payload dto.PinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu ghim không hợp lệ")
+				continue
+			}
+
+			pinDTO, err := c.service.PinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			pinnedResp, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:pinned",
+				Payload: mustMarshal(pinDTO),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: pinnedResp}
+
+		case "message:unpin":
+			var payload dto.UnpinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu bỏ ghim không hợp lệ")
+				continue
+			}
+
+			if err := c.service.UnpinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			unpinnedResp, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:unpinned",
+				Payload: mustMarshal(dto.MessageUnpinnedPayload{ChatID: payload.ChatID, MessageID: payload.MessageID}),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: unpinnedResp}
 
 		case "call:busy":
 			// Client xác nhận đã nhận được thông báo busy — bỏ qua, không cần xử lý thêm

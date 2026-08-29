@@ -150,3 +150,41 @@ type ChatInviteItemDTO struct {
 type ChatInviteListResponse struct {
 	Data []ChatInviteItemDTO `json:"data"`
 }
+
+// ── Pin Message DTOs ───────────────────────────────────────────────────────
+
+type PinMessagePayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+}
+
+type UnpinMessagePayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+}
+
+type MessagePinnedPayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	PinnedBy  string `json:"pinned_by"`
+	PinnedAt  string `json:"pinned_at"`
+}
+
+type MessageUnpinnedPayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+}
+
+type PinnedMessageDTO struct {
+	ID         string    `json:"id"`
+	MessageID  string    `json:"message_id"`
+	PinnedBy   string    `json:"pinned_by"`
+	PinnedAt   time.Time `json:"pinned_at"`
+	Content    string    `json:"content"`
+	SenderID   string    `json:"sender_id"`
+	SenderName string    `json:"sender_name"`
+}
+
+type PinnedMessagesResponse struct {
+	PinnedMessages []PinnedMessageDTO `json:"pinned_messages"`
+}
