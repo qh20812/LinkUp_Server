@@ -208,7 +208,7 @@ func main() {
 		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, postRepository, userSettingsRepository, profileRepository, notificationService, chatValidation)
 		chatHub := ws.NewHub()
 		go chatHub.Run()
-		chatController := controllers.NewChatController(chatHub, chatService, postRepository, env)
+		chatController := controllers.NewChatController(chatHub, chatService, mediaService, postRepository, env)
 		routes.RegisterChatRoutes(router, chatController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG PRESENCE (ONLINE/OFFLINE STATUS) =====

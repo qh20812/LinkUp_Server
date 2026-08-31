@@ -17,18 +17,20 @@ import (
 )
 
 type ChatController struct {
-	hub         *ws.Hub
-	chatService *services.ChatService
-	postRepo    *repository.PostRepository
-	env         config.Env
+	hub          *ws.Hub
+	chatService  *services.ChatService
+	mediaService services.MediaService
+	postRepo     *repository.PostRepository
+	env          config.Env
 }
 
-func NewChatController(hub *ws.Hub, chatService *services.ChatService, postRepo *repository.PostRepository, env config.Env) *ChatController {
+func NewChatController(hub *ws.Hub, chatService *services.ChatService, mediaService services.MediaService, postRepo *repository.PostRepository, env config.Env) *ChatController {
 	return &ChatController{
-		hub:         hub,
-		chatService: chatService,
-		postRepo:    postRepo,
-		env:         env,
+		hub:          hub,
+		chatService:  chatService,
+		mediaService: mediaService,
+		postRepo:     postRepo,
+		env:          env,
 	}
 }
 
@@ -251,5 +253,63 @@ func (ctrl *ChatController) SharePost(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Chia sẻ bài viết thành công",
 		"data":    msg,
+	})
+}
+
+func (ctrl *ChatController) UploadChatMedia(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+
+	chatID := c.PostForm("chat_id")
+	if chatID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	if err := ctrl.chatService.JoinChat(c.Request.Context(), userID, chatID); err != nil {
+		errorsapp.Respond(c, http.StatusForbidden, err)
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	media, err := ctrl.mediaService.UploadChatMedia(c.Request.Context(), userID, file)
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			status := errorsapp.StatusCode(appErr.Code)
+			if appErr.Code == errorsapp.ErrCodeMediaInsufficientStorage {
+				status = http.StatusPaymentRequired
+			}
+			errorsapp.Respond(c, status, appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	quota, used, available, _ := ctrl.mediaService.GetUserStorageStatus(c.Request.Context(), userID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"data": dto.UploadMediaResponse{
+			ID:               media.ID,
+			FileURI:          media.FileURI,
+			FileType:         media.FileType,
+			FileSize:         media.FileSize,
+			Status:           media.Status.String(),
+			AvailableStorage: available,
+		},
+		"storage": gin.H{
+			"quota_bytes":     quota,
+			"used_bytes":      used,
+			"available_bytes": available,
+		},
 	})
 }

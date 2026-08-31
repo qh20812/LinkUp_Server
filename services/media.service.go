@@ -23,6 +23,7 @@ import (
 
 type MediaService interface {
 	UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
+	UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
@@ -68,7 +69,19 @@ func (s *mediaService) SetStoryRepo(repo repository.StoryRepository) {
 }
 
 func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
-	// 1. Kiểm tra storage quota
+	media, err := s.upload(ctx, userID, file, models.MediaStatusPending)
+	if err != nil {
+		return nil, err
+	}
+	go s.moderateInBackground(media.ID, media.FileURI)
+	return media, nil
+}
+
+func (s *mediaService) UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
+	return s.upload(ctx, userID, file, models.MediaStatusApproved)
+}
+
+func (s *mediaService) upload(ctx context.Context, userID string, file *multipart.FileHeader, status models.MediaStatus) (*models.Media, error) {
 	quota, used, err := s.repo.GetUserStorageInfo(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get storage info: %w", err)
@@ -78,7 +91,6 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 		available = 0
 	}
 
-	// 2. Validate file type + size
 	if err := s.validation.ValidateFile(file.Filename, file.Size, file.Header.Get("Content-Type")); err != nil {
 		return nil, err
 	}
@@ -86,36 +98,29 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 		return nil, err
 	}
 
-	// 3. Mở file
 	src, err := file.Open()
 	if err != nil {
 		return nil, fmt.Errorf("open file: %w", err)
 	}
 	defer src.Close()
 
-	// 4. Upload lên Cloudinary KHÔNG chạy moderation (nhanh)
 	publicID := utils.GenerateUUID()
 	uploadResult, err := s.aiModeration.UploadWithoutModeration(ctx, src, publicID)
 	if err != nil {
 		return nil, fmt.Errorf("upload to cloudinary: %w", err)
 	}
 
-	// 5. Tạo media record — status = pending, chờ moderation chạy nền
 	media := models.NewMedia(userID, nil, uploadResult.SecureURL, file.Header.Get("Content-Type"), float64(file.Size))
 	media.ID = publicID
 	media.CreatedAt = time.Now()
-	media.Status = models.MediaStatusPending
+	media.Status = status
 
-	// 6. Lưu DB
 	if err := s.repo.Create(ctx, &media); err != nil {
 		return nil, fmt.Errorf("save media record: %w", err)
 	}
 	if err := s.repo.UpdateStorageUsage(ctx, userID, float64(file.Size)); err != nil {
 		return nil, fmt.Errorf("update storage usage: %w", err)
 	}
-
-	// 7. Chạy moderation nền (không block response)
-	go s.moderateInBackground(media.ID, uploadResult.SecureURL)
 
 	return &media, nil
 }

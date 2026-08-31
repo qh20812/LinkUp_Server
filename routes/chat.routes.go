@@ -22,6 +22,7 @@ func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, en
 		chatGroup.POST("/invite", ctrl.CreateChatInvite)
 		chatGroup.POST("/invite/respond", ctrl.ResponseChatInvite)
 
+		chatGroup.POST("/media", ctrl.UploadChatMedia)
 		chatGroup.GET("/messages/:messageID/download", ctrl.DownloadMessageMedia)
 		chatGroup.DELETE("/:chatID", ctrl.DeleteChat)
 		chatGroup.POST("/share", ctrl.SharePost)
