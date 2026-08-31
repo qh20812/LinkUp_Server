@@ -244,7 +244,7 @@ func (ctrl *ChatController) SharePost(c *gin.Context) {
 	}
 
 	sharedPostID := input.SharedPostID
-	msg, err := ctrl.chatService.SendMessage(c.Request.Context(), userID, chat.ID, "", 0, nil, nil, nil, nil, &sharedPostID)
+	msg, err := ctrl.chatService.SendMessage(c.Request.Context(), userID, chat.ID, "", 0, nil, nil, nil, nil, &sharedPostID, nil)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return

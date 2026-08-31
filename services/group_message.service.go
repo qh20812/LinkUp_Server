@@ -79,7 +79,7 @@ func (s *GroupMessageService) JoinRoom(ctx context.Context, userID, chatID strin
 func (s *GroupMessageService) SendMessage(
 	ctx context.Context,
 	userID, chatID, content string,
-	emojiID, mediaID, gifURL, replyToMessageID, sharedPostID *string,
+	emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID *string,
 ) (*models.Message, error) {
 	chat, err := s.ensureGroupMember(ctx, userID, chatID)
 	if err != nil {
@@ -172,6 +172,7 @@ func (s *GroupMessageService) SendMessage(
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+	msg.MediaGroupID = mediaGroupID
 	if sharedPostID != nil && *sharedPostID != "" {
 		msg.SharedPostID = sharedPostID
 		msg.Type = "shared_post"

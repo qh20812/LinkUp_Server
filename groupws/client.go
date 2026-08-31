@@ -178,6 +178,7 @@ func (c *Client) ReadPump() {
 				Content:          m.Content,
 				EmojiID:          m.EmojiID,
 				MediaID:          m.MediaID,
+				MediaGroupID:     m.MediaGroupID,
 				ReplyToMessageID: m.ReplyToMessageID,
 				SharedPostID:     m.SharedPostID,
 				Type:             m.Type,
@@ -278,6 +279,7 @@ func (c *Client) ReadPump() {
 			payload.GifURL,
 			payload.ReplyToMessageID,
 			payload.SharedPostID,
+			payload.MediaGroupID,
 		)
 			if err != nil {
 				c.sendError(err.Error())
@@ -293,6 +295,7 @@ func (c *Client) ReadPump() {
 			Content:          msg.Content,
 			EmojiID:          msg.EmojiID,
 			MediaID:          msg.MediaID,
+			MediaGroupID:     msg.MediaGroupID,
 			ReplyToMessageID: msg.ReplyToMessageID,
 			SharedPostID:     msg.SharedPostID,
 			Type:             msg.Type,
@@ -373,6 +376,7 @@ func (c *Client) ReadPump() {
 					Content:   m.Content,
 					EmojiID:   m.EmojiID,
 					MediaID:   m.MediaID,
+					MediaGroupID: m.MediaGroupID,
 					CreatedAt: m.CreatedAt,
 				})
 			}

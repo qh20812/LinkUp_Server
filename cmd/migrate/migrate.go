@@ -41,6 +41,11 @@ func Run(db *gorm.DB) {
 	// idempotent, không làm mất dữ liệu khi chạy lại.
 	ensureColumn(db, "messages", "e2e_version", "INT NOT NULL DEFAULT 0")
 
+	// Thêm cột messages.media_group_id cho tính năng gộp media nhiều file
+	// (media_group_id dùng chung cho các message trong cùng một batch gửi).
+	ensureColumn(db, "messages", "media_group_id", "VARCHAR(36) NULL")
+	ensureIndex(db, "messages", "idx_messages_media_group_id", "media_group_id")
+
 	// Thêm cột pin cho posts (is_pinned/pinned_at)
 	ensureColumn(db, "posts", "is_pinned", "TINYINT(1) NOT NULL DEFAULT 0")
 	ensureColumn(db, "posts", "pinned_at", "DATETIME NULL")

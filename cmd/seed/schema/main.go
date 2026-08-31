@@ -388,6 +388,7 @@ func Run(env config.Env) error {
 			sender_id VARCHAR(36) NOT NULL,
 			content TEXT NOT NULL,
 			media_id VARCHAR(36) NULL,
+			media_group_id VARCHAR(36) NULL,
 			emoji_id VARCHAR(36) NULL,
 			deleted_for_sender TINYINT(1) NOT NULL DEFAULT 0,
 			deleted_for_receiver TINYINT(1) NOT NULL DEFAULT 0,
@@ -398,7 +399,8 @@ func Run(env config.Env) error {
 			FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
 			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE SET NULL,
 			INDEX idx_messages_chat_id (chat_id),
-			INDEX idx_messages_sender_id (sender_id)
+			INDEX idx_messages_sender_id (sender_id),
+			INDEX idx_messages_media_group_id (media_group_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 18. Depends on users

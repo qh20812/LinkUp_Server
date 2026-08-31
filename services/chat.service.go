@@ -54,7 +54,7 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID, sharedPostID *string) (*models.Message, error) {
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -157,6 +157,7 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+	msg.MediaGroupID = mediaGroupID
 	if sharedPostID != nil && *sharedPostID != "" {
 		msg.SharedPostID = sharedPostID
 		msg.Type = "shared_post"

@@ -136,7 +136,7 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID, payload.SharedPostID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID, payload.SharedPostID, payload.MediaGroupID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
@@ -161,6 +161,7 @@ func (c *Client) ReadPump() {
 				Content:          content,
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
+				MediaGroupID:     msg.MediaGroupID,
 				ReplyToMessageID: msg.ReplyToMessageID,
 				SharedPostID:     msg.SharedPostID,
 				Type:             msg.Type,
@@ -534,6 +535,7 @@ func toMessagePayloads(messages []models.Message, userID string, sharedPosts ...
 			Content:          content,
 			EmojiID:          msg.EmojiID,
 			MediaID:          msg.MediaID,
+			MediaGroupID:     msg.MediaGroupID,
 			ReplyToMessageID: msg.ReplyToMessageID,
 			SharedPostID:     msg.SharedPostID,
 			Type:             msg.Type,

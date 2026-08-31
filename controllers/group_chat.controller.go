@@ -141,6 +141,7 @@ func (ctrl *GroupChatController) SendGroupMessage(c *gin.Context) {
 		nil,
 		input.ReplyToMessageID,
 		input.SharedPostID,
+		nil,
 	)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)

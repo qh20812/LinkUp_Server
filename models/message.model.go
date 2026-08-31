@@ -8,6 +8,7 @@ type Message struct {
 	SenderID           string     `json:"sender_id" db:"sender_id"`
 	Content            string     `json:"content" db:"content"`
 	MediaID            *string    `json:"media_id,omitempty" db:"media_id"`
+	MediaGroupID       *string    `json:"media_group_id,omitempty" db:"media_group_id"`
 	EmojiID            *string    `json:"emoji_id,omitempty" db:"emoji_id"`
 	ReplyToMessageID   *string    `json:"reply_to_message_id,omitempty" db:"reply_to_message_id"`
 	SharedPostID       *string    `json:"shared_post_id,omitempty" db:"shared_post_id"`
@@ -24,4 +25,8 @@ type Message struct {
 
 func NewMessage(chatID, senderID string, content string, mediaID, emojiID *string) Message {
 	return Message{ChatID: chatID, SenderID: senderID, Content: content, MediaID: mediaID, EmojiID: emojiID}
+}
+
+func NewGroupedMessage(chatID, senderID string, content string, mediaID, emojiID, mediaGroupID *string) Message {
+	return Message{ChatID: chatID, SenderID: senderID, Content: content, MediaID: mediaID, EmojiID: emojiID, MediaGroupID: mediaGroupID}
 }
