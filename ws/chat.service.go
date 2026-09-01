@@ -17,6 +17,7 @@ type ChatService interface {
 	DecryptMessage(ctx context.Context, chatID, encryptedContent string) (string, error)
 	GetEncryptionKey(ctx context.Context, chatID string) (string, error)
 	GetReplyPreviews(ctx context.Context, messageIDs []string) map[string]*dto.ReplyPreview
+	GetMediaFileTypes(ctx context.Context, mediaIDs []string) map[string]string
 	PinMessage(ctx context.Context, userID, chatID, messageID string) (*dto.PinnedMessageDTO, error)
 	UnpinMessage(ctx context.Context, userID, chatID, messageID string) error
 	GetPinnedMessages(ctx context.Context, userID, chatID string) ([]dto.PinnedMessageDTO, error)

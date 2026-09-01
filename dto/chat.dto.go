@@ -47,6 +47,7 @@ type MessagePayload struct {
 	EmojiID          *string             `json:"emoji_id,omitempty"`
 	MediaID          *string             `json:"media_id,omitempty"`
 	MediaGroupID     *string             `json:"media_group_id,omitempty"`
+	MediaType        string              `json:"media_type,omitempty"`
 	ReplyToMessageID *string             `json:"reply_to_message_id,omitempty"`
 	ReplyTo          *ReplyPreview       `json:"reply_to,omitempty"`
 	SharedPostID     *string             `json:"shared_post_id,omitempty"`

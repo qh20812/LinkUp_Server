@@ -168,6 +168,7 @@ func (c *Client) ReadPump() {
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
 		sharedPosts := c.messageService.LoadSharedPosts(c.ctx, history)
+		mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(history))
 
 		msgs := make([]dto.MessagePayload, 0, len(history))
 		for _, m := range history {
@@ -187,6 +188,9 @@ func (c *Client) ReadPump() {
 				AnonymousName:    m.AnonymousName,
 				Deleted:          m.DeletedAt != nil,
 				CreatedAt:        m.CreatedAt,
+			}
+			if m.MediaID != nil && mediaTypes != nil {
+				p.MediaType = mediaTypes[*m.MediaID]
 			}
 			if prof, ok := profiles[m.SenderID]; ok {
 				p.SenderName = prof.DisplayName
@@ -301,6 +305,9 @@ func (c *Client) ReadPump() {
 			Type:             msg.Type,
 			CreatedAt:        msg.CreatedAt,
 		}
+		if msg.MediaID != nil && *msg.MediaID != "" {
+			newPayload.MediaType = c.messageService.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})
 		if prof, ok := profiles[msg.SenderID]; ok {
 			newPayload.SenderName = prof.DisplayName
@@ -368,17 +375,22 @@ func (c *Client) ReadPump() {
 			}
 
 			out := make([]dto.MessagePayload, 0, len(messages))
+			mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(messages))
 			for _, m := range messages {
-				out = append(out, dto.MessagePayload{
-					ID:        m.ID,
-					ChatID:    m.ChatID,
-					SenderID:  m.SenderID,
-					Content:   m.Content,
-					EmojiID:   m.EmojiID,
-					MediaID:   m.MediaID,
-					MediaGroupID: m.MediaGroupID,
-					CreatedAt: m.CreatedAt,
-				})
+				p := dto.MessagePayload{
+					ID:            m.ID,
+					ChatID:        m.ChatID,
+					SenderID:      m.SenderID,
+					Content:       m.Content,
+					EmojiID:       m.EmojiID,
+					MediaID:       m.MediaID,
+					MediaGroupID:  m.MediaGroupID,
+					CreatedAt:     m.CreatedAt,
+				}
+				if m.MediaID != nil && mediaTypes != nil {
+					p.MediaType = mediaTypes[*m.MediaID]
+				}
+				out = append(out, p)
 			}
 
 		c.sendEvent("group:message:search_result", map[string]any{
@@ -1091,6 +1103,16 @@ func (c *Client) sendError(text string) {
 func mustMarshal(v any) []byte {
 	out, _ := json.Marshal(v)
 	return out
+}
+
+func collectGroupMediaIDs(messages []models.Message) []string {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaID != nil && *m.MediaID != "" {
+			ids = append(ids, *m.MediaID)
+		}
+	}
+	return ids
 }
 
 func (c *Client) cleanupCallSession() {

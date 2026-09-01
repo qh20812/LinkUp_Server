@@ -390,6 +390,25 @@ func (s *GroupMessageService) GetChatRepo() *repository.ChatRepository {
 	return s.chatRepo
 }
 
+func (s *GroupMessageService) GetMediaFileTypes(ctx context.Context, mediaIDs []string) map[string]string {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	result, err := s.mediaRepo.GetFileTypesByIDs(ctx, ids)
+	if err != nil {
+		return map[string]string{}
+	}
+	return result
+}
+
 func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {
 	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
 		return nil, err

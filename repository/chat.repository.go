@@ -402,6 +402,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		LastContent        *string    `gorm:"column:last_content"`
 		LastSenderID       *string    `gorm:"column:last_sender_id"`
 		LastE2EVersion     *int       `gorm:"column:last_e2e_version"`
+		LastMediaType      string     `gorm:"column:last_media_type"`
 		LastCreatedAt      *time.Time `gorm:"column:last_created_at"`
 		UpdatedAt          time.Time  `gorm:"column:updated_at"`
 	}{}
@@ -416,6 +417,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			lm.content AS last_content,
 			lm.sender_id AS last_sender_id,
 			lm.e2e_version AS last_e2e_version,
+			COALESCE(lmm.file_type, '') AS last_media_type,
 			lm.created_at AS last_created_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
@@ -429,6 +431,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			ORDER BY m2.created_at DESC
 			LIMIT 1
 		)`, userID, userID).
+		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Where("chats.type = ?", models.ChatTypeDirect).
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
@@ -459,6 +462,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 				ChatID:     row.ChatID,
 				SenderID:   derefString(row.LastSenderID),
 				Content:    *row.LastContent,
+				MediaType:  row.LastMediaType,
 				E2EVersion: e2eVersion,
 				CreatedAt:  *row.LastCreatedAt,
 			}

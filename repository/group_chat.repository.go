@@ -427,6 +427,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		LastMsgID   *string    `gorm:"column:last_message_id"`
 		LastContent *string    `gorm:"column:last_content"`
 		LastSender  *string    `gorm:"column:last_sender_id"`
+		LastMediaType string   `gorm:"column:last_media_type"`
 		LastCreated *time.Time `gorm:"column:last_created_at"`
 		UpdatedAt   time.Time  `gorm:"column:updated_at"`
 	}
@@ -442,6 +443,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			lm.id AS last_message_id,
 			lm.content AS last_content,
 			lm.sender_id AS last_sender_id,
+			COALESCE(lmm.file_type, '') AS last_media_type,
 			lm.created_at AS last_created_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
@@ -454,8 +456,9 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			ORDER BY m2.created_at DESC
 			LIMIT 1
 		)`, userID, userID).
+		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Where("chats.type = ?", models.ChatTypeGroup).
-		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lm.created_at, chats.created_at").
+		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lm.created_at, chats.created_at").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -477,6 +480,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 				ChatID:    r.ChatID,
 				SenderID:  derefString(r.LastSender),
 				Content:   *r.LastContent,
+				MediaType: r.LastMediaType,
 				CreatedAt: *r.LastCreated,
 			}
 		}

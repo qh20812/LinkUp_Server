@@ -44,6 +44,29 @@ func (r *MediaRepository) GetByID(ctx context.Context, id string) (*models.Media
 	return &media, nil
 }
 
+func (r *MediaRepository) GetFileTypesByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	var rows []struct {
+		ID       string
+		FileType string
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Select("id, file_type").
+		Where("id IN ?", ids).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(rows))
+	for _, row := range rows {
+		result[row.ID] = row.FileType
+	}
+	return result, nil
+}
+
 func (r *MediaRepository) GetByUserID(ctx context.Context, userID string) ([]models.Media, error) {
 	var medias []models.Media
 	err := r.db.WithContext(ctx).Where("user_id = ? AND status != ?", userID, models.MediaStatusRejected).Find(&medias).Error
