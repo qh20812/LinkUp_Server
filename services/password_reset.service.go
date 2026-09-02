@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -86,7 +87,10 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 	}
 	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, rawToken)
 
-	if err := utils.SendResetPasswordEmail(user.Email, user.Username, resetLink); err != nil {
+	deepLink := fmt.Sprintf("linkupmobile://reset-password?token=%s", rawToken)
+	mobileResetLink := fmt.Sprintf("%s/open-app?redirect=%s", frontendURL, url.QueryEscape(deepLink))
+
+	if err := utils.SendResetPasswordEmail(user.Email, user.Username, resetLink, mobileResetLink); err != nil {
 		fmt.Printf("Warning: Failed to send email: %v\n", err)
 	}
 

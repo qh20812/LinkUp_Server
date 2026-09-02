@@ -11,7 +11,7 @@ type EmailConfig struct {
 	Password string
 }
 
-func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
+func SendResetPasswordEmail(toEmail, userName, resetLink, mobileLink string) error {
 	gmailUser := os.Getenv("GMAIL_USER")
 	gmailPassword := os.Getenv("GMAIL_PASSWORD")
 
@@ -37,7 +37,11 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
         <p>Để đặt lại mật khẩu, vui lòng nhấp vào nút bên dưới:</p>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Đặt lại mật khẩu</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Đặt lại mật khẩu trên Web</a>
+        </div>
+        
+        <div style="margin: 30px 0;">
+            <a href="%s" style="background-color: #40E0D0; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
@@ -54,7 +58,7 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
     </div>
 </body>
 </html>
-    `, userName, resetLink, resetLink)
+    `, userName, resetLink, mobileLink, resetLink)
 
 	to := []string{toEmail}
 	smtpHost := "smtp.gmail.com"
@@ -71,7 +75,7 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
 	return err
 }
 
-func SendVerificationEmail(toEmail, userName, verifyLink string) error {
+func SendVerificationEmail(toEmail, userName, verifyLink, mobileLink string) error {
 	gmailUser := os.Getenv("GMAIL_USER")
 	gmailPassword := os.Getenv("GMAIL_PASSWORD")
 
@@ -95,7 +99,11 @@ func SendVerificationEmail(toEmail, userName, verifyLink string) error {
         <p>Cảm ơn bạn đã đăng ký tài khoản LinkUp! Vui lòng nhấp vào nút bên dưới để xác thực địa chỉ email của bạn.</p>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Xác thực email</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Xác thực trên Web</a>
+        </div>
+        
+        <div style="margin: 30px 0;">
+            <a href="%s" style="background-color: #40E0D0; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
@@ -113,7 +121,7 @@ func SendVerificationEmail(toEmail, userName, verifyLink string) error {
     </div>
 </body>
 </html>
-    `, userName, verifyLink, verifyLink)
+    `, userName, verifyLink, mobileLink, verifyLink)
 
 	to := []string{toEmail}
 	smtpHost := "smtp.gmail.com"

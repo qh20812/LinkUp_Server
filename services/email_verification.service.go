@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -58,8 +59,10 @@ func (s *EmailVerificationService) SendVerificationEmail(ctx context.Context, us
 	}
 
 	verifyLink := fmt.Sprintf("%s/verify-email?token=%s", s.env.FrontendURL, rawToken)
+	deepLink := fmt.Sprintf("linkupmobile://verify-email?token=%s", rawToken)
+	mobileLink := fmt.Sprintf("%s/open-app?redirect=%s", s.env.FrontendURL, url.QueryEscape(deepLink))
 
-	if err := utils.SendVerificationEmail(email, userName, verifyLink); err != nil {
+	if err := utils.SendVerificationEmail(email, userName, verifyLink, mobileLink); err != nil {
 		fmt.Printf("Warning: Failed to send verification email: %v\n", err)
 	}
 
