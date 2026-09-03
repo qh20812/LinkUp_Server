@@ -41,7 +41,7 @@ func SendResetPasswordEmail(toEmail, userName, resetLink, mobileLink string) err
         </div>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #40E0D0; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
@@ -103,7 +103,7 @@ func SendVerificationEmail(toEmail, userName, verifyLink, mobileLink string) err
         </div>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #40E0D0; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
