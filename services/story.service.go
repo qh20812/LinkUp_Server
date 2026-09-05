@@ -56,8 +56,8 @@ func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeade
 			return nil, errorsapp.New(errorsapp.ErrCodeStoryInvalidFormat)
 		}
 
-		// Upload file qua MediaService
-		mediaRecord, err := s.mediaService.UploadMedia(ctx, userID, fileHeader)
+		// Upload file qua MediaService (auto-approved, không chạy AI moderation)
+		mediaRecord, err := s.mediaService.AutoApproveUpload(ctx, userID, fileHeader)
 		if err != nil {
 			return nil, err
 		}

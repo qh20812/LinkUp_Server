@@ -37,7 +37,7 @@ func (ctrl *MediaController) UploadMedia(c *gin.Context) {
 		return
 	}
 
-	media, err := ctrl.service.UploadMedia(c.Request.Context(), userID, file)
+	media, err := ctrl.service.AutoApproveUpload(c.Request.Context(), userID, file)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			status := errorsapp.StatusCode(appErr.Code)

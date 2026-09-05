@@ -23,6 +23,7 @@ import (
 
 type MediaService interface {
 	UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
+	AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
@@ -75,6 +76,12 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 	}
 	go s.moderateInBackground(media.ID, media.FileURI)
 	return media, nil
+}
+
+// AutoApproveUpload upload media với status approved, không chạy AI moderation.
+// Dùng cho post creation, stories, và standalone upload — nội dung vi phạm sẽ được xử lý qua report system.
+func (s *mediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
+	return s.upload(ctx, userID, file, models.MediaStatusApproved)
 }
 
 func (s *mediaService) UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {

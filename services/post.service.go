@@ -92,7 +92,7 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 			wg.Add(1)
 			go func(f *multipart.FileHeader) {
 				defer wg.Done()
-				uploadedMedia, err := s.mediaService.UploadMedia(ctx, userID, f)
+				uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx, userID, f)
 				if err == nil && uploadedMedia != nil {
 					mu.Lock()
 					mediaIDs = append(mediaIDs, uploadedMedia.ID)
