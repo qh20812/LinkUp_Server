@@ -21,8 +21,9 @@ type Env struct {
 	JWTSecret    string
 	JWTExpiresIn int
 
-	CloudinaryEnv string
-	FrontendURL   string
+	CloudinaryEnv    string
+	FrontendURL      string
+	MobileFrontendURL string
 
 	IceServerUrls  string
 	TurnServerUrl  string
@@ -85,8 +86,9 @@ func LoadEnv() error {
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
 
-		CloudinaryEnv: getRequiredString("CLOUDINARY_URL"),
-		FrontendURL:   getString("VERIFY_EMAIL_URL", getString("FRONTEND_RESET_URL", "http://localhost:3000")),
+		CloudinaryEnv:    getRequiredString("CLOUDINARY_URL"),
+		FrontendURL:      getString("VERIFY_EMAIL_URL", getString("FRONTEND_RESET_URL", "http://localhost:3000")),
+		MobileFrontendURL: getString("MOBILE_VERIFY_URL", "linkupmobile://verify-email"),
 
 		IceServerUrls:  getString("ICE_SERVER_URLS", ""),
 		TurnServerUrl:  getString("TURN_SERVER_URL", ""),
