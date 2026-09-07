@@ -149,15 +149,18 @@ func (s *storyService) GetHomeStories(viewerID string, followingOnly bool) ([]dt
 			grouped[st.UserID] = group
 		}
 		_, isViewed := viewedSet[st.ID]
+		p := profileMap[st.UserID]
 		group.Stories = append(group.Stories, dto.StoryResponse{
-			ID:        st.ID,
-			UserID:    st.UserID,
-			MediaURI:  st.MediaURI,
-			MediaType: st.MediaType.String(),
-			Caption:   st.Caption,
-			CreatedAt: st.CreatedAt,
-			ExpiresAt: st.ExpiresAt,
-			HasViewed: isViewed,
+			ID:          st.ID,
+			UserID:      st.UserID,
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+			MediaURI:    st.MediaURI,
+			MediaType:   st.MediaType.String(),
+			Caption:     st.Caption,
+			CreatedAt:   st.CreatedAt,
+			ExpiresAt:   st.ExpiresAt,
+			HasViewed:   isViewed,
 		})
 	}
 
@@ -371,6 +374,13 @@ func (s *storyService) GetUserActiveStories(userID string, viewerID string) ([]d
 		return nil, err
 	}
 
+	displayName := ""
+	avatarURI := ""
+	if profiles, err := s.profileRepo.FindByIDs(context.Background(), []string{userID}); err == nil && len(profiles) > 0 {
+		displayName = profiles[0].DisplayName
+		avatarURI = profiles[0].AvatarURI
+	}
+
 	var res []dto.StoryResponse
 	for _, story := range stories {
 		hasViewed := false
@@ -381,14 +391,16 @@ func (s *storyService) GetUserActiveStories(userID string, viewerID string) ([]d
 			}
 		}
 		res = append(res, dto.StoryResponse{
-			ID:        story.ID,
-			UserID:    story.UserID,
-			MediaURI:  story.MediaURI,
-			MediaType: story.MediaType.String(),
-			Caption:   story.Caption,
-			CreatedAt: story.CreatedAt,
-			ExpiresAt: story.ExpiresAt,
-			HasViewed: hasViewed,
+			ID:          story.ID,
+			UserID:      story.UserID,
+			DisplayName: displayName,
+			AvatarURI:   avatarURI,
+			MediaURI:    story.MediaURI,
+			MediaType:   story.MediaType.String(),
+			Caption:     story.Caption,
+			CreatedAt:   story.CreatedAt,
+			ExpiresAt:   story.ExpiresAt,
+			HasViewed:   hasViewed,
 		})
 	}
 	return res, nil
