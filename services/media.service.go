@@ -24,7 +24,7 @@ import (
 type MediaService interface {
 	UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
-	UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
+	UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader, durationSeconds int) (*models.Media, error)
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
@@ -70,7 +70,7 @@ func (s *mediaService) SetStoryRepo(repo repository.StoryRepository) {
 }
 
 func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
-	media, err := s.upload(ctx, userID, file, models.MediaStatusPending)
+	media, err := s.upload(ctx, userID, file, models.MediaStatusPending, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -81,14 +81,18 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 // AutoApproveUpload upload media với status approved, không chạy AI moderation.
 // Dùng cho post creation, stories, và standalone upload — nội dung vi phạm sẽ được xử lý qua report system.
 func (s *mediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
-	return s.upload(ctx, userID, file, models.MediaStatusApproved)
+	return s.upload(ctx, userID, file, models.MediaStatusApproved, 0)
 }
 
-func (s *mediaService) UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
-	return s.upload(ctx, userID, file, models.MediaStatusApproved)
+// UploadChatMedia upload file cho tin nhắn chat. durationSeconds (giây) chỉ áp
+// dụng cho tin nhắn thoại (voice notes) — client upload nhạc qua MediaRecorder
+// nên biết chính xác thời lượng; server validate giới hạn 5 phút và lưu vào
+// bản ghi media để mọi payload tin nhắn có thể hiển thị duration.
+func (s *mediaService) UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader, durationSeconds int) (*models.Media, error) {
+	return s.upload(ctx, userID, file, models.MediaStatusApproved, durationSeconds)
 }
 
-func (s *mediaService) upload(ctx context.Context, userID string, file *multipart.FileHeader, status models.MediaStatus) (*models.Media, error) {
+func (s *mediaService) upload(ctx context.Context, userID string, file *multipart.FileHeader, status models.MediaStatus, durationSeconds int) (*models.Media, error) {
 	quota, used, err := s.repo.GetUserStorageInfo(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get storage info: %w", err)
@@ -121,6 +125,15 @@ func (s *mediaService) upload(ctx context.Context, userID string, file *multipar
 	media.ID = publicID
 	media.CreatedAt = time.Now()
 	media.Status = status
+
+	// Tin nhắn thoại (voice notes): lưu thời lượng client gửi lên (đơn vị giây)
+	// và chặn file quá dài (giới hạn 5 phút).
+	if strings.HasPrefix(file.Header.Get("Content-Type"), "audio/") && durationSeconds > 0 {
+		media.DurationSeconds = durationSeconds
+		if err := s.validation.ValidateAudioDuration(float64(durationSeconds)); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.repo.Create(ctx, &media); err != nil {
 		return nil, fmt.Errorf("save media record: %w", err)

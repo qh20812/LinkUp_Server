@@ -18,6 +18,8 @@ type StoryRepository interface {
 	Create(story *models.Story) error
 	FindByID(id string) (*models.Story, error)
 	GetActiveStories() ([]models.Story, error)
+	GetActiveStoriesForViewer(viewerID string, followingOnly bool) ([]models.Story, error)
+	GetViewedStoryIDs(viewerID string) (map[string]struct{}, error)
 	HasActiveStoryByUserID(userID string) (bool, error)
 	GetActiveStoriesByUserID(userID string) ([]models.Story, error)
 	HasUserViewed(storyID, viewerID string) (bool, error)
@@ -29,6 +31,10 @@ type StoryRepository interface {
 	FindReactByUser(storyID, userID string) (*models.StoryInteract, error)
 	UpdateInteract(interact *models.StoryInteract) error
 	GetViewersDetails(storyID string) ([]models.StoryView, []models.StoryInteract, error)
+	DeleteStory(storyID string) error
+	IsMuted(userID, mutedUserID string) (bool, error)
+	CreateMute(mute *models.StoryMute) error
+	DeleteMute(userID, mutedUserID string) error
 }
 
 type storyRepository struct {
@@ -53,6 +59,43 @@ func (r *storyRepository) GetActiveStories() ([]models.Story, error) {
 	var stories []models.Story
 	err := r.db.Where("expires_at > ?", time.Now()).Order("created_at DESC").Find(&stories).Error
 	return stories, err
+}
+
+// GetActiveStoriesForViewer lấy story active cho 1 viewer cụ thể:
+// loại bỏ story của user đã bị viewer mute, của user đã block/mute viewer,
+// và (nếu followingOnly) chỉ giữ những user viewer đang theo dõi + chính mình.
+func (r *storyRepository) GetActiveStoriesForViewer(viewerID string, followingOnly bool) ([]models.Story, error) {
+	var stories []models.Story
+
+	if viewerID == "" {
+		err := r.db.Where("expires_at > ?", time.Now()).Order("created_at DESC").Find(&stories).Error
+		return stories, err
+	}
+
+	query := r.db.Where("expires_at > ?", time.Now()).
+		Where("user_id NOT IN (SELECT muted_user_id FROM story_mutes WHERE user_id = ?)", viewerID).
+		Where("user_id NOT IN (SELECT user_id FROM blocks WHERE blocked_user_id = ?)", viewerID).
+		Where("user_id NOT IN (SELECT blocked_user_id FROM blocks WHERE user_id = ?)", viewerID)
+
+	if followingOnly {
+		query = query.Where("user_id = ? OR user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)", viewerID, viewerID)
+	}
+
+	err := query.Order("created_at DESC").Find(&stories).Error
+	return stories, err
+}
+
+func (r *storyRepository) GetViewedStoryIDs(viewerID string) (map[string]struct{}, error) {
+	var ids []string
+	err := r.db.Table("story_views").Where("viewer_id = ?", viewerID).Pluck("story_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set, nil
 }
 
 func (r *storyRepository) HasActiveStoryByUserID(userID string) (bool, error) {
@@ -133,4 +176,38 @@ func (r *storyRepository) GetViewersDetails(storyID string) ([]models.StoryView,
 		return nil, nil, errViews
 	}
 	return views, interacts, errInteracts
+}
+
+// DeleteStory xóa story và cascade story_views / story_interacts trong 1 transaction
+func (r *storyRepository) DeleteStory(storyID string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("story_id = ?", storyID).Delete(&models.StoryInteract{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("story_id = ?", storyID).Delete(&models.StoryView{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", storyID).Delete(&models.Story{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (r *storyRepository) IsMuted(userID, mutedUserID string) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.StoryMute{}).
+		Where("user_id = ? AND muted_user_id = ?", userID, mutedUserID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (r *storyRepository) CreateMute(mute *models.StoryMute) error {
+	return r.db.Create(mute).Error
+}
+
+func (r *storyRepository) DeleteMute(userID, mutedUserID string) error {
+	return r.db.
+		Where("user_id = ? AND muted_user_id = ?", userID, mutedUserID).
+		Delete(&models.StoryMute{}).Error
 }

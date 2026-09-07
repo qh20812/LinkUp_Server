@@ -164,7 +164,8 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
 		storyRepository := repository.NewStoryRepository(gormDB)
-		storyService := services.NewStoryService(storyRepository, profileRepository, mediaService, notificationService)
+		blockRepository := repository.NewBlockRepository(gormDB)
+		storyService := services.NewStoryService(storyRepository, profileRepository, mediaService, notificationService, followRepository, blockRepository)
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
@@ -180,7 +181,6 @@ func main() {
 		routes.RegisterReportRoutes(router, reportController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG BLOCK (CHẶN USER) =====
-		blockRepository := repository.NewBlockRepository(gormDB)
 		blockValidation := validations.NewBlockValidation()
 		blockService := services.NewBlockService(blockRepository, authRepository, blockValidation)
 		blockController := controllers.NewBlockController(blockService)

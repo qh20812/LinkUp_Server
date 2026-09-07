@@ -36,6 +36,7 @@ type SendMessagePayload struct {
 	GifURL           *string `json:"gif_url,omitempty"`
 	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
 	SharedPostID     *string `json:"shared_post_id,omitempty"`
+	ForwardedFrom    *string `json:"forwarded_from,omitempty"`
 	E2EVersion       int     `json:"e2e_version,omitempty"`
 }
 
@@ -48,10 +49,14 @@ type MessagePayload struct {
 	MediaID          *string             `json:"media_id,omitempty"`
 	MediaGroupID     *string             `json:"media_group_id,omitempty"`
 	MediaType        string              `json:"media_type,omitempty"`
+	DurationSeconds  int                 `json:"duration_seconds,omitempty"`
 	ReplyToMessageID *string             `json:"reply_to_message_id,omitempty"`
 	ReplyTo          *ReplyPreview       `json:"reply_to,omitempty"`
 	SharedPostID     *string             `json:"shared_post_id,omitempty"`
 	SharedPost       *SharedPostPayload  `json:"shared_post,omitempty"`
+	ForwardedFrom    *string             `json:"forwarded_from,omitempty"`
+	ForwardsCount    int                 `json:"forwards_count,omitempty"`
+	SentFromMessageID *string            `json:"sent_from_message_id,omitempty"`
 	SenderName       string              `json:"sender_name,omitempty"`
 	SenderAvatar     string              `json:"sender_avatar,omitempty"`
 	Type             string              `json:"type,omitempty"`
@@ -59,8 +64,10 @@ type MessagePayload struct {
 	IsAnonymized     bool                `json:"is_anonymized"`
 	AnonymousName    *string             `json:"anonymous_name,omitempty"`
 	E2EVersion       int                 `json:"e2e_version,omitempty"`
-	Deleted          bool                `json:"deleted"`
-	CreatedAt        time.Time           `json:"created_at"`
+	Deleted          bool                 `json:"deleted"`
+	SeenBy           []string             `json:"seen_by,omitempty"`
+	Reactions        []MessageReactionPayload `json:"reactions,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
 }
 
 type ReplyPreview struct {
@@ -203,4 +210,50 @@ type PinnedMessageDTO struct {
 
 type PinnedMessagesResponse struct {
 	PinnedMessages []PinnedMessageDTO `json:"pinned_messages"`
+}
+
+// ── Read receipts (Phase 4) ────────────────────────────────────────────────
+
+// MessageReadPayload client → server. Client báo mình đã đọc tới tin
+// last_message_id; server nâng watermark đọc của user lên created_at tin đó.
+type MessageReadPayload struct {
+	ChatID        string `json:"chat_id"`
+	LastMessageID string `json:"last_message_id"`
+}
+
+// MessageReadStatePayload server → client. Broadcast cho toàn room khi một
+// thành viên cập nhật vị trí đã đọc.
+type MessageReadStatePayload struct {
+	ChatID        string    `json:"chat_id"`
+	UserID        string    `json:"user_id"`
+	LastMessageID string    `json:"last_message_id"`
+	LastReadAt    time.Time `json:"last_read_at"`
+}
+
+// ── Message reactions (Phase 4) ────────────────────────────────────────────
+
+// ReactMessagePayload client → server. Client bấm 1 emoji trên 1 tin nhắn.
+type ReactMessagePayload struct {
+	ChatID    string `json:"chat_id"`
+	MessageID string `json:"message_id"`
+	EmojiID   string `json:"emoji_id"`
+}
+
+// MessageReactionPayload là 1 reaction trong danh sách reactions của tin nhắn.
+type MessageReactionPayload struct {
+	MessageID string    `json:"message_id"`
+	UserID    string    `json:"user_id"`
+	EmojiID   string    `json:"emoji_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// MessageReactedPayload server → client. Broadcast cho cả room kèm danh sách
+// reactions mới của tin nhắn sau khi toggle. Action = added|updated|removed.
+type MessageReactedPayload struct {
+	ChatID    string                 `json:"chat_id"`
+	MessageID string                 `json:"message_id"`
+	UserID    string                 `json:"user_id"`
+	Action    string                 `json:"action"`
+	EmojiID   string                 `json:"emoji_id,omitempty"`
+	Reactions []MessageReactionPayload `json:"reactions,omitempty"`
 }

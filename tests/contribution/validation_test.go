@@ -2,6 +2,7 @@ package contribution_test
 
 import (
 	"testing"
+	"time"
 
 	"linkup/dto"
 	"linkup/validations"
@@ -75,6 +76,10 @@ func TestValidatePolicyInput(t *testing.T) {
 func TestValidateCreateChallenge(t *testing.T) {
 	v := validations.NewContributionValidation()
 
+	// Dates relative to now so the "must be in the future" rule never goes stale.
+	start := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+	end := time.Now().Add(48 * time.Hour).Format(time.RFC3339)
+
 	tests := []struct {
 		name    string
 		input   dto.CreateChallengeInput
@@ -87,8 +92,8 @@ func TestValidateCreateChallenge(t *testing.T) {
 				Description:     "Share your best photo",
 				Hashtag:         "#LinkUpPhoto",
 				PointsPerPost:   15,
-				StartDate:       "2026-09-01T00:00:00Z",
-				EndDate:         "2026-09-07T00:00:00Z",
+				StartDate:       start,
+				EndDate:         end,
 				MaxParticipants: nil,
 			},
 			wantErr: "",
@@ -100,8 +105,8 @@ func TestValidateCreateChallenge(t *testing.T) {
 				Description:   "Share your best photo",
 				Hashtag:       "LinkUpPhoto",
 				PointsPerPost: 15,
-				StartDate:     "2026-09-01T00:00:00Z",
-				EndDate:       "2026-09-07T00:00:00Z",
+				StartDate:     start,
+				EndDate:       end,
 			},
 			wantErr: "Hashtag phải bắt đầu bằng #",
 		},

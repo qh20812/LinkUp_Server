@@ -398,13 +398,15 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		PartnerUserID      string     `gorm:"column:partner_user_id"`
 		PartnerDisplayName string     `gorm:"column:partner_display_name"`
 		PartnerAvatarURI   string     `gorm:"column:partner_avatar_uri"`
-		LastMessageID      *string    `gorm:"column:last_message_id"`
-		LastContent        *string    `gorm:"column:last_content"`
-		LastSenderID       *string    `gorm:"column:last_sender_id"`
-		LastE2EVersion     *int       `gorm:"column:last_e2e_version"`
-		LastMediaType      string     `gorm:"column:last_media_type"`
-		LastCreatedAt      *time.Time `gorm:"column:last_created_at"`
-		UpdatedAt          time.Time  `gorm:"column:updated_at"`
+LastMessageID        *string     `gorm:"column:last_message_id"`
+		LastContent          *string     `gorm:"column:last_content"`
+		LastSenderID         *string     `gorm:"column:last_sender_id"`
+		LastE2EVersion       *int        `gorm:"column:last_e2e_version"`
+		LastMediaType        string      `gorm:"column:last_media_type"`
+		LastMediaDuration    int         `gorm:"column:last_media_duration"`
+		LastForwardedFrom    *string     `gorm:"column:last_forwarded_from"`
+		LastCreatedAt        *time.Time  `gorm:"column:last_created_at"`
+		UpdatedAt            time.Time   `gorm:"column:updated_at"`
 	}{}
 
 	err := r.db.WithContext(ctx).
@@ -418,6 +420,8 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			lm.sender_id AS last_sender_id,
 			lm.e2e_version AS last_e2e_version,
 			COALESCE(lmm.file_type, '') AS last_media_type,
+			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
+			lm.forwarded_from AS last_forwarded_from,
 			lm.created_at AS last_created_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
@@ -458,13 +462,15 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			}
 			conv.IsEncrypted = e2eVersion == 1
 			conv.LastMessage = &dto.MessagePayload{
-				ID:         *row.LastMessageID,
-				ChatID:     row.ChatID,
-				SenderID:   derefString(row.LastSenderID),
-				Content:    *row.LastContent,
-				MediaType:  row.LastMediaType,
-				E2EVersion: e2eVersion,
-				CreatedAt:  *row.LastCreatedAt,
+				ID:            *row.LastMessageID,
+				ChatID:        row.ChatID,
+				SenderID:      derefString(row.LastSenderID),
+				Content:       *row.LastContent,
+				MediaType:     row.LastMediaType,
+				DurationSeconds: row.LastMediaDuration,
+				ForwardedFrom: row.LastForwardedFrom,
+				E2EVersion:    e2eVersion,
+				CreatedAt:     *row.LastCreatedAt,
 			}
 		}
 
@@ -638,4 +644,155 @@ func (r *ChatRepository) IsMessagePinned(ctx context.Context, chatID, messageID 
 		Where("chat_id = ? AND message_id = ?", chatID, messageID).
 		Count(&count).Error
 	return count > 0, err
+}
+
+// UpsertChatRead nâng watermark đọc của user trong chat. Chỉ cập nhật khi
+// tin mới (theo created_at) trễ hơn watermark hiện tại — bảo toàn tính
+// đơn điệu, tránh "đọc lùi" khi client gửi tin cũ hơn.
+func (r *ChatRepository) UpsertChatRead(ctx context.Context, chatID, userID, messageID string, messageCreatedAt time.Time) (bool, error) {
+	var existing models.ChatRead
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ? AND user_id = ?", chatID, userID).
+		First(&existing).Error
+	if err == nil {
+		if !messageCreatedAt.After(existing.LastReadAt) {
+			// Watermark đã cao hơn — không nâng lùi.
+			return false, nil
+		}
+		err = r.db.WithContext(ctx).Model(&existing).Updates(map[string]any{
+			"last_read_at":    messageCreatedAt,
+			"last_message_id": messageID,
+			"updated_at":      time.Now().UTC(),
+		}).Error
+		if err != nil {
+			return false, fmt.Errorf("update chat read: %w", err)
+		}
+		return true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, fmt.Errorf("get chat read: %w", err)
+	}
+
+	now := time.Now().UTC()
+	cr := models.ChatRead{
+		ChatID:        chatID,
+		UserID:        userID,
+		LastReadAt:    messageCreatedAt,
+		LastMessageID: messageID,
+		UpdatedAt:     now,
+	}
+	err = r.db.WithContext(ctx).Create(&cr).Error
+	if err != nil {
+		return false, fmt.Errorf("create chat read: %w", err)
+	}
+	return true, nil
+}
+
+// GetChatReadWatermarks trả về watermark đọc (theo user) của toàn chat.
+// Map user_id → last_read_at. Dùng để tính seen_by cho từng tin nhắn.
+func (r *ChatRepository) GetChatReadWatermarks(ctx context.Context, chatID string) (map[string]time.Time, error) {
+	var rows []models.ChatRead
+	err := r.db.WithContext(ctx).
+		Where("chat_id = ?", chatID).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("get chat read watermarks: %w", err)
+	}
+	result := make(map[string]time.Time, len(rows))
+	for _, row := range rows {
+		result[row.UserID] = row.LastReadAt
+	}
+	return result, nil
+}
+
+// ── Message reactions (Phase 4) ─────────────────────────────────────────────
+
+// ToggleMessageReaction bật/tắt reaction của user trên tin nhắn.
+// - Chưa có → tạo mới, trả "added".
+// - Có và cùng emoji → xóa, trả "removed".
+// - Có nhưng khác emoji → đổi emoji, trả "updated".
+func (r *ChatRepository) ToggleMessageReaction(ctx context.Context, messageID, userID, emojiID string) (string, error) {
+	var existing models.MessageReaction
+	err := r.db.WithContext(ctx).
+		Where("message_id = ? AND user_id = ?", messageID, userID).
+		First(&existing).Error
+	if err == nil {
+		if existing.EmojiID == emojiID {
+			err = r.db.WithContext(ctx).
+				Where("message_id = ? AND user_id = ?", messageID, userID).
+				Delete(&models.MessageReaction{}).Error
+			if err != nil {
+				return "", fmt.Errorf("delete message reaction: %w", err)
+			}
+			return "removed", nil
+		}
+		err = r.db.WithContext(ctx).Model(&existing).Updates(map[string]any{
+			"emoji_id":   emojiID,
+			"updated_at": time.Now().UTC(),
+		}).Error
+		if err != nil {
+			return "", fmt.Errorf("update message reaction: %w", err)
+		}
+		return "updated", nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", fmt.Errorf("get message reaction: %w", err)
+	}
+
+	reaction := models.MessageReaction{
+		MessageID: messageID,
+		UserID:    userID,
+		EmojiID:   emojiID,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	err = r.db.WithContext(ctx).Create(&reaction).Error
+	if err != nil {
+		return "", fmt.Errorf("create message reaction: %w", err)
+	}
+	return "added", nil
+}
+
+// GetMessageReactions trả về reaction (theo message_id) cho danh sách tin nhắn.
+func (r *ChatRepository) GetMessageReactions(ctx context.Context, messageIDs []string) map[string][]models.MessageReaction {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	var rows []models.MessageReaction
+	err := r.db.WithContext(ctx).
+		Where("message_id IN ?", messageIDs).
+		Order("created_at ASC").
+		Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+	result := make(map[string][]models.MessageReaction, len(messageIDs))
+	for _, row := range rows {
+		result[row.MessageID] = append(result[row.MessageID], row)
+	}
+	return result
+}
+
+// ── Message forwarding (Phase 4) ────────────────────────────────────────────
+
+// IncrementForwardsCount tăng số lần chuyển tiếp của tin nhắn gốc lên 1.
+func (r *ChatRepository) IncrementForwardsCount(ctx context.Context, messageID string) error {
+	err := r.db.WithContext(ctx).
+		Model(&models.Message{}).
+		Where("id = ?", messageID).
+		UpdateColumn("forwards_count", gorm.Expr("forwards_count + 1")).Error
+	if err != nil {
+		return fmt.Errorf("increment forwards count: %w", err)
+	}
+	return nil
+}
+
+// CanReadMessage kiểm tra xem user có quyền đọc tin nhắn (thuộc hội thoại gốc)
+// hay không — dùng khi chuyển tiếp để tránh lộ nội dung hội thoại khác.
+func (r *ChatRepository) CanReadMessage(ctx context.Context, messageID, userID string) (bool, error) {
+	msg, err := r.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return false, err
+	}
+	return r.IsUserParticipant(ctx, msg.ChatID, userID)
 }

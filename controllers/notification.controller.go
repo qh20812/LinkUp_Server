@@ -27,6 +27,9 @@ type UpdatePreferencesInput struct {
 	FriendRequestEnabled *bool `json:"friend_request_enabled"`
 	CommunityEnabled     *bool `json:"community_enabled"`
 	VoiceCallEnabled     *bool `json:"voice_call_enabled"`
+	StoryReactEnabled    *bool `json:"story_react_enabled"`
+	ShareEnabled         *bool `json:"share_enabled"`
+	MediaEnabled         *bool `json:"media_enabled"`
 }
 
 func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
@@ -105,7 +108,7 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
-	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil && input.CommunityEnabled == nil && input.VoiceCallEnabled == nil {
+	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil && input.CommunityEnabled == nil && input.VoiceCallEnabled == nil && input.StoryReactEnabled == nil && input.ShareEnabled == nil && input.MediaEnabled == nil {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
@@ -126,6 +129,9 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 			FriendRequestEnabled: true,
 			CommunityEnabled:     true,
 			VoiceCallEnabled:     true,
+			StoryReactEnabled:    true,
+			ShareEnabled:         true,
+			MediaEnabled:         true,
 		}
 	}
 	if input.LikeEnabled != nil {
@@ -148,6 +154,15 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 	}
 	if input.VoiceCallEnabled != nil {
 		pref.VoiceCallEnabled = *input.VoiceCallEnabled
+	}
+	if input.StoryReactEnabled != nil {
+		pref.StoryReactEnabled = *input.StoryReactEnabled
+	}
+	if input.ShareEnabled != nil {
+		pref.ShareEnabled = *input.ShareEnabled
+	}
+	if input.MediaEnabled != nil {
+		pref.MediaEnabled = *input.MediaEnabled
 	}
 
 	if err := ctrl.service.UpdatePreferences(c.Request.Context(), pref); err != nil {

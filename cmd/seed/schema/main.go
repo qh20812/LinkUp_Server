@@ -222,6 +222,7 @@ func Run(env config.Env) error {
 			file_uri VARCHAR(512) NOT NULL,
 			file_type VARCHAR(50) NOT NULL DEFAULT '',
 			file_size DOUBLE NOT NULL DEFAULT 0,
+			duration_seconds INT NOT NULL DEFAULT 0,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
 			review_reason TEXT NULL,
 			created_at DATETIME NOT NULL,
@@ -390,6 +391,8 @@ func Run(env config.Env) error {
 			media_id VARCHAR(36) NULL,
 			media_group_id VARCHAR(36) NULL,
 			emoji_id VARCHAR(36) NULL,
+			forwarded_from VARCHAR(36) NULL,
+			forwards_count INT NOT NULL DEFAULT 0,
 			deleted_for_sender TINYINT(1) NOT NULL DEFAULT 0,
 			deleted_for_receiver TINYINT(1) NOT NULL DEFAULT 0,
 			deleted_at DATETIME NULL,
@@ -400,10 +403,37 @@ func Run(env config.Env) error {
 			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE SET NULL,
 			INDEX idx_messages_chat_id (chat_id),
 			INDEX idx_messages_sender_id (sender_id),
-			INDEX idx_messages_media_group_id (media_group_id)
+			INDEX idx_messages_media_group_id (media_group_id),
+			INDEX idx_messages_forwarded_from (forwarded_from)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 18. Depends on users
+		// 18. Read receipts: watermark đọc từng thành viên trong chat
+		`CREATE TABLE IF NOT EXISTS chat_reads (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			last_read_at DATETIME NOT NULL,
+			last_message_id VARCHAR(36) NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, user_id),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 19. Message reactions: emoji reak của user trên tin nhắn
+		`CREATE TABLE IF NOT EXISTS message_reactions (
+			message_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			emoji_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (message_id, user_id),
+			FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE CASCADE,
+			INDEX idx_message_reactions_message (message_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 20. Depends on users
 		`CREATE TABLE IF NOT EXISTS stories (
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
@@ -416,7 +446,7 @@ func Run(env config.Env) error {
 			INDEX idx_stories_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 19. Depends on users
+		// 20. Depends on users
 		`CREATE TABLE IF NOT EXISTS bans (
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
@@ -534,6 +564,9 @@ func Run(env config.Env) error {
 			follow_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			message_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			friend_request_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			story_react_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			share_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			media_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -970,6 +1003,20 @@ func Run(env config.Env) error {
 	}
 	if err := addColumnIfMissing(database, "notification_preferences", "voice_call_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
 		return fmt.Errorf("schema: add notification_preferences.voice_call_enabled: %w", err)
+	}
+	if err := addColumnIfMissing(database, "notification_preferences", "story_react_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.story_react_enabled: %w", err)
+	}
+	if err := addColumnIfMissing(database, "notification_preferences", "share_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.share_enabled: %w", err)
+	}
+	if err := addColumnIfMissing(database, "notification_preferences", "media_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.media_enabled: %w", err)
+	}
+
+	// Phase 2b: duration_seconds trên media table cho tin nhắn thoại (voice notes)
+	if err := addColumnIfMissing(database, "media", "duration_seconds", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add media.duration_seconds: %w", err)
 	}
 
 	// Phase 3: indexes for admin ListPosts performance (correlated subqueries in ListPosts)

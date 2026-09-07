@@ -19,6 +19,7 @@ type GroupSendMessagePayload struct {
 	GifURL           *string `json:"gif_url,omitempty"`
 	ReplyToMessageID *string `json:"reply_to_message_id,omitempty"`
 	SharedPostID     *string `json:"shared_post_id,omitempty"`
+	ForwardedFrom    *string `json:"forwarded_from,omitempty"`
 }
 
 type GroupTypingPayload struct {

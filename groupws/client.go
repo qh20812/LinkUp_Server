@@ -169,6 +169,7 @@ func (c *Client) ReadPump() {
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
 		sharedPosts := c.messageService.LoadSharedPosts(c.ctx, history)
 		mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(history))
+		mediaDurations := c.messageService.GetMediaDurations(c.ctx, collectGroupMediaIDs(history))
 
 		msgs := make([]dto.MessagePayload, 0, len(history))
 		for _, m := range history {
@@ -182,6 +183,8 @@ func (c *Client) ReadPump() {
 				MediaGroupID:     m.MediaGroupID,
 				ReplyToMessageID: m.ReplyToMessageID,
 				SharedPostID:     m.SharedPostID,
+				ForwardedFrom:    m.ForwardedFrom,
+				ForwardsCount:    m.ForwardsCount,
 				Type:             m.Type,
 				MessageCategory:  m.MessageCategory,
 				IsAnonymized:     m.IsAnonymized,
@@ -191,6 +194,9 @@ func (c *Client) ReadPump() {
 			}
 			if m.MediaID != nil && mediaTypes != nil {
 				p.MediaType = mediaTypes[*m.MediaID]
+			}
+			if m.MediaID != nil && mediaDurations != nil {
+				p.DurationSeconds = mediaDurations[*m.MediaID]
 			}
 			if prof, ok := profiles[m.SenderID]; ok {
 				p.SenderName = prof.DisplayName
@@ -223,14 +229,32 @@ func (c *Client) ReadPump() {
 					}
 				}
 			}
-			for i := range msgs {
-				if msgs[i].ReplyToMessageID != nil {
-					if preview, ok := previews[*msgs[i].ReplyToMessageID]; ok {
-						msgs[i].ReplyTo = preview
+for i := range msgs {
+					if msgs[i].ReplyToMessageID != nil {
+						if preview, ok := previews[*msgs[i].ReplyToMessageID]; ok {
+							msgs[i].ReplyTo = preview
+						}
 					}
 				}
 			}
-		}
+
+			// Read receipts: gắn seen_by cho từng tin nhắn trong lịch sử.
+			if watermarks, err := c.messageService.GetChatReadWatermarks(c.ctx, payload.ChatID); err == nil {
+				applySeenBy(msgs, watermarks)
+			}
+
+			// Message reactions: gắn danh sách cảm xúc cho từng tin nhắn.
+			msgIDs := make([]string, 0, len(msgs))
+			for _, m := range msgs {
+				msgIDs = append(msgIDs, m.ID)
+			}
+			if reactions := c.messageService.GetMessageReactions(c.ctx, msgIDs); reactions != nil {
+				for i := range msgs {
+					if list, ok := reactions[msgs[i].ID]; ok && list != nil {
+						msgs[i].Reactions = list
+					}
+				}
+			}
 
 			callDocs, err := c.messageService.GetGroupCallsByChatID(c.ctx, c.userID, payload.ChatID)
 			if err != nil {
@@ -284,6 +308,7 @@ func (c *Client) ReadPump() {
 			payload.ReplyToMessageID,
 			payload.SharedPostID,
 			payload.MediaGroupID,
+			payload.ForwardedFrom,
 		)
 			if err != nil {
 				c.sendError(err.Error())
@@ -302,11 +327,14 @@ func (c *Client) ReadPump() {
 			MediaGroupID:     msg.MediaGroupID,
 			ReplyToMessageID: msg.ReplyToMessageID,
 			SharedPostID:     msg.SharedPostID,
+			ForwardedFrom:    msg.ForwardedFrom,
+			ForwardsCount:    msg.ForwardsCount,
 			Type:             msg.Type,
 			CreatedAt:        msg.CreatedAt,
 		}
 		if msg.MediaID != nil && *msg.MediaID != "" {
 			newPayload.MediaType = c.messageService.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+			newPayload.DurationSeconds = c.messageService.GetMediaDurations(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})
 		if prof, ok := profiles[msg.SenderID]; ok {
@@ -376,19 +404,25 @@ func (c *Client) ReadPump() {
 
 			out := make([]dto.MessagePayload, 0, len(messages))
 			mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(messages))
+			mediaDurations := c.messageService.GetMediaDurations(c.ctx, collectGroupMediaIDs(messages))
 			for _, m := range messages {
 				p := dto.MessagePayload{
-					ID:            m.ID,
-					ChatID:        m.ChatID,
-					SenderID:      m.SenderID,
-					Content:       m.Content,
-					EmojiID:       m.EmojiID,
-					MediaID:       m.MediaID,
-					MediaGroupID:  m.MediaGroupID,
-					CreatedAt:     m.CreatedAt,
+					ID:               m.ID,
+					ChatID:           m.ChatID,
+					SenderID:         m.SenderID,
+					Content:          m.Content,
+					EmojiID:          m.EmojiID,
+					MediaID:          m.MediaID,
+					MediaGroupID:     m.MediaGroupID,
+					ForwardedFrom:    m.ForwardedFrom,
+					ForwardsCount:    m.ForwardsCount,
+					CreatedAt:        m.CreatedAt,
 				}
 				if m.MediaID != nil && mediaTypes != nil {
 					p.MediaType = mediaTypes[*m.MediaID]
+				}
+				if m.MediaID != nil && mediaDurations != nil {
+					p.DurationSeconds = mediaDurations[*m.MediaID]
 				}
 				out = append(out, p)
 			}
@@ -432,6 +466,52 @@ func (c *Client) ReadPump() {
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
 				Type:    "group:message:unpinned",
 				Payload: mustMarshal(dto.MessageUnpinnedPayload{ChatID: payload.ChatID, MessageID: payload.MessageID}),
+			})
+
+		case "group:message:read":
+			var payload dto.MessageReadPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu đã đọc không hợp lệ")
+				continue
+			}
+
+			state, err := c.messageService.MarkMessageRead(c.ctx, c.userID, payload.ChatID, payload.LastMessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if state == nil {
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:message:read",
+				Payload: mustMarshal(state),
+			})
+
+		case "group:message:react":
+			var payload dto.ReactMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu cảm xúc không hợp lệ")
+				continue
+			}
+
+			action, reactions, err := c.messageService.ReactToMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID, payload.EmojiID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type: "group:message:reacted",
+				Payload: mustMarshal(dto.MessageReactedPayload{
+					ChatID:    payload.ChatID,
+					MessageID: payload.MessageID,
+					UserID:    c.userID,
+					Action:    action,
+					EmojiID:   payload.EmojiID,
+					Reactions: reactions,
+				}),
 			})
 
 		case "group:message:delete":
@@ -1103,6 +1183,26 @@ func (c *Client) sendError(text string) {
 func mustMarshal(v any) []byte {
 	out, _ := json.Marshal(v)
 	return out
+}
+
+// applySeenBy gắn seen_by (danh sách user đã đọc) cho từng tin nhắn dựa trên
+// watermark đọc của từng thành viên trong chat. Bỏ qua chính người gửi.
+func applySeenBy(payloads []dto.MessagePayload, watermarks map[string]time.Time) {
+	for i := range payloads {
+		p := &payloads[i]
+		var seen []string
+		for userID, readAt := range watermarks {
+			if userID == p.SenderID {
+				continue
+			}
+			if !readAt.Before(p.CreatedAt) {
+				seen = append(seen, userID)
+			}
+		}
+		if len(seen) > 0 {
+			p.SeenBy = seen
+		}
+	}
 }
 
 func collectGroupMediaIDs(messages []models.Message) []string {

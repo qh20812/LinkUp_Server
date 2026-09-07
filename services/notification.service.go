@@ -209,8 +209,10 @@ func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *
 
 func isNotificationEnabled(pref *models.NotificationPreference, notifType models.NotificationType) bool {
 	switch notifType {
-	case models.NotificationTypeLike, models.NotificationTypeShare:
+	case models.NotificationTypeLike:
 		return pref.LikeEnabled
+	case models.NotificationTypeStoryReact:
+		return pref.StoryReactEnabled
 	case models.NotificationTypeComment:
 		return pref.CommentEnabled
 	case models.NotificationTypeFollow:
@@ -219,6 +221,11 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 		return pref.MessageEnabled
 	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted:
 		return pref.FriendRequestEnabled
+	case models.NotificationTypeShare:
+		return pref.ShareEnabled
+	case models.NotificationTypeMediaApproved, models.NotificationTypeMediaRejected,
+		models.NotificationTypeMediaFlagged:
+		return pref.MediaEnabled
 	case models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved,
 		models.NotificationTypeCommunityJoinRejected, models.NotificationTypeCommunityRoleChanged,
 		models.NotificationTypeCommunityMemberLeft, models.NotificationTypeCommunityMemberKicked,

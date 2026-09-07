@@ -18,8 +18,8 @@ func RegisterStoryRoutes(router *gin.Engine, ctrl *controllers.StoryController, 
 		// 1. Đăng tải Story mới (Cần đăng nhập)
 		storyGroup.POST("", middlewares.AuthMiddleware(env, db), ctrl.CreateStory)
 
-		// 2. Lấy danh sách các story đầu trang chủ (Công khai)
-		storyGroup.GET("/feed", ctrl.GetHomeFeed)
+		// 2. Lấy danh sách các story đầu trang chủ (Optional auth để lọc theo viewer + scope=following)
+		storyGroup.GET("/feed", middlewares.OptionalAuth(env, db), ctrl.GetHomeFeed)
 
 		// 3. Kiểm tra user có story active không (Công khai)
 		storyGroup.GET("/user/:userID/active", ctrl.CheckUserStory)
@@ -35,5 +35,11 @@ func RegisterStoryRoutes(router *gin.Engine, ctrl *controllers.StoryController, 
 
 		// 7. Thống kê chi tiết Analytics dành cho chủ story (Cần đăng nhập)
 		storyGroup.GET("/:id/analytics", middlewares.AuthMiddleware(env, db), ctrl.GetAnalytics)
+
+		// 8. Xóa story của chính mình (Cần đăng nhập)
+		storyGroup.DELETE("/:id", middlewares.AuthMiddleware(env, db), ctrl.DeleteStory)
+
+		// 9. Bật/tắt ẩn story của 1 user (Cần đăng nhập)
+		storyGroup.PUT("/mutes/:userID", middlewares.AuthMiddleware(env, db), ctrl.ToggleMute)
 	}
 }

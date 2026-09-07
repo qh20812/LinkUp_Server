@@ -264,6 +264,7 @@ var Messages = map[string]string{
 	"media.FILE_TYPE_NOT_ALLOWED": "Định dạng file không được hỗ trợ",
 	"media.FILE_TOO_LARGE":       "File vượt quá giới hạn kích thước",
 	"media.INSUFFICIENT_STORAGE": "Dung lượng lưu trữ không đủ",
+	"media.DURATION_TOO_LONG":  "Thời lượng file âm thanh vượt quá giới hạn cho phép",
 	"media.STORAGE_QUOTA_EXCEEDED": "Dung lượng lưu trữ đã đầy, vui lòng mua thêm dung lượng",
 	"media.NOT_FOUND":            "Media không tồn tại",
 	"media.FORBIDDEN":            "Bạn không có quyền xóa media này",

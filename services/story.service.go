@@ -16,10 +16,12 @@ import (
 
 type StoryService interface {
 	CreateStory(ctx context.Context, userID string, fileHeader *multipart.FileHeader, caption string) (*dto.CreateStoryResponse, error)
-	GetHomeStories() ([]dto.StoryFeedGroup, error)
+	GetHomeStories(viewerID string, followingOnly bool) ([]dto.StoryFeedGroup, error)
 	ViewStory(storyID, viewerID string) (*models.Story, error)
 	InteractWithStory(storyID, userID string, req dto.InteractStoryRequest) error
 	GetAnalytics(storyID, userID string) (*dto.StoryAnalyticsResponse, error)
+	DeleteStory(ctx context.Context, storyID, userID string) error
+	ToggleStoryMute(userID, targetUserID string) (bool, error)
 	HasActiveStory(userID string) (bool, error)
 	GetUserActiveStories(userID string, viewerID string) ([]dto.StoryResponse, error)
 }
@@ -29,14 +31,18 @@ type storyService struct {
 	profileRepo  *repository.ProfileRepository
 	mediaService MediaService
 	notifService *NotificationService
+	followRepo   *repository.FollowRepository
+	blockRepo    *repository.BlockRepository
 }
 
-func NewStoryService(repo repository.StoryRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService) StoryService {
+func NewStoryService(repo repository.StoryRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService, followRepo *repository.FollowRepository, blockRepo *repository.BlockRepository) StoryService {
 	return &storyService{
 		repo:         repo,
 		profileRepo:  profileRepo,
 		mediaService: mediaService,
 		notifService: notifService,
+		followRepo:   followRepo,
+		blockRepo:    blockRepo,
 	}
 }
 
@@ -50,7 +56,7 @@ func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeade
 
 		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
 			mediaType = models.StoryMediaTypeImage
-		} else if ext == ".mp4" || ext == ".mov" {
+		} else if ext == ".mp4" || ext == ".mov" || ext == ".webm" {
 			mediaType = models.StoryMediaTypeVideo
 		} else {
 			return nil, errorsapp.New(errorsapp.ErrCodeStoryInvalidFormat)
@@ -91,14 +97,22 @@ func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeade
 		ExpiresAt: *story.ExpiresAt,
 	}, nil
 }
-func (s *storyService) GetHomeStories() ([]dto.StoryFeedGroup, error) {
-	stories, err := s.repo.GetActiveStories()
+func (s *storyService) GetHomeStories(viewerID string, followingOnly bool) ([]dto.StoryFeedGroup, error) {
+	stories, err := s.repo.GetActiveStoriesForViewer(viewerID, followingOnly)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(stories) == 0 {
 		return []dto.StoryFeedGroup{}, nil
+	}
+
+	// Batch load trạng thái đã xem của viewer (nếu có đăng nhập)
+	viewedSet := map[string]struct{}{}
+	if viewerID != "" {
+		if ids, err := s.repo.GetViewedStoryIDs(viewerID); err == nil {
+			viewedSet = ids
+		}
 	}
 
 	// Collect unique user IDs
@@ -134,6 +148,7 @@ func (s *storyService) GetHomeStories() ([]dto.StoryFeedGroup, error) {
 			}
 			grouped[st.UserID] = group
 		}
+		_, isViewed := viewedSet[st.ID]
 		group.Stories = append(group.Stories, dto.StoryResponse{
 			ID:        st.ID,
 			UserID:    st.UserID,
@@ -142,7 +157,7 @@ func (s *storyService) GetHomeStories() ([]dto.StoryFeedGroup, error) {
 			Caption:   st.Caption,
 			CreatedAt: st.CreatedAt,
 			ExpiresAt: st.ExpiresAt,
-			HasViewed: false,
+			HasViewed: isViewed,
 		})
 	}
 
@@ -228,7 +243,7 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 		if err := s.repo.CreateInteract(interact); err != nil {
 			return err
 		}
-		notifyOwner(models.NotificationTypeLike, "đã bày tỏ cảm xúc với story của bạn")
+		notifyOwner(models.NotificationTypeStoryReact, "đã bày tỏ cảm xúc với story của bạn")
 		return nil
 	}
 
@@ -313,8 +328,26 @@ func (s *storyService) GetAnalytics(storyID, userID string) (*dto.StoryAnalytics
 		}
 	}
 
+	// Batch load profiles cho tất cả viewer để hiển thị tên + avatar
+	userIDs := make([]string, 0, len(viewerMap))
+	for id := range viewerMap {
+		userIDs = append(userIDs, id)
+	}
+	profileMap := make(map[string]models.Profile, len(userIDs))
+	if len(userIDs) > 0 {
+		if profiles, err := s.profileRepo.FindByIDs(context.Background(), userIDs); err == nil {
+			for _, p := range profiles {
+				profileMap[p.UserID] = p
+			}
+		}
+	}
+
 	var viewersList []dto.ViewerDetailResponse
 	for _, v := range viewerMap {
+		if p, ok := profileMap[v.UserID]; ok {
+			v.DisplayName = p.DisplayName
+			v.AvatarURI = p.AvatarURI
+		}
 		viewersList = append(viewersList, *v)
 	}
 
@@ -359,4 +392,49 @@ func (s *storyService) GetUserActiveStories(userID string, viewerID string) ([]d
 		})
 	}
 	return res, nil
+}
+
+func (s *storyService) DeleteStory(ctx context.Context, storyID, userID string) error {
+	story, err := s.repo.FindByID(storyID)
+	if err != nil {
+		return errorsapp.New(errorsapp.ErrCodeStoryNotFound)
+	}
+
+	if story.UserID != userID {
+		return errorsapp.New(errorsapp.ErrCodeStoryForbidden)
+	}
+
+	if err := s.repo.DeleteStory(storyID); err != nil {
+		return errorsapp.New(errorsapp.ErrCodeStoryDeleteFailed)
+	}
+	return nil
+}
+
+// ToggleStoryMute bật/tắt ẩn story của targetUserID. Trả về trạng thái muted hiện tại.
+func (s *storyService) ToggleStoryMute(userID, targetUserID string) (bool, error) {
+	if userID == targetUserID {
+		return false, errorsapp.New(errorsapp.ErrCodeStoryMuteSelf)
+	}
+
+	muted, err := s.repo.IsMuted(userID, targetUserID)
+	if err != nil {
+		return false, err
+	}
+
+	if muted {
+		if err := s.repo.DeleteMute(userID, targetUserID); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	mute := &models.StoryMute{
+		ID:          uuid.New().String(),
+		UserID:      userID,
+		MutedUserID: targetUserID,
+	}
+	if err := s.repo.CreateMute(mute); err != nil {
+		return false, err
+	}
+	return true, nil
 }

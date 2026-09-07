@@ -268,6 +268,7 @@ const (
 	ErrCodeMediaImageTooLarge       = "media.IMAGE_TOO_LARGE"
 	ErrCodeMediaInvalidAspectRatio  = "media.INVALID_ASPECT_RATIO"
 	ErrCodeMediaRejected            = "media.REJECTED"
+	ErrCodeMediaDurationTooLong     = "media.DURATION_TOO_LONG"
 
 	// ── Contribution ───────────────────────────────────────────
 	ErrCodeContribPostWeightInvalid     = "contribution.POST_WEIGHT_INVALID"
@@ -342,6 +343,9 @@ const (
 	ErrCodeStoryEmojiNotFound    = "story.EMOJI_NOT_FOUND"
 	ErrCodeStoryReplyEmpty       = "story.REPLY_EMPTY"
 	ErrCodeStoryAnalyticsForbidden = "story.ANALYTICS_FORBIDDEN"
+	ErrCodeStoryForbidden        = "story.FORBIDDEN"
+	ErrCodeStoryDeleteFailed     = "story.DELETE_FAILED"
+	ErrCodeStoryMuteSelf         = "story.MUTE_SELF"
 
 	// ── Search ─────────────────────────────────────────────────
 	ErrCodeSearchKeywordTooShort = "search.KEYWORD_TOO_SHORT"

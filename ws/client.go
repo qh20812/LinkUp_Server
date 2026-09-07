@@ -83,7 +83,7 @@ func (c *Client) ReadPump() {
 		// Chat events cần ChatService. Call events có nil check riêng.
 		if c.service == nil {
 			switch event.Type {
-			case "chat:join", "chat:history:more", "message:send", "typing:start", "typing:stop", "message:delete", "message:search", "message:pin", "message:unpin":
+			case "chat:join", "chat:history:more", "message:send", "typing:start", "typing:stop", "message:delete", "message:search", "message:pin", "message:unpin", "message:read", "message:react":
 				continue
 			}
 		}
@@ -136,7 +136,7 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID, payload.SharedPostID, payload.MediaGroupID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID, payload.SharedPostID, payload.MediaGroupID, payload.ForwardedFrom)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
@@ -164,12 +164,15 @@ func (c *Client) ReadPump() {
 				MediaGroupID:     msg.MediaGroupID,
 				ReplyToMessageID: msg.ReplyToMessageID,
 				SharedPostID:     msg.SharedPostID,
+				ForwardedFrom:    msg.ForwardedFrom,
+				ForwardsCount:    msg.ForwardsCount,
 				Type:             msg.Type,
 				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
 			}
 			if msg.MediaID != nil && *msg.MediaID != "" {
 				messagePayload.MediaType = c.service.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+				messagePayload.DurationSeconds = c.service.GetMediaDurations(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
 			}
 			if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
 				if previews := c.service.GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
@@ -277,7 +280,7 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(dto.SearchMessageResultPayload{
 					ChatID:   payload.ChatID,
 					Keyword:  payload.Keyword,
-					Messages: toMessagePayloads(messages, c.userID, nil, loadMediaTypesForMessages(c.ctx, c.service, messages)),
+					Messages: toMessagePayloads(messages, c.userID, nil, loadMediaTypesForMessages(c.ctx, c.service, messages), loadMediaDurationsForMessages(c.ctx, c.service, messages)),
 				}),
 			})
 			c.send <- resp
@@ -318,6 +321,54 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(dto.MessageUnpinnedPayload{ChatID: payload.ChatID, MessageID: payload.MessageID}),
 			})
 			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: unpinnedResp}
+
+		case "message:read":
+			var payload dto.MessageReadPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu đã đọc không hợp lệ")
+				continue
+			}
+
+			state, err := c.service.MarkMessageRead(c.ctx, c.userID, payload.ChatID, payload.LastMessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if state == nil {
+				continue
+			}
+
+			readResp, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:read",
+				Payload: mustMarshal(state),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: readResp}
+
+		case "message:react":
+			var payload dto.ReactMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu cảm xúc không hợp lệ")
+				continue
+			}
+
+			action, reactions, err := c.service.ReactToMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID, payload.EmojiID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			reactedResp, _ := json.Marshal(dto.WsEvent{
+				Type: "message:reacted",
+				Payload: mustMarshal(dto.MessageReactedPayload{
+					ChatID:    payload.ChatID,
+					MessageID: payload.MessageID,
+					UserID:    c.userID,
+					Action:    action,
+					EmojiID:   payload.EmojiID,
+					Reactions: reactions,
+				}),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: reactedResp}
 
 		case "call:busy":
 			// Client xác nhận đã nhận được thông báo busy — bỏ qua, không cần xử lý thêm
@@ -519,7 +570,7 @@ func mustMarshal(v any) json.RawMessage {
 	return out
 }
 
-func toMessagePayloads(messages []models.Message, userID string, sharedPosts map[string]*dto.SharedPostPayload, mediaTypes map[string]string) []dto.MessagePayload {
+func toMessagePayloads(messages []models.Message, userID string, sharedPosts map[string]*dto.SharedPostPayload, mediaTypes map[string]string, mediaDurations map[string]int) []dto.MessagePayload {
 	result := make([]dto.MessagePayload, 0, len(messages))
 	for _, msg := range messages {
 		deleted := isMessageDeletedFor(msg, userID)
@@ -537,6 +588,8 @@ func toMessagePayloads(messages []models.Message, userID string, sharedPosts map
 			MediaGroupID:     msg.MediaGroupID,
 			ReplyToMessageID: msg.ReplyToMessageID,
 			SharedPostID:     msg.SharedPostID,
+			ForwardedFrom:    msg.ForwardedFrom,
+			ForwardsCount:    msg.ForwardsCount,
 			Type:             msg.Type,
 			E2EVersion:       msg.E2EVersion,
 			Deleted:          deleted,
@@ -544,6 +597,9 @@ func toMessagePayloads(messages []models.Message, userID string, sharedPosts map
 		}
 		if msg.MediaID != nil && mediaTypes != nil {
 			payload.MediaType = mediaTypes[*msg.MediaID]
+		}
+		if msg.MediaID != nil && mediaDurations != nil {
+			payload.DurationSeconds = mediaDurations[*msg.MediaID]
 		}
 		if sharedPosts != nil && msg.SharedPostID != nil {
 			if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
@@ -553,6 +609,26 @@ func toMessagePayloads(messages []models.Message, userID string, sharedPosts map
 		result = append(result, payload)
 	}
 	return result
+}
+
+// applySeenBy gắn danh sách user đã đọc (seen_by) cho từng tin nhắn dựa trên
+// watermark đọc của từng thành viên trong chat. Bỏ qua chính người gửi.
+func applySeenBy(payloads []dto.MessagePayload, watermarks map[string]time.Time) {
+	for i := range payloads {
+		p := &payloads[i]
+		var seen []string
+		for userID, readAt := range watermarks {
+			if userID == p.SenderID {
+				continue
+			}
+			if !readAt.Before(p.CreatedAt) {
+				seen = append(seen, userID)
+			}
+		}
+		if len(seen) > 0 {
+			p.SeenBy = seen
+		}
+	}
 }
 
 func loadMediaTypesForMessages(ctx context.Context, service ChatService, messages []models.Message) map[string]string {
@@ -566,6 +642,19 @@ func loadMediaTypesForMessages(ctx context.Context, service ChatService, message
 		return nil
 	}
 	return service.GetMediaFileTypes(ctx, ids)
+}
+
+func loadMediaDurationsForMessages(ctx context.Context, service ChatService, messages []models.Message) map[string]int {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaID != nil && *m.MediaID != "" {
+			ids = append(ids, *m.MediaID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return service.GetMediaDurations(ctx, ids)
 }
 
 func loadSharedPostsForMessages(ctx context.Context, messages []models.Message, postRepo *repository.PostRepository) map[string]*dto.SharedPostPayload {
@@ -648,7 +737,7 @@ func (c *Client) sendChatHistory(eventType, chatID string, cursor *dto.HistoryCu
 	if c.postRepo != nil {
 		sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
 	}
-	payloads := toMessagePayloads(history, c.userID, sharedPosts, loadMediaTypesForMessages(c.ctx, c.service, history))
+	payloads := toMessagePayloads(history, c.userID, sharedPosts, loadMediaTypesForMessages(c.ctx, c.service, history), loadMediaDurationsForMessages(c.ctx, c.service, history))
 
 	replyIDs := make([]string, 0)
 	for _, p := range payloads {
@@ -670,6 +759,24 @@ func (c *Client) sendChatHistory(eventType, chatID string, cursor *dto.HistoryCu
 				if preview, ok := previews[*payloads[i].ReplyToMessageID]; ok {
 					payloads[i].ReplyTo = preview
 				}
+			}
+		}
+	}
+
+	// Read receipts: gắn danh sách user đã đọc từng tin nhắn (watermark đọc).
+	if watermarks, err := c.service.GetChatReadWatermarks(c.ctx, chatID); err == nil {
+		applySeenBy(payloads, watermarks)
+	}
+
+	// Message reactions: gắn danh sách cảm xúc cho từng tin nhắn.
+	ids := make([]string, 0, len(payloads))
+	for _, p := range payloads {
+		ids = append(ids, p.ID)
+	}
+	if reactions := c.service.GetMessageReactions(c.ctx, ids); reactions != nil {
+		for i := range payloads {
+			if list, ok := reactions[payloads[i].ID]; ok && list != nil {
+				payloads[i].Reactions = list
 			}
 		}
 	}

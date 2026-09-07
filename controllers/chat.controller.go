@@ -11,6 +11,7 @@ import (
 	"linkup/utils"
 	"linkup/ws"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -244,7 +245,7 @@ func (ctrl *ChatController) SharePost(c *gin.Context) {
 	}
 
 	sharedPostID := input.SharedPostID
-	msg, err := ctrl.chatService.SendMessage(c.Request.Context(), userID, chat.ID, "", 0, nil, nil, nil, nil, &sharedPostID, nil)
+	msg, err := ctrl.chatService.SendMessage(c.Request.Context(), userID, chat.ID, "", 0, nil, nil, nil, nil, &sharedPostID, nil, nil)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
@@ -281,7 +282,16 @@ func (ctrl *ChatController) UploadChatMedia(c *gin.Context) {
 		return
 	}
 
-	media, err := ctrl.mediaService.UploadChatMedia(c.Request.Context(), userID, file)
+	// duration_seconds (giây) chỉ có ý nghĩa với tin nhắn thoại (voice notes).
+	// Client gửi kèm khi upload audio ghi âm; server validate giới hạn 5 phút.
+	durationSeconds := 0
+	if raw := c.PostForm("duration_seconds"); raw != "" {
+		if parsed, convErr := strconv.Atoi(raw); convErr == nil && parsed > 0 {
+			durationSeconds = parsed
+		}
+	}
+
+	media, err := ctrl.mediaService.UploadChatMedia(c.Request.Context(), userID, file, durationSeconds)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			status := errorsapp.StatusCode(appErr.Code)
@@ -303,6 +313,7 @@ func (ctrl *ChatController) UploadChatMedia(c *gin.Context) {
 			FileURI:          media.FileURI,
 			FileType:         media.FileType,
 			FileSize:         media.FileSize,
+			DurationSeconds:  media.DurationSeconds,
 			Status:           media.Status.String(),
 			AvailableStorage: available,
 		},

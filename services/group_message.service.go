@@ -79,7 +79,7 @@ func (s *GroupMessageService) JoinRoom(ctx context.Context, userID, chatID strin
 func (s *GroupMessageService) SendMessage(
 	ctx context.Context,
 	userID, chatID, content string,
-	emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID *string,
+	emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID, forwardedFrom *string,
 ) (*models.Message, error) {
 	chat, err := s.ensureGroupMember(ctx, userID, chatID)
 	if err != nil {
@@ -158,6 +158,23 @@ func (s *GroupMessageService) SendMessage(
 		}
 	}
 
+	// Forward: metadata forwarded_from trỏ về tin gốc; server chỉ chấp nhận khi
+	// user thuộc hội thoại gốc. Client tạo nội dung mới (giải mã rồi mã hóa lại
+	// với khóa của hội thoại đích), nên forward phải có nội dung.
+	if forwardedFrom != nil && *forwardedFrom != "" {
+		hasContent := forwardHasContent(content, emojiID, mediaID, sharedPostID)
+		if !hasContent {
+			return nil, fmt.Errorf("không có nội dung để chuyển tiếp")
+		}
+		canRead, err := s.chatRepo.CanReadMessage(ctx, *forwardedFrom, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !canRead {
+			return nil, fmt.Errorf("không thể chuyển tiếp tin nhắn từ hội thoại không thuộc quyền truy cập của bạn")
+		}
+	}
+
 	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	if err != nil {
 		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
@@ -176,6 +193,14 @@ func (s *GroupMessageService) SendMessage(
 	if sharedPostID != nil && *sharedPostID != "" {
 		msg.SharedPostID = sharedPostID
 		msg.Type = "shared_post"
+	}
+	if forwardedFrom != nil && *forwardedFrom != "" {
+		src, err := s.chatRepo.FindMessageByID(ctx, *forwardedFrom)
+		if err == nil {
+			msg.ForwardedFrom = forwardedFrom
+			msg.ForwardsCount = src.ForwardsCount + 1
+			_ = s.chatRepo.IncrementForwardsCount(ctx, *forwardedFrom)
+		}
 	}
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
@@ -409,6 +434,25 @@ func (s *GroupMessageService) GetMediaFileTypes(ctx context.Context, mediaIDs []
 	return result
 }
 
+func (s *GroupMessageService) GetMediaDurations(ctx context.Context, mediaIDs []string) map[string]int {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	result, err := s.mediaRepo.GetMediaDurationsByIDs(ctx, ids)
+	if err != nil {
+		return map[string]int{}
+	}
+	return result
+}
+
 func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {
 	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
 		return nil, err
@@ -575,4 +619,95 @@ func (s *GroupMessageService) GetPinnedMessages(ctx context.Context, userID, cha
 	}
 
 	return pins, nil
+}
+
+// MarkMessageRead nâng watermark đọc của user trong group chat lên một tin.
+// Nhánh group dùng chung bảng chat_reads (chat_id = group chat id).
+func (s *GroupMessageService) MarkMessageRead(ctx context.Context, userID, chatID, messageID string) (*dto.MessageReadStatePayload, error) {
+	if err := s.JoinRoom(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if msg.ChatID != chatID {
+		return nil, fmt.Errorf("tin nhắn không thuộc hội thoại này")
+	}
+
+	advanced, err := s.chatRepo.UpsertChatRead(ctx, chatID, userID, messageID, msg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if !advanced {
+		return nil, nil
+	}
+	return &dto.MessageReadStatePayload{
+		ChatID:        chatID,
+		UserID:        userID,
+		LastMessageID: messageID,
+		LastReadAt:    msg.CreatedAt,
+	}, nil
+}
+
+// GetChatReadWatermarks trả về watermark đọc của toàn group chat.
+func (s *GroupMessageService) GetChatReadWatermarks(ctx context.Context, chatID string) (map[string]time.Time, error) {
+	return s.chatRepo.GetChatReadWatermarks(ctx, chatID)
+}
+
+// ── Message reactions (Phase 4) ─────────────────────────────────────────────
+
+func (s *GroupMessageService) ReactToMessage(ctx context.Context, userID, chatID, messageID, emojiID string) (string, []dto.MessageReactionPayload, error) {
+	if err := s.JoinRoom(ctx, userID, chatID); err != nil {
+		return "", nil, err
+	}
+	if emojiID == "" {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeEmojiRequired)
+	}
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return "", nil, err
+	}
+	if msg.ChatID != chatID {
+		return "", nil, fmt.Errorf("tin nhắn không thuộc hội thoại này")
+	}
+	ok, err := s.chatRepo.IsEmojiExists(ctx, emojiID)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeGCEmojiNotFound)
+	}
+
+	action, err := s.chatRepo.ToggleMessageReaction(ctx, messageID, userID, emojiID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	reactions := s.GetMessageReactions(ctx, []string{messageID})[messageID]
+
+	// Thông báo "thích" tin nhắn cho người gửi (chỉ khi thêm reaction mới).
+	if action == "added" && userID != msg.SenderID && s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+	}
+
+	return action, reactions, nil
+}
+
+func (s *GroupMessageService) GetMessageReactions(ctx context.Context, messageIDs []string) map[string][]dto.MessageReactionPayload {
+	result := make(map[string][]dto.MessageReactionPayload)
+	raw := s.chatRepo.GetMessageReactions(ctx, messageIDs)
+	for messageID, list := range raw {
+		payloads := make([]dto.MessageReactionPayload, 0, len(list))
+		for _, r := range list {
+			payloads = append(payloads, dto.MessageReactionPayload{
+				MessageID: r.MessageID,
+				UserID:    r.UserID,
+				EmojiID:   r.EmojiID,
+				CreatedAt: r.CreatedAt,
+			})
+		}
+		result[messageID] = payloads
+	}
+	return result
 }

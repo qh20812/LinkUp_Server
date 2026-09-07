@@ -46,8 +46,10 @@ type InteractStoryRequest struct {
 
 // ViewerDetailResponse hiển thị chi tiết người xem, cảm xúc và tin nhắn cho chủ Story
 type ViewerDetailResponse struct {
-	UserID     string    `json:"user_id"`
-	ViewedAt   time.Time `json:"viewed_at"`
+	UserID      string    `json:"user_id"`
+	DisplayName string    `json:"display_name"`
+	AvatarURI   string    `json:"avatar_uri"`
+	ViewedAt    time.Time `json:"viewed_at"`
 	ReactType  *string   `json:"react_type,omitempty"`
 	EmojiID    *string   `json:"emoji_id,omitempty"`
 	ClickCount int       `json:"click_count,omitempty"`

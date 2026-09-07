@@ -21,6 +21,7 @@ func Run(db *gorm.DB) {
 		&models.User{},
 		&models.StoryView{},
 		&models.StoryInteract{},
+		&models.StoryMute{},
 		&models.AdPackage{},
 		&models.PartnerSubscription{},
 		&models.Ad{},
@@ -46,6 +47,16 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "messages", "media_group_id", "VARCHAR(36) NULL")
 	ensureIndex(db, "messages", "idx_messages_media_group_id", "media_group_id")
 
+	// Thêm cột messages.forwarded_from/forwards_count cho tính năng chuyển tiếp
+	// (forward) tin nhắn: trỏ về tin gốc + số lần chuỗi đã được chuyển tiếp.
+	ensureColumn(db, "messages", "forwarded_from", "VARCHAR(36) NULL")
+	ensureColumn(db, "messages", "forwards_count", "INT NOT NULL DEFAULT 0")
+	ensureIndex(db, "messages", "idx_messages_forwarded_from", "forwarded_from")
+
+	// Thêm cột media.duration_seconds cho tin nhắn thoại (voice notes):
+	// thời lượng file âm thanh tính bằng giây, mặc định 0 cho media thường.
+	ensureColumn(db, "media", "duration_seconds", "INT NOT NULL DEFAULT 0")
+
 	// Thêm cột pin cho posts (is_pinned/pinned_at)
 	ensureColumn(db, "posts", "is_pinned", "TINYINT(1) NOT NULL DEFAULT 0")
 	ensureColumn(db, "posts", "pinned_at", "DATETIME NULL")
@@ -70,9 +81,16 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "user_settings", "activity_status_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
 	ensureColumn(db, "user_settings", "last_seen_visibility", "VARCHAR(20) NOT NULL DEFAULT 'all_friends'")
 
+	// Thêm các cột notification_preferences mới cho story react/share/media
+	if db.Migrator().HasTable("notification_preferences") {
+		ensureColumn(db, "notification_preferences", "story_react_enabled", "TINYINT(1) NOT NULL DEFAULT 1")
+		ensureColumn(db, "notification_preferences", "share_enabled", "TINYINT(1) NOT NULL DEFAULT 1")
+		ensureColumn(db, "notification_preferences", "media_enabled", "TINYINT(1) NOT NULL DEFAULT 1")
+	}
+
 	// Đồng bộ collation toàn bảng GORM về utf8mb4_unicode_ci (idempotent).
 	// "ads" do seed tạo đã là unicode_ci nhưng chạy lại cũng an toàn.
-	for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts", "comment_reactions"} {
+	for _, table := range []string{"ads", "ad_packages", "partner_subscriptions", "ad_media", "ad_analytics", "story_views", "story_interacts", "story_mutes", "comment_reactions"} {
 		if db.Migrator().HasTable(table) {
 			_ = db.Exec("ALTER TABLE " + table + " CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
 		}
@@ -111,6 +129,40 @@ func Run(db *gorm.DB) {
 	ensureForeignKey(db, "pinned_messages", "fk_pinned_chat", "chat_id", "chats", "id")
 	ensureForeignKey(db, "pinned_messages", "fk_pinned_message", "message_id", "messages", "id")
 	ensureForeignKey(db, "pinned_messages", "fk_pinned_by", "pinned_by", "users", "id")
+
+	// ===== Chat reads (read receipts) table =====
+	if !db.Migrator().HasTable(&models.ChatRead{}) {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS chat_reads (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			last_read_at DATETIME NOT NULL,
+			last_message_id VARCHAR(36) NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, user_id),
+			KEY idx_chat_reads_chat (chat_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create chat_reads table: %v", err)
+		}
+	}
+	ensureForeignKey(db, "chat_reads", "fk_chat_reads_chat", "chat_id", "chats", "id")
+	ensureForeignKey(db, "chat_reads", "fk_chat_reads_user", "user_id", "users", "id")
+
+	// ===== Message reactions (Phase 4) table =====
+	if !db.Migrator().HasTable(&models.MessageReaction{}) {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS message_reactions (
+			message_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			emoji_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (message_id, user_id),
+			KEY idx_message_reactions_message (message_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create message_reactions table: %v", err)
+		}
+	}
+	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_message", "message_id", "messages", "id")
+	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_user", "user_id", "users", "id")
 
 	// Seed dữ liệu mặc định cho các Gói Quảng Cáo
 	seedAdPackages(db)

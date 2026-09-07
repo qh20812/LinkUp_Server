@@ -54,7 +54,14 @@ func (s *ChatService) JoinChat(ctx context.Context, userID, chatID string) error
 	return nil
 }
 
-func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID *string) (*models.Message, error) {
+// forwardHasContent xác định tin chuyển tiếp có nội dung thật (text/emoji/media/
+// shared post) hay không. Chuyển tiếp "rỗng" bị từ chối vì client tạo nội dung
+// mới (giải mã rồi mã hóa lại với khóa hội thoại đích).
+func forwardHasContent(content string, emojiID, mediaID, sharedPostID *string) bool {
+	return strings.TrimSpace(content) != "" || emojiID != nil || mediaID != nil || sharedPostID != nil
+}
+
+func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID, forwardedFrom *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
 		return nil, err
@@ -153,6 +160,24 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		}
 	}
 
+	// Forward: tin nhắn chuyển tiếp là tin mới mang metadata forwarded_from trỏ về
+	// tin gốc. Server chỉ chấp nhận khi user thuộc hội thoại gốc (tránh lộ nội dung
+	// hội thoại khác). Client tự tạo nội dung mới (giải mã rồi mã hóa lại với khóa
+	// của hội thoại đích), vì vậy nội dung forward phải có giá trị.
+	if forwardedFrom != nil && *forwardedFrom != "" {
+		hasContent := forwardHasContent(content, emojiID, mediaID, sharedPostID)
+		if !hasContent {
+			return nil, fmt.Errorf("không có nội dung để chuyển tiếp")
+		}
+		canRead, err := s.chatRepo.CanReadMessage(ctx, *forwardedFrom, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !canRead {
+			return nil, fmt.Errorf("không thể chuyển tiếp tin nhắn từ hội thoại không thuộc quyền truy cập của bạn")
+		}
+	}
+
 	msg := models.NewMessage(chatID, userID, content, mediaID, emojiID)
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
@@ -161,6 +186,14 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 	if sharedPostID != nil && *sharedPostID != "" {
 		msg.SharedPostID = sharedPostID
 		msg.Type = "shared_post"
+	}
+	if forwardedFrom != nil && *forwardedFrom != "" {
+		src, err := s.chatRepo.FindMessageByID(ctx, *forwardedFrom)
+		if err == nil {
+			msg.ForwardedFrom = forwardedFrom
+			msg.ForwardsCount = src.ForwardsCount + 1
+			_ = s.chatRepo.IncrementForwardsCount(ctx, *forwardedFrom)
+		}
 	}
 
 	if e2eVersion == 1 {
@@ -246,6 +279,25 @@ func (s *ChatService) GetMediaFileTypes(ctx context.Context, mediaIDs []string) 
 	result, err := s.mediaRepo.GetFileTypesByIDs(ctx, ids)
 	if err != nil {
 		return map[string]string{}
+	}
+	return result
+}
+
+func (s *ChatService) GetMediaDurations(ctx context.Context, mediaIDs []string) map[string]int {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	result, err := s.mediaRepo.GetMediaDurationsByIDs(ctx, ids)
+	if err != nil {
+		return map[string]int{}
 	}
 	return result
 }
@@ -812,4 +864,96 @@ func (s *ChatService) GetPinnedMessages(ctx context.Context, userID, chatID stri
 	}
 
 	return pins, nil
+}
+
+// MarkMessageRead nâng watermark đọc của user lên created_at tin lastMessageID.
+// Payload kết quả dùng để broadcast cho toàn room. Nếu watermark chưa tăng
+// (tin cũ hơn vị trí đọc hiện tại) thì trả nil — không cần thông báo lại.
+func (s *ChatService) MarkMessageRead(ctx context.Context, userID, chatID, messageID string) (*dto.MessageReadStatePayload, error) {
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if msg.ChatID != chatID {
+		return nil, fmt.Errorf("tin nhắn không thuộc hội thoại này")
+	}
+
+	advanced, err := s.chatRepo.UpsertChatRead(ctx, chatID, userID, messageID, msg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if !advanced {
+		return nil, nil
+	}
+	return &dto.MessageReadStatePayload{
+		ChatID:        chatID,
+		UserID:        userID,
+		LastMessageID: messageID,
+		LastReadAt:    msg.CreatedAt,
+	}, nil
+}
+
+// GetChatReadWatermarks trả về watermark đọc của toàn chat (user → last_read_at).
+func (s *ChatService) GetChatReadWatermarks(ctx context.Context, chatID string) (map[string]time.Time, error) {
+	return s.chatRepo.GetChatReadWatermarks(ctx, chatID)
+}
+
+// ── Message reactions (Phase 4) ─────────────────────────────────────────────
+
+func (s *ChatService) ReactToMessage(ctx context.Context, userID, chatID, messageID, emojiID string) (string, []dto.MessageReactionPayload, error) {
+	if err := s.JoinChat(ctx, userID, chatID); err != nil {
+		return "", nil, err
+	}
+	if emojiID == "" {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeEmojiRequired)
+	}
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return "", nil, err
+	}
+	if msg.ChatID != chatID {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
+	}
+	ok, err := s.chatRepo.IsEmojiExists(ctx, emojiID)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeGCEmojiNotFound)
+	}
+
+	action, err := s.chatRepo.ToggleMessageReaction(ctx, messageID, userID, emojiID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	reactions := s.GetMessageReactions(ctx, []string{messageID})[messageID]
+
+	// Thông báo "thích" tin nhắn cho người gửi (chỉ khi thêm reaction mới).
+	if action == "added" && userID != msg.SenderID && s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+	}
+
+	return action, reactions, nil
+}
+
+func (s *ChatService) GetMessageReactions(ctx context.Context, messageIDs []string) map[string][]dto.MessageReactionPayload {
+	result := make(map[string][]dto.MessageReactionPayload)
+	raw := s.chatRepo.GetMessageReactions(ctx, messageIDs)
+	for messageID, list := range raw {
+		payloads := make([]dto.MessageReactionPayload, 0, len(list))
+		for _, r := range list {
+			payloads = append(payloads, dto.MessageReactionPayload{
+				MessageID: r.MessageID,
+				UserID:    r.UserID,
+				EmojiID:   r.EmojiID,
+				CreatedAt: r.CreatedAt,
+			})
+		}
+		result[messageID] = payloads
+	}
+	return result
 }
