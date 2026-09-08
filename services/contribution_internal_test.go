@@ -910,7 +910,7 @@ func newFullTestSeed(t *testing.T) fullTestSeed {
 	notifRepo := repository.NewNotificationRepository(db)
 	prefRepo := repository.NewNotificationPreferenceRepository(db)
 	validation := validations.NewContributionValidation()
-	notifService := NewNotificationService(notifRepo, prefRepo, profileRepo, nil)
+	notifService := NewNotificationService(notifRepo, prefRepo, profileRepo, nil, nil, nil)
 	svc := NewContributionService(contributionRepo, communityRepo, profileRepo, notifService, validation)
 
 	return fullTestSeed{

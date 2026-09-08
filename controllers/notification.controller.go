@@ -3,12 +3,14 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/services"
+	"linkup/utils"
 )
 
 type NotificationController struct {
@@ -166,6 +168,35 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 	}
 
 	if err := ctrl.service.UpdatePreferences(c.Request.Context(), pref); err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (ctrl *NotificationController) RegisterPushToken(c *gin.Context) {
+	userID, _ := c.Get("userID")
+
+	var input struct {
+		PushToken string `json:"push_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	now := time.Now().UTC()
+	token := &models.PushToken{
+		ID:        utils.GenerateUUID(),
+		UserID:    userID.(string),
+		PushToken: input.PushToken,
+		Platform:  "expo",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := ctrl.service.UpsertPushToken(c.Request.Context(), token); err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}

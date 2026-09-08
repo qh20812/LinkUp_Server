@@ -13,18 +13,22 @@ import (
 )
 
 type NotificationService struct {
-	notifRepo   *repository.NotificationRepository
-	prefRepo    *repository.NotificationPreferenceRepository
-	profileRepo *repository.ProfileRepository
-	hub         *ws.Hub
+	notifRepo      *repository.NotificationRepository
+	prefRepo       *repository.NotificationPreferenceRepository
+	profileRepo    *repository.ProfileRepository
+	pushTokenRepo  *repository.PushTokenRepository
+	pushService    *PushService
+	hub            *ws.Hub
 }
 
-func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub) *NotificationService {
+func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub, pushTokenRepo *repository.PushTokenRepository, pushService *PushService) *NotificationService {
 	return &NotificationService{
-		notifRepo:   notifRepo,
-		prefRepo:    prefRepo,
-		profileRepo: profileRepo,
-		hub:         hub,
+		notifRepo:     notifRepo,
+		prefRepo:      prefRepo,
+		profileRepo:   profileRepo,
+		pushTokenRepo: pushTokenRepo,
+		pushService:   pushService,
+		hub:           hub,
 	}
 }
 
@@ -61,6 +65,14 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	s.hub.SendToUser(receiverID, ws.OutgoingMessage{
 		Type: "notification",
 		Data: &resp,
+	})
+
+	// Send push notification
+	s.sendPush(ctx, receiverID, content, map[string]interface{}{
+		"type":           string(notifType),
+		"redirect_post_id":    redirectPostID,
+		"redirect_user_id":    redirectUserID,
+		"redirect_comment_id": redirectCommentID,
 	})
 
 	return notification, nil
@@ -111,6 +123,14 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 		s.hub.SendToUser(notifications[i].ReceiverID, ws.OutgoingMessage{
 			Type: "notification",
 			Data: &resp,
+		})
+
+		// Send push notification
+		s.sendPush(ctx, notifications[i].ReceiverID, content, map[string]interface{}{
+			"type":           string(notifType),
+			"redirect_post_id":    redirectPostID,
+			"redirect_user_id":    redirectUserID,
+			"redirect_comment_id": redirectCommentID,
 		})
 	}
 
@@ -183,6 +203,10 @@ func (s *NotificationService) UpdatePreferences(ctx context.Context, pref *model
 	return s.prefRepo.Upsert(ctx, pref)
 }
 
+func (s *NotificationService) UpsertPushToken(ctx context.Context, token *models.PushToken) error {
+	return s.pushTokenRepo.Upsert(ctx, token)
+}
+
 func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *string) map[string]dto.SenderProfile {
 	if senderID == nil {
 		return nil
@@ -205,6 +229,19 @@ func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *
 		}
 	}
 	return senderMap
+}
+
+func (s *NotificationService) sendPush(ctx context.Context, receiverID, content string, data map[string]interface{}) {
+	if s.pushTokenRepo == nil || s.pushService == nil {
+		return
+	}
+	tokens, err := s.pushTokenRepo.FindByUserID(ctx, receiverID)
+	if err != nil || len(tokens) == 0 {
+		return
+	}
+	for _, t := range tokens {
+		go s.pushService.SendBatch(t.PushToken, "LinkUp", content, data)
+	}
 }
 
 func isNotificationEnabled(pref *models.NotificationPreference, notifType models.NotificationType) bool {
