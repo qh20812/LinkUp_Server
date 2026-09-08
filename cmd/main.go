@@ -124,7 +124,9 @@ func main() {
 		// ===== KHỞI TẠO TẦNG NOTIFICATION (HỖ TRỢ THÔNG BÁO TIN NHẮN/LIKE/COMMENT) =====
 		notificationRepository := repository.NewNotificationRepository(gormDB)
 		notificationPreferenceRepository := repository.NewNotificationPreferenceRepository(gormDB)
-		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, profileRepository, hub)
+		pushTokenRepository := repository.NewPushTokenRepository(gormDB)
+		pushService := services.NewPushService()
+		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, profileRepository, hub, pushTokenRepository, pushService)
 		notificationController := controllers.NewNotificationController(notificationService)
 		routes.RegisterNotificationRoutes(router, notificationController, env, gormDB)
 

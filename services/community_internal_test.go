@@ -213,7 +213,7 @@ func newCommunityTestSeed(t *testing.T, autoApprove bool) communityTestSeed {
 	prefRepo := repository.NewNotificationPreferenceRepository(db)
 	hub := ws.NewHub()
 	go hub.Run()
-	notifService := NewNotificationService(notifRepo, prefRepo, profileRepo, hub)
+	notifService := NewNotificationService(notifRepo, prefRepo, profileRepo, hub, nil, nil)
 	validation := validations.NewCommunityValidation()
 	groupRole := utils.NewGroupRoleChecker(communityRepo.GetUserRole)
 
@@ -254,7 +254,7 @@ func newCreateCommunityTestSeed(t *testing.T) communityTestSeed {
 	prefRepo := repository.NewNotificationPreferenceRepository(db)
 	hub := ws.NewHub()
 	go hub.Run()
-	notifService := NewNotificationService(notifRepo, prefRepo, profileRepo, hub)
+	notifService := NewNotificationService(notifRepo, prefRepo, profileRepo, hub, nil, nil)
 	validation := validations.NewCommunityValidation()
 	groupRole := utils.NewGroupRoleChecker(communityRepo.GetUserRole)
 

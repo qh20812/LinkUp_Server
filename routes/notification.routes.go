@@ -18,5 +18,6 @@ func RegisterNotificationRoutes(router *gin.Engine, ctrl *controllers.Notificati
 		g.GET("/unread-count", ctrl.GetUnreadCount)
 		g.GET("/preferences", ctrl.GetPreferences)
 		g.PUT("/preferences", ctrl.UpdatePreferences)
+		g.POST("/push-token", ctrl.RegisterPushToken)
 	}
 }

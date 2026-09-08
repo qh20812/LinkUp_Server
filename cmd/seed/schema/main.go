@@ -1061,5 +1061,21 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add fk_posts_shared_from: %w", err)
 	}
 
+	// ===== PUSH TOKENS TABLE =====
+	pushTokensSchema := `CREATE TABLE IF NOT EXISTS push_tokens (
+		id VARCHAR(36) PRIMARY KEY,
+		user_id VARCHAR(36) NOT NULL,
+		push_token VARCHAR(255) NOT NULL,
+		platform VARCHAR(20) NOT NULL DEFAULT 'expo',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		UNIQUE INDEX idx_push_tokens_token (push_token),
+		INDEX idx_push_tokens_user (user_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+	if _, err := database.Exec(pushTokensSchema); err != nil {
+		return fmt.Errorf("schema: create push_tokens: %w", err)
+	}
+
 	return nil
 }
