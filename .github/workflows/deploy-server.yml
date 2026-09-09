@@ -51,6 +51,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 24700
           source: server.tar.gz
           target: /tmp/
 
@@ -60,6 +61,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 24700
           timeout: 60s
           script_timeout: 10m
           script: |
