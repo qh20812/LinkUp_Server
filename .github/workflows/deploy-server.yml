@@ -78,7 +78,7 @@ jobs:
             docker load -i /tmp/server.tar.gz
 
             # Deploy new version
-            docker compose up -d server
+            docker compose up -d --no-build server
 
             # Health check (up to 60s)
             echo "Waiting for server (up to 60s)..."
