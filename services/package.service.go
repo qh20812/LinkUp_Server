@@ -2,9 +2,9 @@ package services
 
 import (
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"time"
@@ -57,7 +57,7 @@ func (s *packageServiceImpl) SubscribePackage(userID string, packageID string) (
 
 	// Gọi Transaction: tự động xử lý hủy gói cũ + tạo gói mới + nâng role người dùng
 	if err := s.repo.SubscribeWithTransaction(activeSub, newSub); err != nil {
-		return nil, fmt.Errorf("không thể đăng ký gói: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodePackageSubscribeFailed, err)
 	}
 
 	return newSub, nil
@@ -69,7 +69,7 @@ func (s *packageServiceImpl) GetUserSubscription(userID string) (*dto.Subscripti
 		return nil, err
 	}
 	if sub == nil {
-		return nil, errors.New("bạn chưa đăng ký gói quảng cáo nào")
+		return nil, errorsapp.New(errorsapp.ErrCodePackageNotSubscribed)
 	}
 
 	slotsLeft := sub.Package.MaxSlots - sub.SlotsUsed

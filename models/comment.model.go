@@ -21,8 +21,14 @@ type Comment struct {
 	Content      string         `json:"content"`
 	Status       CommentStatus  `json:"status"`
 	ReviewReason *string        `json:"review_reason,omitempty"`
+	LikesCount   int            `json:"likes_count" gorm:"default:0"`
+	IsLiked      bool           `json:"is_liked" gorm:"->"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    *time.Time     `json:"updated_at,omitempty"`
+
+	Username    string `json:"username" gorm:"->"`
+	DisplayName string `json:"display_name" gorm:"->"`
+	AvatarURI   string `json:"avatar_uri" gorm:"->"`
 }
 
 func NewComment(userID, postID string, parentID *string, content string) Comment {

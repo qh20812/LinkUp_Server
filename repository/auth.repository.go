@@ -83,6 +83,45 @@ func (r *AuthRepository) FindByIDs(ctx context.Context, userIDs []string) ([]mod
 	return users, nil
 }
 
+// PasswordHistoryLimit is how many past passwords are kept to reject reuse.
+const PasswordHistoryLimit = 5
+
+// UpdatePasswordWithHistory changes the user's password inside a single
+// transaction: it records the previous hash in password_histories, updates the
+// account hash, then prunes history to the most recent PasswordHistoryLimit rows.
+func (r *AuthRepository) UpdatePasswordWithHistory(ctx context.Context, userID string, oldHash string, newHash string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		history := &models.PasswordHistory{
+			ID:           utils.GenerateUUID(),
+			UserID:       userID,
+			PasswordHash: oldHash,
+			CreatedAt:    time.Now(),
+		}
+		if err := tx.Create(history).Error; err != nil {
+			return fmt.Errorf("save password history: %w", err)
+		}
+
+		if err := tx.Model(&models.User{}).Where("id = ?", userID).Update("password_hash", newHash).Error; err != nil {
+			return fmt.Errorf("update password: %w", err)
+		}
+
+		// MySQL 8.0 window function: delete rows ranked beyond the newest `keep`.
+		if err := tx.Exec(`
+			DELETE ph FROM password_histories ph
+			JOIN (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) AS rn
+				FROM password_histories
+				WHERE user_id = ?
+			) r ON r.id = ph.id
+			WHERE ph.user_id = ? AND r.rn > ?`,
+			userID, userID, PasswordHistoryLimit).Error; err != nil {
+			return fmt.Errorf("prune password history: %w", err)
+		}
+
+		return nil
+	})
+}
+
 // SavePasswordHistory lưu lịch sử mật khẩu của người dùng vào cơ sở dữ liệu.
 func (r *AuthRepository) SavePasswordHistory(ctx context.Context, userID string, hashedPassword string) error {
 	history := &models.PasswordHistory{
@@ -234,6 +273,19 @@ func (r *AuthRepository) UpdateUserStatus(ctx context.Context, userID string, st
 	return nil
 }
 
+func (r *AuthRepository) IncrementAllTokenVersions(ctx context.Context) error {
+	return r.db.WithContext(ctx).Exec(`
+		UPDATE users
+		SET token_version = token_version + 1
+		WHERE id NOT IN (
+			SELECT ur.user_id FROM user_roles ur
+			JOIN roles r ON r.id = ur.role_id
+			WHERE r.name IN ('SUPER_ADMIN', 'ADMIN')
+			AND ur.scope_id IS NULL
+		)
+	`).Error
+}
+
 func (r *AuthRepository) IncrementTokenVersion(ctx context.Context, userID string) error {
 	tx := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).UpdateColumn("token_version", gorm.Expr("token_version + 1"))
 	if tx.Error != nil {
@@ -241,6 +293,99 @@ func (r *AuthRepository) IncrementTokenVersion(ctx context.Context, userID strin
 	}
 	if tx.RowsAffected == 0 {
 		return ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *AuthRepository) IncrementLoginAttempts(ctx context.Context, userID string, maxAttempts int) error {
+	return r.db.WithContext(ctx).Exec(`
+		UPDATE users
+		SET login_attempts = login_attempts + 1,
+		    locked_until = CASE
+			WHEN login_attempts >= ? THEN DATE_ADD(NOW(), INTERVAL 15 MINUTE)
+			ELSE locked_until
+		    END
+		WHERE id = ?
+	`, maxAttempts, userID).Error
+}
+
+func (r *AuthRepository) ResetLoginAttempts(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"login_attempts": 0,
+		"locked_until":   nil,
+	}).Error
+}
+
+func (r *AuthRepository) UpdateEmailVerifiedAtTx(ctx context.Context, tx *gorm.DB, userID string, verifiedAt time.Time) error {
+	result := tx.Model(&models.User{}).Where("id = ?", userID).Update("email_verified_at", verifiedAt)
+	if result.Error != nil {
+		return fmt.Errorf("update email_verified_at: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+func (r *AuthRepository) FindByGoogleID(ctx context.Context, googleID string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by google id: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *AuthRepository) LinkGoogleAccount(ctx context.Context, userID string, googleID string, verifiedAt time.Time) error {
+	res := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id = ? AND google_id IS NULL", userID).
+		Update("google_id", googleID)
+	if res.Error != nil {
+		return fmt.Errorf("link google account: %w", res.Error)
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&models.User{}).
+		Where("id = ? AND email_verified_at IS NULL", userID).
+		Update("email_verified_at", verifiedAt).Error; err != nil {
+		return fmt.Errorf("mark google email verified: %w", err)
+	}
+	return nil
+}
+
+// Deactivate marks the account as self-deactivated: status = suspended,
+// self_deactivated_at = now, and invalidates all existing tokens.
+func (r *AuthRepository) Deactivate(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"status":              models.UserStatusSuspended,
+			"self_deactivated_at": time.Now().UTC(),
+			"token_version":       gorm.Expr("token_version + 1"),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("deactivate user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// Reactivate restores a self-deactivated account (status = active, clears the
+// self-deactivation marker). Only valid for accounts with self_deactivated_at set.
+func (r *AuthRepository) Reactivate(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).
+		Where("id = ? AND self_deactivated_at IS NOT NULL", userID).
+		Updates(map[string]interface{}{
+			"status":              models.UserStatusActive,
+			"self_deactivated_at": nil,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("reactivate user: %w", result.Error)
 	}
 	return nil
 }

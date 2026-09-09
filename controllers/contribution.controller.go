@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"linkup/validations"
 	"net/http"
@@ -22,13 +23,13 @@ func NewContributionController(contributionService *services.ContributionService
 func (ctrl *ContributionController) GetPolicy(c *gin.Context) {
 	communityID := c.Param("communityID")
 	if communityID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", val)
@@ -41,7 +42,7 @@ func (ctrl *ContributionController) GetPolicy(c *gin.Context) {
 		} else if err == validations.ErrNotCommunityMember {
 			status = http.StatusForbidden
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -60,7 +61,7 @@ func (ctrl *ContributionController) GetPolicy(c *gin.Context) {
 func (ctrl *ContributionController) UpdatePolicy(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	adminID := fmt.Sprintf("%v", val)
@@ -68,7 +69,7 @@ func (ctrl *ContributionController) UpdatePolicy(c *gin.Context) {
 
 	var input dto.UpdatePolicyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -77,7 +78,7 @@ func (ctrl *ContributionController) UpdatePolicy(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -87,7 +88,7 @@ func (ctrl *ContributionController) UpdatePolicy(c *gin.Context) {
 func (ctrl *ContributionController) GetMyContribution(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", val)
@@ -98,7 +99,7 @@ func (ctrl *ContributionController) GetMyContribution(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -108,7 +109,7 @@ func (ctrl *ContributionController) GetMyContribution(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -119,7 +120,7 @@ func (ctrl *ContributionController) GetUserContribution(c *gin.Context) {
 	communityID := c.Param("communityID")
 	userID := c.Param("userID")
 	if communityID == "" || userID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "communityID và userID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -129,7 +130,7 @@ func (ctrl *ContributionController) GetUserContribution(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -142,7 +143,7 @@ func (ctrl *ContributionController) GetLeaderboard(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
 	if page < 1 || pageSize < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "page và page_size phải lớn hơn 0"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -152,7 +153,7 @@ func (ctrl *ContributionController) GetLeaderboard(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -169,7 +170,7 @@ func (ctrl *ContributionController) GetCommunityMembers(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "10"))
 
 	if page < 1 || pageSize < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "page và page_size phải lớn hơn 0"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -179,7 +180,7 @@ func (ctrl *ContributionController) GetCommunityMembers(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -193,7 +194,7 @@ func (ctrl *ContributionController) GetCommunityMembers(c *gin.Context) {
 func (ctrl *ContributionController) CreateChallenge(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	adminID := fmt.Sprintf("%v", val)
@@ -201,7 +202,7 @@ func (ctrl *ContributionController) CreateChallenge(c *gin.Context) {
 
 	var input dto.CreateChallengeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -210,7 +211,7 @@ func (ctrl *ContributionController) CreateChallenge(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -226,7 +227,7 @@ func (ctrl *ContributionController) GetActiveChallenges(c *gin.Context) {
 		if err == validations.ErrCommunityNotFound {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, status, err)
 		return
 	}
 
@@ -236,26 +237,26 @@ func (ctrl *ContributionController) GetActiveChallenges(c *gin.Context) {
 func (ctrl *ContributionController) JoinChallenge(c *gin.Context) {
 	val, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 	userID := fmt.Sprintf("%v", val)
 	challengeID := c.Param("challengeID")
 	if challengeID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "challengeID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	if err := ctrl.contributionService.JoinChallenge(c.Request.Context(), userID, challengeID); err != nil {
-		status := http.StatusBadRequest
-		if err == validations.ErrNotCommunityMember {
-			status = http.StatusForbidden
-		} else if err == services.ErrChallengeNotFound {
-			status = http.StatusNotFound
-		} else if err == services.ErrChallengeAlreadyJoined || err == services.ErrChallengeParticipantLimitHit {
-			status = http.StatusConflict
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			status := errorsapp.StatusCode(appErr.Code)
+			if appErr.Code == errorsapp.ErrCodeContribAlreadyJoined || appErr.Code == errorsapp.ErrCodeContribParticipantLimitHit {
+				status = http.StatusConflict
+			}
+			errorsapp.Respond(c, status, appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -265,17 +266,17 @@ func (ctrl *ContributionController) JoinChallenge(c *gin.Context) {
 func (ctrl *ContributionController) GetChallengeParticipants(c *gin.Context) {
 	challengeID := c.Param("challengeID")
 	if challengeID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "challengeID là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	participants, err := ctrl.contributionService.GetChallengeParticipants(c.Request.Context(), challengeID)
 	if err != nil {
-		status := http.StatusBadRequest
-		if err == services.ErrChallengeNotFound {
-			status = http.StatusNotFound
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 

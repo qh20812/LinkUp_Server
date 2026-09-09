@@ -3,11 +3,11 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -15,24 +15,26 @@ import (
 )
 
 type VoiceCallService struct {
-	callRepo   *repository.CallRepository
-	friendRepo *repository.FriendRepository
-	profileRepo *repository.ProfileRepository
-	hub        *ws.Hub
+	callRepo     *repository.CallRepository
+	friendRepo   *repository.FriendRepository
+	profileRepo  *repository.ProfileRepository
+	notifService *NotificationService
+	hub          *ws.Hub
 }
 
-func NewVoiceCallService(callRepo *repository.CallRepository, friendRepo *repository.FriendRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub) *VoiceCallService {
+func NewVoiceCallService(callRepo *repository.CallRepository, friendRepo *repository.FriendRepository, profileRepo *repository.ProfileRepository, notifService *NotificationService, hub *ws.Hub) *VoiceCallService {
 	return &VoiceCallService{
-		callRepo:    callRepo,
-		friendRepo:  friendRepo,
-		profileRepo: profileRepo,
-		hub:         hub,
+		callRepo:     callRepo,
+		friendRepo:   friendRepo,
+		profileRepo:  profileRepo,
+		notifService: notifService,
+		hub:          hub,
 	}
 }
 
 func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, payload dto.CallInitiatePayload) (*models.Call, error) {
 	if callerID == payload.CalleeID {
-		return nil, errors.New("không thể gọi cho chính mình")
+		return nil, errorsapp.New(errorsapp.ErrCodeCallSelfCall)
 	}
 
 	callType := models.ParseCallType(payload.CallType)
@@ -42,7 +44,7 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 		return nil, fmt.Errorf("kiểm tra bạn bè: %w", err)
 	}
 	if !isFriend {
-		return nil, errors.New("chỉ có thể gọi cho bạn bè")
+		return nil, errorsapp.New(errorsapp.ErrCodeCallNotFriend)
 	}
 
 	now := time.Now().UTC()
@@ -163,13 +165,13 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 		return fmt.Errorf("tìm cuộc gọi: %w", err)
 	}
 	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeCallNotFound)
 	}
 	if userID != call.CallerID && userID != call.CalleeID {
-		return errors.New("không phải người tham gia cuộc gọi")
+		return errorsapp.New(errorsapp.ErrCodeCallNotParticipant)
 	}
 	if call.Status == models.CallStatusEnded || call.Status == models.CallStatusRejected || call.Status == models.CallStatusMissed || call.Status == models.CallStatusCancelled {
-		return errors.New("cuộc gọi đã kết thúc")
+		return errorsapp.New(errorsapp.ErrCodeCallAlreadyEnded)
 	}
 
 	now := time.Now().UTC()
@@ -220,6 +222,10 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 				Timestamp: now.UnixMilli(),
 			},
 		})
+		if s.notifService != nil {
+			senderID := call.CallerID
+			s.notifService.Create(ctx, call.CalleeID, &senderID, models.NotificationTypeVoiceCall, "đã gọi nhỡ cho bạn", nil, &call.CallerID, nil)
+		}
 	case models.CallStatusCancelled:
 		// Caller cancelled before answer — notify callee of cancelled call.
 		s.hub.SendToUser(call.CalleeID, ws.OutgoingMessage{
@@ -233,6 +239,22 @@ func (s *VoiceCallService) EndCall(ctx context.Context, userID string, callID st
 	}
 
 	return nil
+}
+
+func (s *VoiceCallService) CleanupDisconnectedCalls(ctx context.Context, userID string) error {
+	call, err := s.callRepo.FindActiveByParticipant(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("tìm cuộc gọi đang hoạt động: %w", err)
+	}
+	if call == nil {
+		return nil
+	}
+	// Reuse EndCall semantics: caller-disconnect while ringing -> cancelled,
+	// callee-disconnect while ringing -> missed (with notification), and
+	// disconnect mid-conversation -> ended with the real duration. The
+	// disconnected party no longer has a socket, so only the other
+	// participant receives the broadcast.
+	return s.EndCall(ctx, userID, call.ID)
 }
 
 func (s *VoiceCallService) GetCallHistory(ctx context.Context, userID string, limit, offset int) ([]models.Call, int64, error) {
@@ -367,10 +389,10 @@ func (s *VoiceCallService) HideCallFromHistory(ctx context.Context, userID, call
 		return fmt.Errorf("tìm cuộc gọi: %w", err)
 	}
 	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeCallNotFound)
 	}
 	if userID != call.CallerID && userID != call.CalleeID {
-		return errors.New("không phải người tham gia cuộc gọi")
+		return errorsapp.New(errorsapp.ErrCodeCallNotParticipant)
 	}
 
 	if err := s.callRepo.HideCall(ctx, userID, callID); err != nil {
@@ -385,10 +407,10 @@ func (s *VoiceCallService) ToggleMute(ctx context.Context, userID string, callID
 		return fmt.Errorf("tìm cuộc gọi: %w", err)
 	}
 	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeCallNotFound)
 	}
 	if call.Status != models.CallStatusConnected {
-		return errors.New("cuộc gọi không ở trạng thái kết nối")
+		return errorsapp.New(errorsapp.ErrCodeCallNotConnected)
 	}
 
 	switch userID {
@@ -401,7 +423,7 @@ func (s *VoiceCallService) ToggleMute(ctx context.Context, userID string, callID
 			return fmt.Errorf("cập nhật mute: %w", err)
 		}
 	default:
-		return errors.New("không phải người tham gia cuộc gọi")
+		return errorsapp.New(errorsapp.ErrCodeCallNotParticipant)
 	}
 
 	s.hub.SendToUsers([]string{call.CallerID, call.CalleeID}, ws.OutgoingMessage{
@@ -422,13 +444,13 @@ func (s *VoiceCallService) ToggleVideo(ctx context.Context, userID string, callI
 		return fmt.Errorf("tìm cuộc gọi: %w", err)
 	}
 	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeCallNotFound)
 	}
 	if call.CallType != models.CallTypeVideo {
-		return errors.New("cuộc gọi không phải video call")
+		return errorsapp.New(errorsapp.ErrCodeCallNotVideo)
 	}
 	if call.Status != models.CallStatusConnected {
-		return errors.New("cuộc gọi không ở trạng thái kết nối")
+		return errorsapp.New(errorsapp.ErrCodeCallNotConnected)
 	}
 
 	switch userID {
@@ -441,7 +463,7 @@ func (s *VoiceCallService) ToggleVideo(ctx context.Context, userID string, callI
 			return fmt.Errorf("cập nhật video: %w", err)
 		}
 	default:
-		return errors.New("không phải người tham gia cuộc gọi")
+		return errorsapp.New(errorsapp.ErrCodeCallNotParticipant)
 	}
 
 	s.hub.SendToUsers([]string{call.CallerID, call.CalleeID}, ws.OutgoingMessage{
@@ -462,10 +484,10 @@ func (s *VoiceCallService) GetCallDetail(ctx context.Context, userID string, cal
 		return nil, fmt.Errorf("tìm cuộc gọi: %w", err)
 	}
 	if call == nil {
-		return nil, errors.New("cuộc gọi không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodeCallNotFound)
 	}
 	if userID != call.CallerID && userID != call.CalleeID {
-		return nil, errors.New("không phải người tham gia cuộc gọi")
+		return nil, errorsapp.New(errorsapp.ErrCodeCallNotParticipant)
 	}
 	return call, nil
 }
@@ -476,10 +498,10 @@ func (s *VoiceCallService) HandleSignal(ctx context.Context, senderID string, ca
 		return fmt.Errorf("tìm cuộc gọi: %w", err)
 	}
 	if call == nil {
-		return errors.New("cuộc gọi không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeCallNotFound)
 	}
 	if senderID != call.CallerID && senderID != call.CalleeID {
-		return errors.New("không phải người tham gia cuộc gọi")
+		return errorsapp.New(errorsapp.ErrCodeCallNotParticipant)
 	}
 
 	receiverID := call.CalleeID

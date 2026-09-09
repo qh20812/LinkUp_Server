@@ -2,11 +2,11 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -41,7 +41,7 @@ func (s *BlockService) ToggleBlock(ctx context.Context, userID, targetUserID str
 		return dto.BlockUserResponse{}, fmt.Errorf("toggle block: %w", err)
 	}
 	if isAdmin || isSuperAdmin {
-		return dto.BlockUserResponse{}, errors.New("không thể chặn quản trị viên hoặc siêu quản trị viên")
+		return dto.BlockUserResponse{}, errorsapp.New(errorsapp.ErrCodeBlockAdminRestricted)
 	}
 
 	existing, err := s.blockRepo.FindByUserAndTarget(ctx, userID, targetUserID)

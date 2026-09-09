@@ -14,7 +14,7 @@ func RegisterPackageRoutes(router *gin.Engine, ctrl *controllers.PackageControll
 	// API Công khai danh sách gói
 	router.GET("/api/ads/packages", ctrl.GetPackages)
 
-	partnerGroup := router.Group("/ads-management")
+	partnerGroup := router.Group("/api/ads-management")
 	{
 		partnerGroup.POST("/subscribe",
 			middlewares.AuthMiddleware(env, db),

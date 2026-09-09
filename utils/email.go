@@ -11,7 +11,7 @@ type EmailConfig struct {
 	Password string
 }
 
-func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
+func SendResetPasswordEmail(toEmail, userName, resetLink, mobileLink string) error {
 	gmailUser := os.Getenv("GMAIL_USER")
 	gmailPassword := os.Getenv("GMAIL_PASSWORD")
 
@@ -37,7 +37,11 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
         <p>Để đặt lại mật khẩu, vui lòng nhấp vào nút bên dưới:</p>
         
         <div style="margin: 30px 0;">
-            <a href="%s" style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Đặt lại mật khẩu</a>
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Đặt lại mật khẩu trên Web</a>
+        </div>
+        
+        <div style="margin: 30px 0;">
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
         </div>
         
         <p style="color: #666; font-size: 12px;">
@@ -54,7 +58,7 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
     </div>
 </body>
 </html>
-    `, userName, resetLink, resetLink)
+    `, userName, resetLink, mobileLink, resetLink)
 
 	to := []string{toEmail}
 	smtpHost := "smtp.gmail.com"
@@ -69,4 +73,66 @@ func SendResetPasswordEmail(toEmail, userName, resetLink string) error {
 
 	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, gmailUser, to, message)
 	return err
+}
+
+func SendVerificationEmail(toEmail, userName, verifyLink, mobileLink string) error {
+	gmailUser := os.Getenv("GMAIL_USER")
+	gmailPassword := os.Getenv("GMAIL_PASSWORD")
+
+	if gmailUser == "" || gmailPassword == "" {
+		return fmt.Errorf("Gmail credentials not configured")
+	}
+
+	subject := "LinkUp - Xác thực email"
+	body := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+        <h2>Xác thực email tài khoản LinkUp</h2>
+        
+        <p>Xin chào <strong>%s</strong>,</p>
+        
+        <p>Cảm ơn bạn đã đăng ký tài khoản LinkUp! Vui lòng nhấp vào nút bên dưới để xác thực địa chỉ email của bạn.</p>
+        
+        <div style="margin: 30px 0;">
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Xác thực trên Web</a>
+        </div>
+        
+        <div style="margin: 30px 0;">
+            <a href="%s" style="background-color: #40E0D0; color: #0A1F44; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: 600;">Mở trong ứng dụng</a>
+        </div>
+        
+        <p style="color: #666; font-size: 12px;">
+            Link này sẽ hết hạn trong 1 giờ.<br>
+            Hoặc sao chép link này vào trình duyệt: <br>
+            <span style="word-break: break-all;">%s</span>
+        </p>
+        
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+        
+        <p style="color: #999; font-size: 12px;">
+            Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.<br>
+            Mọi thắc mắc vui lòng liên hệ: linkup.support.qtn@gmail.com
+        </p>
+    </div>
+</body>
+</html>
+    `, userName, verifyLink, mobileLink, verifyLink)
+
+	to := []string{toEmail}
+	smtpHost := "smtp.gmail.com"
+	smtpPort := "587"
+
+	auth := smtp.PlainAuth("", gmailUser, gmailPassword, smtpHost)
+
+	header := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n",
+		gmailUser, toEmail, subject)
+
+	message := []byte(header + body)
+
+	return smtp.SendMail(smtpHost+":"+smtpPort, auth, gmailUser, to, message)
 }

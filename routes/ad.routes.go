@@ -18,7 +18,7 @@ func RegisterAdRoutes(
 	env config.Env,
 	db *gorm.DB,
 ) {
-	adsManagement := router.Group("/ads-management")
+	adsManagement := router.Group("/api/ads-management")
 	{
 		adsManagement.POST("",
 			middlewares.AuthMiddleware(env, db),
@@ -47,7 +47,7 @@ func RegisterAdRoutes(
 		)
 	}
 
-	customerGroup := router.Group("/customer")
+	customerGroup := router.Group("/api/customer")
 	{
 		customerGroup.GET("/feed",
 			middlewares.AuthMiddleware(env, db),

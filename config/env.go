@@ -21,11 +21,9 @@ type Env struct {
 	JWTSecret    string
 	JWTExpiresIn int
 
-	GmailUser        string
-	GmailPass        string
-	FrontendResetURL string
-
-	CloudinaryEnv string
+	CloudinaryEnv    string
+	FrontendURL      string
+	MobileFrontendURL string
 
 	IceServerUrls  string
 	TurnServerUrl  string
@@ -34,6 +32,8 @@ type Env struct {
 
 	MongoURI string
 	MongoDBName string
+
+	GoogleClientIDs []string
 }
 
 var (
@@ -86,11 +86,9 @@ func LoadEnv() error {
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
 
-		GmailUser:        getString("GMAIL_USER", ""),
-		GmailPass:        getString("GMAIL_PASSWORD", ""),
-		FrontendResetURL: getString("FRONTEND_RESET_URL", "http://localhost:3000"),
-
-		CloudinaryEnv: getRequiredString("CLOUDINARY_URL"),
+		CloudinaryEnv:    getRequiredString("CLOUDINARY_URL"),
+		FrontendURL:      getString("VERIFY_EMAIL_URL", getString("FRONTEND_RESET_URL", "http://localhost:3000")),
+		MobileFrontendURL: getString("MOBILE_VERIFY_URL", "linkupmobile://verify-email"),
 
 		IceServerUrls:  getString("ICE_SERVER_URLS", ""),
 		TurnServerUrl:  getString("TURN_SERVER_URL", ""),
@@ -99,6 +97,8 @@ func LoadEnv() error {
 
 		MongoURI: getRequiredString("MONGO_URI"),
 		MongoDBName: getString("MONGO_DB_NAME", "linkup"),
+
+		GoogleClientIDs: parseCSV(getString("GOOGLE_CLIENT_IDS", "")),
 	}
 
 	missing := validateRequired(env)
@@ -233,4 +233,15 @@ func getBool(key string) (bool, error) {
 		return false, fmt.Errorf("invalid bool env var %s: %w", key, err)
 	}
 	return parsed, nil
+}
+
+func parseCSV(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

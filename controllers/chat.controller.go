@@ -5,27 +5,33 @@ import (
 	"fmt"
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/services"
-	"linkup/validations"
+	"linkup/utils"
 	"linkup/ws"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
 type ChatController struct {
-	hub         *ws.Hub
-	chatService *services.ChatService
-	env         config.Env
+	hub          *ws.Hub
+	chatService  *services.ChatService
+	mediaService services.MediaService
+	postRepo     *repository.PostRepository
+	env          config.Env
 }
 
-func NewChatController(hub *ws.Hub, chatService *services.ChatService, env config.Env) *ChatController {
+func NewChatController(hub *ws.Hub, chatService *services.ChatService, mediaService services.MediaService, postRepo *repository.PostRepository, env config.Env) *ChatController {
 	return &ChatController{
-		hub:         hub,
-		chatService: chatService,
-		env:         env,
+		hub:          hub,
+		chatService:  chatService,
+		mediaService: mediaService,
+		postRepo:     postRepo,
+		env:          env,
 	}
 }
 
@@ -36,24 +42,47 @@ var upgrader = websocket.Upgrader{
 }
 
 func (ctrl *ChatController) HandleWebsocket(c *gin.Context) {
-	userIDVal, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "không có quyền truy cập"})
+	tokenString := c.Query("token")
+	if tokenString == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
-	userID := fmt.Sprintf("%v", userIDVal)
+
+	token, err := utils.ParseToken(ctrl.env.JWTSecret, tokenString)
+	if err != nil || !token.Valid {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeInvalidToken))
+		return
+	}
+
+	claims := token.Claims.(*utils.TokenClaims)
+	if claims.TokenType != "access" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeInvalidToken))
+		return
+	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "không thể nâng cấp kết nối websocket"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInternal))
 		return
 	}
 
-	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, userID)
+	client := ws.NewClient(c.Request.Context(), conn, ctrl.hub, ctrl.chatService, nil, ctrl.postRepo, claims.UserID)
 	ctrl.hub.RegisterClient(client)
 
 	go client.WritePump()
 	client.ReadPump()
+}
+
+func (ctrl *ChatController) ListChats(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	chats, err := ctrl.chatService.ListUserChats(c.Request.Context(), userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.ChatListResponse{Data: chats})
 }
 
 func (ctrl *ChatController) CreateDirectChat(c *gin.Context) {
@@ -61,13 +90,13 @@ func (ctrl *ChatController) CreateDirectChat(c *gin.Context) {
 
 	var input dto.DirectChatRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	chat, exists, err := ctrl.chatService.GetOrCreateDirectChat(c.Request.Context(), userID, input.TargetUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -87,13 +116,13 @@ func (ctrl *ChatController) CreateChatInvite(c *gin.Context) {
 
 	var input dto.ChatInviteRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "target_user_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	invite, err := ctrl.chatService.RequestChatInvite(c.Request.Context(), userID, input.TargetUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -103,18 +132,30 @@ func (ctrl *ChatController) CreateChatInvite(c *gin.Context) {
 	})
 }
 
+func (ctrl *ChatController) ListChatInvites(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	invites, err := ctrl.chatService.ListReceivedInvites(c.Request.Context(), userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, dto.ChatInviteListResponse{Data: invites})
+}
+
 func (ctrl *ChatController) ResponseChatInvite(c *gin.Context) {
 	userID := fmt.Sprintf("%v", c.GetString("userID"))
 
 	var input dto.ChatInviteResponseRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invite_id và accept là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	chat, err := ctrl.chatService.ResponseChatInvite(c.Request.Context(), userID, input.InviteID, input.Accept)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -138,21 +179,16 @@ func (ctrl *ChatController) DownloadMessageMedia(c *gin.Context) {
 	messageID := c.Param("messageID")
 
 	if messageID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "message_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	media, contentType, filename, data, err := ctrl.chatService.DownloadMessageMedia(c.Request.Context(), userID, messageID)
 	if err != nil {
-		switch {
-		case errors.Is(err, validations.ErrMessageNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "Tin nhắn không tồn tại"})
-		case errors.Is(err, validations.ErrMessageAccessDenied):
-			c.JSON(http.StatusForbidden, gin.H{"error": "Bạn không có quyền truy cập tin nhắn này"})
-		case errors.Is(err, validations.ErrMediaNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "Media không tồn tại"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
 		}
 		return
 	}
@@ -170,7 +206,7 @@ func (ctrl *ChatController) DeleteChat(c *gin.Context) {
 	chatID := c.Param("chatID")
 
 	if chatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id là bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
@@ -178,12 +214,113 @@ func (ctrl *ChatController) DeleteChat(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, repository.ErrChatNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "không tìm thấy phòng chat"})
+			errorsapp.RespondError(c, http.StatusNotFound, errorsapp.New(errorsapp.ErrCodeNotFound))
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			errorsapp.Respond(c, http.StatusBadRequest, err)
 		}
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"error": "Xóa phòng chat thành công"})
+}
+
+type SharePostInput struct {
+	TargetUserID string `json:"target_user_id" binding:"required"`
+	SharedPostID string `json:"shared_post_id" binding:"required"`
+}
+
+func (ctrl *ChatController) SharePost(c *gin.Context) {
+	userID := fmt.Sprintf("%v", c.GetString("userID"))
+
+	var input SharePostInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	chat, _, err := ctrl.chatService.GetOrCreateDirectChat(c.Request.Context(), userID, input.TargetUserID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	sharedPostID := input.SharedPostID
+	msg, err := ctrl.chatService.SendMessage(c.Request.Context(), userID, chat.ID, "", 0, nil, nil, nil, nil, &sharedPostID, nil, nil)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Chia sẻ bài viết thành công",
+		"data":    msg,
+	})
+}
+
+func (ctrl *ChatController) UploadChatMedia(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+
+	chatID := c.PostForm("chat_id")
+	if chatID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	if err := ctrl.chatService.JoinChat(c.Request.Context(), userID, chatID); err != nil {
+		errorsapp.Respond(c, http.StatusForbidden, err)
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	// duration_seconds (giây) chỉ có ý nghĩa với tin nhắn thoại (voice notes).
+	// Client gửi kèm khi upload audio ghi âm; server validate giới hạn 5 phút.
+	durationSeconds := 0
+	if raw := c.PostForm("duration_seconds"); raw != "" {
+		if parsed, convErr := strconv.Atoi(raw); convErr == nil && parsed > 0 {
+			durationSeconds = parsed
+		}
+	}
+
+	media, err := ctrl.mediaService.UploadChatMedia(c.Request.Context(), userID, file, durationSeconds)
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			status := errorsapp.StatusCode(appErr.Code)
+			if appErr.Code == errorsapp.ErrCodeMediaInsufficientStorage {
+				status = http.StatusPaymentRequired
+			}
+			errorsapp.Respond(c, status, appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	quota, used, available, _ := ctrl.mediaService.GetUserStorageStatus(c.Request.Context(), userID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"data": dto.UploadMediaResponse{
+			ID:               media.ID,
+			FileURI:          media.FileURI,
+			FileType:         media.FileType,
+			FileSize:         media.FileSize,
+			DurationSeconds:  media.DurationSeconds,
+			Status:           media.Status.String(),
+			AvailableStorage: available,
+		},
+		"storage": gin.H{
+			"quota_bytes":     quota,
+			"used_bytes":      used,
+			"available_bytes": available,
+		},
+	})
 }

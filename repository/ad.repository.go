@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 
 	"gorm.io/gorm"
@@ -61,7 +62,7 @@ func (r *adRepositoryImpl) FindByID(id string) (*models.Ad, error) {
 	err := r.db.Preload("MediaList").Where("id = ?", id).First(&ad).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("không tìm thấy quảng cáo")
+			return nil, errorsapp.New(errorsapp.ErrCodeAdNotFound)
 		}
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func (r *adRepositoryImpl) Update(ad *models.Ad) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("không tìm thấy quảng cáo để cập nhật")
+		return errorsapp.New(errorsapp.ErrCodeAdNotUpdated)
 	}
 	return nil
 }
@@ -85,7 +86,7 @@ func (r *adRepositoryImpl) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("delete ad: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return errors.New("quảng cáo không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdNotDeleted)
 	}
 	return nil
 }
@@ -205,10 +206,10 @@ func (r *adRepositoryImpl) ListAds(ctx context.Context, keyword, status string, 
 
 	query := `
 		SELECT a.id, a.title, a.content, a.partner_id, a.target_url, a.status, a.budget,
-		       a.media_id, a.started_at, a.expires_at, a.created_at,
+		       a.started_at, a.expires_at, a.created_at,
 		       u.username AS partner_name,
 		       COALESCE(p.display_name, u.username) AS partner_display_name,
-		       COALESCE((SELECT file_uri FROM media m WHERE m.id = a.media_id LIMIT 1), '') AS media_uri,
+		       COALESCE((SELECT am.url FROM ad_media am WHERE am.ad_id = a.id ORDER BY am.sort_order, am.created_at LIMIT 1), '') AS media_uri,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression') AS impressions,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'click') AS clicks,
 		       ROUND(

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -25,16 +26,16 @@ func NewFollowService(followRepository *repository.FollowRepository, authReposit
 
 func (s *FollowService) FollowToggle(ctx context.Context, followerID, followingID string) (string, error) {
 	if followerID == followingID {
-		return "", fmt.Errorf("không thể follow chính mình")
+		return "", errorsapp.New(errorsapp.ErrCodeFollowSelf)
 	}
 
 	followingUser, err := s.authRepository.FindByID(ctx, followingID)
 	if err != nil {
-		return "", fmt.Errorf("người dùng không tồn tại")
+		return "", errorsapp.New(errorsapp.ErrCodeFollowUserNotFound)
 	}
 
 	if !followingUser.IsActive() {
-		return "", fmt.Errorf("không thể follow người dùng này")
+		return "", errorsapp.New(errorsapp.ErrCodeFollowUserInactive)
 	}
 
 	isSuperAdmin, err := s.authRepository.HasRole(ctx, followingID, models.RoleSuperAdmin)
@@ -42,7 +43,7 @@ func (s *FollowService) FollowToggle(ctx context.Context, followerID, followingI
 		return "", fmt.Errorf("Kiểm tra vai trò: %w", err)
 	}
 	if isSuperAdmin {
-		return "", fmt.Errorf("không thể follow superadmin")
+		return "", errorsapp.New(errorsapp.ErrCodeFollowSuperAdmin)
 	}
 
 	isAdmin, err := s.authRepository.HasRole(ctx, followingID, models.RoleAdmin)
@@ -50,7 +51,7 @@ func (s *FollowService) FollowToggle(ctx context.Context, followerID, followingI
 		return "", fmt.Errorf("kiểm tra vai trò admin: %w", err)
 	}
 	if isAdmin {
-		return "", fmt.Errorf("không thể follow admin")
+		return "", errorsapp.New(errorsapp.ErrCodeFollowAdminRestricted)
 	}
 
 	isFollowing, err := s.followRepository.IsFollowing(ctx, followerID, followingID)
@@ -124,6 +125,70 @@ func (s *FollowService) GetSuggestions(ctx context.Context, userID string, page,
 	}
 
 	return dto.FollowSuggestionsResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}
+
+func (s *FollowService) GetFollowers(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	total, err := s.followRepository.GetFollowerCount(ctx, userID)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("count followers: %w", err)
+	}
+
+	items, err := s.followRepository.ListFollowers(ctx, userID, offset, pageSize)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("list followers: %w", err)
+	}
+
+	return dto.FollowListResponse{
+		Data:     items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}
+
+func (s *FollowService) GetMutualFollows(ctx context.Context, viewerID, targetUserID string) ([]dto.FollowListItem, error) {
+	if viewerID == "" || viewerID == targetUserID {
+		return []dto.FollowListItem{}, nil
+	}
+	return s.followRepository.GetMutualFollows(ctx, viewerID, targetUserID, 10)
+}
+func (s *FollowService) GetFollowing(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 50 {
+		pageSize = 20
+	}
+
+	offset := (page - 1) * pageSize
+
+	total, err := s.followRepository.GetFollowingCount(ctx, userID)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("count following: %w", err)
+	}
+
+	items, err := s.followRepository.ListFollowing(ctx, userID, offset, pageSize)
+	if err != nil {
+		return dto.FollowListResponse{}, fmt.Errorf("list following: %w", err)
+	}
+
+	return dto.FollowListResponse{
 		Data:     items,
 		Page:     page,
 		PageSize: pageSize,

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/services"
 	"net/http"
@@ -21,19 +22,19 @@ func NewBlockController(blockService *services.BlockService) *BlockController {
 func (h *BlockController) ToggleBlock(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	var input dto.BlockUserInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	response, err := h.blockService.ToggleBlock(c.Request.Context(), userID.(string), input.TargetUserID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -43,13 +44,13 @@ func (h *BlockController) ToggleBlock(c *gin.Context) {
 func (h *BlockController) GetBlockedUsers(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	blockedUsers, err := h.blockService.GetBlockedUsers(c.Request.Context(), userID.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

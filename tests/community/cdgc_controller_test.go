@@ -59,7 +59,7 @@ func TestCreateCommunity_InvalidBody(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("Dữ liệu đầu vào không hợp lệ")) {
+	if !bytes.Contains(w.Body.Bytes(), []byte("community.INVALID_FORMAT")) {
 		t.Fatalf("body = %q, want to contain parse error", w.Body.String())
 	}
 }
@@ -101,7 +101,7 @@ func TestRequestJoin_MissingCommunityID(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+	if !bytes.Contains(w.Body.Bytes(), []byte("community.NOT_FOUND")) {
 		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
 	}
 }
@@ -169,7 +169,7 @@ func TestCreateInviteCode_MissingCommunityID(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+	if !bytes.Contains(w.Body.Bytes(), []byte("community.NOT_FOUND")) {
 		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
 	}
 }
@@ -213,7 +213,7 @@ func TestListInviteCodes_MissingCommunityID(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+	if !bytes.Contains(w.Body.Bytes(), []byte("community.NOT_FOUND")) {
 		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
 	}
 }
@@ -283,7 +283,7 @@ func TestSendInvitation_MissingCommunityID(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("communityID là bắt buộc")) {
+	if !bytes.Contains(w.Body.Bytes(), []byte("community.NOT_FOUND")) {
 		t.Fatalf("body = %q, want to contain communityID error", w.Body.String())
 	}
 }

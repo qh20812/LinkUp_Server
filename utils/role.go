@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	errorsapp "linkup/errors"
 	"linkup/models"
 )
 
@@ -32,7 +33,7 @@ func HasPlatformRole(userRole, requiredRole PlatformRole) bool {
 // RequirePlatformRole returns error if userRole < requiredRole.
 func RequirePlatformRole(userRole, requiredRole PlatformRole) error {
 	if !HasPlatformRole(userRole, requiredRole) {
-		return fmt.Errorf("bạn cần quyền %s để thực hiện hành động này", requiredRole)
+		return errorsapp.Wrap(errorsapp.ErrCodeRbacPermissionDenied, fmt.Errorf("bạn cần quyền %s để thực hiện hành động này", requiredRole))
 	}
 	return nil
 }
@@ -53,7 +54,7 @@ func HasGroupRole(userRole, requiredRole models.GroupRole) bool {
 // RequireGroupRole returns error if userRole < requiredRole.
 func RequireGroupRole(userRole, requiredRole models.GroupRole) error {
 	if !HasGroupRole(userRole, requiredRole) {
-		return fmt.Errorf("bạn cần quyền %s trong cộng đồng để thực hiện hành động này", requiredRole)
+		return errorsapp.Wrap(errorsapp.ErrCodeRbacPermissionDenied, fmt.Errorf("bạn cần quyền %s trong cộng đồng để thực hiện hành động này", requiredRole))
 	}
 	return nil
 }

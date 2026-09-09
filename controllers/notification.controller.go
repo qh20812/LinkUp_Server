@@ -3,11 +3,14 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/services"
+	"linkup/utils"
 )
 
 type NotificationController struct {
@@ -26,6 +29,9 @@ type UpdatePreferencesInput struct {
 	FriendRequestEnabled *bool `json:"friend_request_enabled"`
 	CommunityEnabled     *bool `json:"community_enabled"`
 	VoiceCallEnabled     *bool `json:"voice_call_enabled"`
+	StoryReactEnabled    *bool `json:"story_react_enabled"`
+	ShareEnabled         *bool `json:"share_enabled"`
+	MediaEnabled         *bool `json:"media_enabled"`
 }
 
 func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
@@ -37,7 +43,7 @@ func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
 
 	notifications, total, err := ctrl.service.GetList(c.Request.Context(), userID.(string), page, pageSize, unreadOnly)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -53,7 +59,7 @@ func (ctrl *NotificationController) MarkAsRead(c *gin.Context) {
 	notifID := c.Param("id")
 
 	if err := ctrl.service.MarkAsRead(c.Request.Context(), userID.(string), notifID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -64,7 +70,7 @@ func (ctrl *NotificationController) MarkAllAsRead(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
 	if err := ctrl.service.MarkAllAsRead(c.Request.Context(), userID.(string)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -76,7 +82,7 @@ func (ctrl *NotificationController) GetUnreadCount(c *gin.Context) {
 
 	count, err := ctrl.service.GetUnreadCount(c.Request.Context(), userID.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -88,7 +94,7 @@ func (ctrl *NotificationController) GetPreferences(c *gin.Context) {
 
 	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID.(string))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -100,17 +106,35 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 
 	var input UpdatePreferencesInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
-	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil && input.CommunityEnabled == nil && input.VoiceCallEnabled == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "không có trường nào để cập nhật"})
+	if input.LikeEnabled == nil && input.CommentEnabled == nil && input.FollowEnabled == nil && input.MessageEnabled == nil && input.FriendRequestEnabled == nil && input.CommunityEnabled == nil && input.VoiceCallEnabled == nil && input.StoryReactEnabled == nil && input.ShareEnabled == nil && input.MediaEnabled == nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
-	pref := &models.NotificationPreference{
-		UserID: userID.(string),
+	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID.(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if pref == nil {
+		// No row yet = all types enabled (matches Create's nil-pref behavior).
+		pref = &models.NotificationPreference{
+			UserID:               userID.(string),
+			LikeEnabled:          true,
+			CommentEnabled:       true,
+			FollowEnabled:        true,
+			MessageEnabled:       true,
+			FriendRequestEnabled: true,
+			CommunityEnabled:     true,
+			VoiceCallEnabled:     true,
+			StoryReactEnabled:    true,
+			ShareEnabled:         true,
+			MediaEnabled:         true,
+		}
 	}
 	if input.LikeEnabled != nil {
 		pref.LikeEnabled = *input.LikeEnabled
@@ -133,9 +157,47 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 	if input.VoiceCallEnabled != nil {
 		pref.VoiceCallEnabled = *input.VoiceCallEnabled
 	}
+	if input.StoryReactEnabled != nil {
+		pref.StoryReactEnabled = *input.StoryReactEnabled
+	}
+	if input.ShareEnabled != nil {
+		pref.ShareEnabled = *input.ShareEnabled
+	}
+	if input.MediaEnabled != nil {
+		pref.MediaEnabled = *input.MediaEnabled
+	}
 
 	if err := ctrl.service.UpdatePreferences(c.Request.Context(), pref); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (ctrl *NotificationController) RegisterPushToken(c *gin.Context) {
+	userID, _ := c.Get("userID")
+
+	var input struct {
+		PushToken string `json:"push_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	now := time.Now().UTC()
+	token := &models.PushToken{
+		ID:        utils.GenerateUUID(),
+		UserID:    userID.(string),
+		PushToken: input.PushToken,
+		Platform:  "expo",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := ctrl.service.UpsertPushToken(c.Request.Context(), token); err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

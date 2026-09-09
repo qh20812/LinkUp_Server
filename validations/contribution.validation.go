@@ -1,29 +1,11 @@
 package validations
 
 import (
-	"errors"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"strings"
 	"time"
 	"unicode/utf8"
-)
-
-var (
-	ErrPostWeightInvalid          = errors.New("trọng số bài viết phải từ 0 đến 100")
-	ErrCommentWeightInvalid       = errors.New("trọng số bình luận phải từ 0 đến 100")
-	ErrReactionWeightInvalid      = errors.New("trọng số phản hồi phải từ 0 đến 100")
-	ErrEventWeightInvalid         = errors.New("trọng số sự kiện phải từ 0 đến 100")
-	ErrThresholdInvalid           = errors.New("ngưỡng điểm phải lớn hơn 0")
-	ErrThresholdOrderInvalid      = errors.New("ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor")
-	ErrHashtagRequired            = errors.New("hashtag là bắt buộc")
-	ErrHashtagInvalidFormat       = errors.New("hashtag phải bắt đầu bằng #")
-	ErrEndDateBeforeStart         = errors.New("ngày kết thúc phải sau ngày bắt đầu")
-	ErrChallengeStartDateInPast   = errors.New("ngày bắt đầu phải ở tương lai")
-	ErrChallengeTitleRequired     = errors.New("tên challenge là bắt buộc")
-	ErrChallengeTitleTooShort     = errors.New("tên challenge phải có ít nhất 5 ký tự")
-	ErrChallengeTitleTooLong      = errors.New("tên challenge không được vượt quá 255 ký tự")
-	ErrDescriptionTooLong         = errors.New("mô tả challenge không được vượt quá 2000 ký tự")
-	ErrDateFormatInvalid          = errors.New("định dạng ngày không hợp lệ, cần dùng RFC3339")
 )
 
 type ContributionValidation struct{}
@@ -44,22 +26,22 @@ func (v *ContributionValidation) NormalizePagination(page, pageSize int) (int, i
 
 func (v *ContributionValidation) ValidatePolicyInput(input dto.CreatePolicyInput) error {
 	if input.PostWeight < 0 || input.PostWeight > 100 {
-		return ErrPostWeightInvalid
+		return errorsapp.New(errorsapp.ErrCodeContribPostWeightInvalid)
 	}
 	if input.CommentWeight < 0 || input.CommentWeight > 100 {
-		return ErrCommentWeightInvalid
+		return errorsapp.New(errorsapp.ErrCodeContribCommentWeightInvalid)
 	}
 	if input.ReactionWeight < 0 || input.ReactionWeight > 100 {
-		return ErrReactionWeightInvalid
+		return errorsapp.New(errorsapp.ErrCodeContribReactionWeightInvalid)
 	}
 	if input.EventWeight < 0 || input.EventWeight > 100 {
-		return ErrEventWeightInvalid
+		return errorsapp.New(errorsapp.ErrCodeContribEventWeightInvalid)
 	}
 	if input.TopContributorThreshold <= 0 || input.ModeratorPromotionThreshold <= 0 {
-		return ErrThresholdInvalid
+		return errorsapp.New(errorsapp.ErrCodeContribThresholdInvalid)
 	}
 	if input.ModeratorPromotionThreshold <= input.TopContributorThreshold {
-		return ErrThresholdOrderInvalid
+		return errorsapp.New(errorsapp.ErrCodeContribThresholdOrderInvalid)
 	}
 	return nil
 }
@@ -97,13 +79,13 @@ func (v *ContributionValidation) ValidateCreateChallenge(input dto.CreateChallen
 func (v *ContributionValidation) ValidateChallengeTitle(title string) error {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return ErrChallengeTitleRequired
+		return errorsapp.New(errorsapp.ErrCodeContribTitleRequired)
 	}
 	if utf8.RuneCountInString(title) < 5 {
-		return ErrChallengeTitleTooShort
+		return errorsapp.New(errorsapp.ErrCodeContribTitleTooShort)
 	}
 	if utf8.RuneCountInString(title) > 255 {
-		return ErrChallengeTitleTooLong
+		return errorsapp.New(errorsapp.ErrCodeContribTitleTooLong)
 	}
 	return nil
 }
@@ -113,7 +95,7 @@ func (v *ContributionValidation) ValidateChallengeDescription(description string
 		return nil
 	}
 	if utf8.RuneCountInString(description) > 2000 {
-		return ErrDescriptionTooLong
+		return errorsapp.New(errorsapp.ErrCodeContribDescTooLong)
 	}
 	return nil
 }
@@ -121,10 +103,10 @@ func (v *ContributionValidation) ValidateChallengeDescription(description string
 func (v *ContributionValidation) ValidateHashtag(hashtag string) error {
 	hashtag = strings.TrimSpace(hashtag)
 	if hashtag == "" {
-		return ErrHashtagRequired
+		return errorsapp.New(errorsapp.ErrCodeContribHashtagRequired)
 	}
 	if !strings.HasPrefix(hashtag, "#") {
-		return ErrHashtagInvalidFormat
+		return errorsapp.New(errorsapp.ErrCodeContribHashtagInvalidFormat)
 	}
 	return nil
 }
@@ -132,17 +114,17 @@ func (v *ContributionValidation) ValidateHashtag(hashtag string) error {
 func (v *ContributionValidation) ValidateChallengeDates(startDate, endDate string) (time.Time, time.Time, error) {
 	start, err := time.Parse(time.RFC3339, strings.TrimSpace(startDate))
 	if err != nil {
-		return time.Time{}, time.Time{}, ErrDateFormatInvalid
+		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribDateFormatInvalid)
 	}
 	end, err := time.Parse(time.RFC3339, strings.TrimSpace(endDate))
 	if err != nil {
-		return time.Time{}, time.Time{}, ErrDateFormatInvalid
+		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribDateFormatInvalid)
 	}
 	if start.Before(time.Now()) {
-		return time.Time{}, time.Time{}, ErrChallengeStartDateInPast
+		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribStartDateInPast)
 	}
 	if !end.After(start) {
-		return time.Time{}, time.Time{}, ErrEndDateBeforeStart
+		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribEndDateBeforeStart)
 	}
 	return start, end, nil
 }

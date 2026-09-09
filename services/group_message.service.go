@@ -2,9 +2,10 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"linkup/dto"
 	"linkup/models"
+	errorsapp "linkup/errors"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
@@ -16,6 +17,7 @@ type GroupMessageService struct {
 	chatRepo       *repository.ChatRepository
 	groupRepo      *repository.GroupChatRepository
 	mediaRepo      *repository.MediaRepository
+	postRepo       *repository.PostRepository
 	notifService   *NotificationService
 	validation     *validations.ChatValidation
 	groupCallRepo  *repository.GroupCallRepository
@@ -25,6 +27,7 @@ func NewGroupMessageService(
 	chatRepo *repository.ChatRepository,
 	groupRepo *repository.GroupChatRepository,
 	mediaRepo *repository.MediaRepository,
+	postRepo *repository.PostRepository,
 	notifService *NotificationService,
 	validation *validations.ChatValidation,
 ) *GroupMessageService {
@@ -32,6 +35,7 @@ func NewGroupMessageService(
 		chatRepo:     chatRepo,
 		groupRepo:    groupRepo,
 		mediaRepo:    mediaRepo,
+		postRepo:     postRepo,
 		notifService: notifService,
 		validation:   validation,
 	}
@@ -44,23 +48,23 @@ func (s *GroupMessageService) ensureGroupMember(ctx context.Context, userID, cha
 	}
 
 	if chat.Type != models.ChatTypeGroup {
-		return nil, errors.New("chat này không phải nhóm chat")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotGroupChat)
 	}
 
 	banned, err := s.groupRepo.IsUserBanned(ctx, chatID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("kiểm tra danh sách chặn thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCBanned, err)
 	}
 	if banned {
-		return nil, errors.New("bạn đã bị chặn khỏi nhóm này")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCBanned)
 	}
 
 	isMember, err := s.groupRepo.IsUserMember(ctx, chatID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("kiểm tra thành viên thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCNotMember, err)
 	}
 	if !isMember {
-		return nil, errors.New("bạn không phải thành viên của nhóm này")
+		return nil, errorsapp.New(errorsapp.ErrCodeGCNotMember)
 	}
 
 	return chat, nil
@@ -75,7 +79,7 @@ func (s *GroupMessageService) JoinRoom(ctx context.Context, userID, chatID strin
 func (s *GroupMessageService) SendMessage(
 	ctx context.Context,
 	userID, chatID, content string,
-	emojiID, mediaID, replyToMessageID *string,
+	emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID, forwardedFrom *string,
 ) (*models.Message, error) {
 	chat, err := s.ensureGroupMember(ctx, userID, chatID)
 	if err != nil {
@@ -96,43 +100,84 @@ func (s *GroupMessageService) SendMessage(
 		return nil, fmt.Errorf("bạn đã bị tắt tiếng trong nhóm này (lý do: %s). Hết hạn: %s", mute.Reason, expiresStr)
 	}
 
-	if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
-		return nil, err
+	if gifURL != nil && *gifURL != "" {
+		gifMedia := models.Media{
+			ID:        utils.GenerateUUID(),
+			UserID:    userID,
+			FileURI:   *gifURL,
+			FileType:  "image/gif",
+			FileSize:  0,
+			Status:    models.MediaStatusApproved,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := s.mediaRepo.Create(ctx, &gifMedia); err != nil {
+			return nil, fmt.Errorf("create gif media: %w", err)
+		}
+		mediaID = &gifMedia.ID
+	}
+
+	// Validate shared post first — a shared post IS the message content.
+	if sharedPostID != nil && *sharedPostID != "" {
+		post, err := s.postRepo.FindByID(ctx, *sharedPostID)
+		if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
+			return nil, fmt.Errorf("bài viết không tồn tại hoặc không khả dụng")
+		}
+	} else {
+		if err := s.validation.ValidateSendMessage(content, emojiID, mediaID); err != nil {
+			return nil, err
+		}
 	}
 
 	if emojiID != nil && *emojiID != "" {
 		ok, err := s.chatRepo.IsEmojiExists(ctx, *emojiID)
 		if err != nil {
-			return nil, fmt.Errorf("check emoji: %w", err)
+			return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEmojiNotFound, err)
 		}
 		if !ok {
-			return nil, errors.New("emoji không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCEmojiNotFound)
 		}
 	}
 
 	if mediaID != nil && *mediaID != "" {
 		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
 		if err != nil {
-			return nil, errors.New("media không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotFound)
 		}
 		if media.UserID != userID {
-			return nil, errors.New("media không thuộc về bạn")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotYours)
 		}
 	}
 
 	if replyToMessageID != nil && *replyToMessageID != "" {
 		parentMsg, err := s.chatRepo.FindMessageByID(ctx, *replyToMessageID)
 		if err != nil {
-			return nil, errors.New("tin nhắn gốc không tồn tại")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCReplyNotFound)
 		}
 		if parentMsg.ChatID != chatID {
-			return nil, errors.New("tin nhắn gốc không thuộc phòng chat này")
+			return nil, errorsapp.New(errorsapp.ErrCodeGCReplyWrongChat)
+		}
+	}
+
+	// Forward: metadata forwarded_from trỏ về tin gốc; server chỉ chấp nhận khi
+	// user thuộc hội thoại gốc. Client tạo nội dung mới (giải mã rồi mã hóa lại
+	// với khóa của hội thoại đích), nên forward phải có nội dung.
+	if forwardedFrom != nil && *forwardedFrom != "" {
+		hasContent := forwardHasContent(content, emojiID, mediaID, sharedPostID)
+		if !hasContent {
+			return nil, fmt.Errorf("không có nội dung để chuyển tiếp")
+		}
+		canRead, err := s.chatRepo.CanReadMessage(ctx, *forwardedFrom, userID)
+		if err != nil {
+			return nil, err
+		}
+		if !canRead {
+			return nil, fmt.Errorf("không thể chuyển tiếp tin nhắn từ hội thoại không thuộc quyền truy cập của bạn")
 		}
 	}
 
 	encryptionKey, err := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	if err != nil {
-		return nil, fmt.Errorf("lấy khóa mã hóa thất bại: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeGCEncryptionKeyNotFound, err)
 	}
 
 	encryptedContent, err := utils.EncryptMessage(content, encryptionKey)
@@ -144,6 +189,19 @@ func (s *GroupMessageService) SendMessage(
 	msg.ID = utils.GenerateUUID()
 	msg.CreatedAt = time.Now().UTC()
 	msg.ReplyToMessageID = replyToMessageID
+	msg.MediaGroupID = mediaGroupID
+	if sharedPostID != nil && *sharedPostID != "" {
+		msg.SharedPostID = sharedPostID
+		msg.Type = "shared_post"
+	}
+	if forwardedFrom != nil && *forwardedFrom != "" {
+		src, err := s.chatRepo.FindMessageByID(ctx, *forwardedFrom)
+		if err == nil {
+			msg.ForwardedFrom = forwardedFrom
+			msg.ForwardsCount = src.ForwardsCount + 1
+			_ = s.chatRepo.IncrementForwardsCount(ctx, *forwardedFrom)
+		}
+	}
 
 	savedMsg, err := s.chatRepo.CreateMessage(ctx, &msg)
 	if err != nil {
@@ -154,6 +212,10 @@ func (s *GroupMessageService) SendMessage(
 	if err == nil && s.notifService != nil {
 		for _, participantID := range participants {
 			if participantID == userID {
+				continue
+			}
+			memberSettings, _ := s.groupRepo.GetMemberSettings(ctx, chatID, participantID)
+			if memberSettings != nil && !memberSettings.NotificationsEnabled {
 				continue
 			}
 			_, _ = s.notifService.Create(
@@ -170,6 +232,46 @@ func (s *GroupMessageService) SendMessage(
 	}
 
 	return savedMsg, nil
+}
+
+func (s *GroupMessageService) DeleteMessage(ctx context.Context, userID, messageID, mode string) (*models.Message, error) {
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.ensureGroupMember(ctx, userID, msg.ChatID); err != nil {
+		return nil, err
+	}
+
+	if err := s.validation.ValidateDeleteMessage(msg.SenderID, userID, mode); err != nil {
+		return nil, err
+	}
+	if err := s.validation.ValidateDeleteMode(mode); err != nil {
+		return nil, err
+	}
+
+	deleteForAll := strings.EqualFold(mode, "all")
+
+	if deleteForAll {
+		if msg.DeletedAt != nil {
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+		}
+		deletedAt := time.Now().UTC()
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, true, &deletedAt)
+	}
+
+	if msg.SenderID == userID {
+		if msg.DeletedForSender {
+			return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+		}
+		return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, true, false, nil)
+	}
+
+	if msg.DeletedForReceiver {
+		return nil, errorsapp.New(errorsapp.ErrCodeChatAlreadyDeleted)
+	}
+	return s.chatRepo.UpdateMessageDeleteStatus(ctx, messageID, false, true, nil)
 }
 
 func (s *GroupMessageService) GetAllMessagesDecrypted(
@@ -245,15 +347,110 @@ func (s *GroupMessageService) ListGroupMemberIDs(ctx context.Context, userID, ch
 	return s.chatRepo.GetParticipantIDs(ctx, chatID)
 }
 
-func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, content string) (*models.Message, error) {
-	msg := models.NewMessage(chatID, "SYSTEM", content, nil, nil)
+func (s *GroupMessageService) CreateSystemMessage(ctx context.Context, chatID, translationKey, msgType, actorID string, extra ...string) (*models.Message, error) {
+	content := translationKey
+	if actorID != "" {
+		content += "|" + actorID
+	}
+	if len(extra) > 0 && extra[0] != "" {
+		content += "|" + extra[0]
+	}
+	msg := models.NewMessage(chatID, actorID, content, nil, nil)
 	msg.ID = utils.GenerateUUID()
+	msg.Type = msgType
+	msg.MessageCategory = "system"
 	msg.CreatedAt = time.Now().UTC()
 	return s.chatRepo.CreateMessage(ctx, &msg)
 }
 
+func (s *GroupMessageService) DecryptMessageContent(ctx context.Context, msg *models.Message) error {
+	if msg.Content == "" {
+		return nil
+	}
+	key, err := s.chatRepo.GetEncryptionKey(ctx, msg.ChatID)
+	if err != nil {
+		return err
+	}
+	decrypted, err := utils.DecryptMessage(msg.Content, key)
+	if err != nil {
+		return err
+	}
+	msg.Content = decrypted
+	return nil
+}
+
+// GetMemberProfiles loads display_name and avatar_uri for a list of user IDs within a group.
+func (s *GroupMessageService) GetMemberProfiles(ctx context.Context, chatID string, userIDs []string) map[string]struct{ DisplayName, AvatarURI string } {
+	type profile struct {
+		UserID      string `gorm:"column:user_id"`
+		DisplayName string `gorm:"column:display_name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+	}
+
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	var profiles []profile
+	err := s.groupRepo.GetMemberProfiles(ctx, chatID, userIDs, &profiles)
+	if err != nil {
+		return nil
+	}
+
+	result := make(map[string]struct{ DisplayName, AvatarURI string }, len(profiles))
+	for _, p := range profiles {
+		result[p.UserID] = struct{ DisplayName, AvatarURI string }{
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+		}
+	}
+	return result
+}
+
 func (s *GroupMessageService) SetGroupCallRepository(repo *repository.GroupCallRepository) {
 	s.groupCallRepo = repo
+}
+
+func (s *GroupMessageService) GetChatRepo() *repository.ChatRepository {
+	return s.chatRepo
+}
+
+func (s *GroupMessageService) GetMediaFileTypes(ctx context.Context, mediaIDs []string) map[string]string {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	result, err := s.mediaRepo.GetFileTypesByIDs(ctx, ids)
+	if err != nil {
+		return map[string]string{}
+	}
+	return result
+}
+
+func (s *GroupMessageService) GetMediaDurations(ctx context.Context, mediaIDs []string) map[string]int {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	result, err := s.mediaRepo.GetMediaDurationsByIDs(ctx, ids)
+	if err != nil {
+		return map[string]int{}
+	}
+	return result
 }
 
 func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {
@@ -264,4 +461,253 @@ func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID,
 		return nil, nil
 	}
 	return s.groupCallRepo.FindByChatID(ctx, chatID)
+}
+
+func (s *GroupMessageService) LoadSharedPosts(ctx context.Context, messages []models.Message) map[string]*dto.SharedPostPayload {
+	postIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		if m.SharedPostID != nil && *m.SharedPostID != "" {
+			if _, ok := seen[*m.SharedPostID]; !ok {
+				postIDs = append(postIDs, *m.SharedPostID)
+				seen[*m.SharedPostID] = struct{}{}
+			}
+		}
+	}
+	if len(postIDs) == 0 {
+		return nil
+	}
+	posts, err := s.postRepo.FindByIDs(ctx, postIDs)
+	if err != nil || len(posts) == 0 {
+		return nil
+	}
+	result := make(map[string]*dto.SharedPostPayload, len(posts))
+	for i := range posts {
+		p := &posts[i]
+		result[p.ID] = &dto.SharedPostPayload{
+			ID:          p.ID,
+			UserID:      p.UserID,
+			Username:    p.Username,
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+			Title:       p.Title,
+			Content:     p.Content,
+		}
+		if len(p.Media) > 0 {
+			result[p.ID].MediaURI = p.Media[0].FileURI
+			result[p.ID].MediaType = p.Media[0].FileType
+		}
+	}
+	return result
+}
+
+// ── Pin Message ────────────────────────────────────────────────────────────
+
+func (s *GroupMessageService) PinMessage(ctx context.Context, userID, chatID, messageID string) (*dto.PinnedMessageDTO, error) {
+	// Validate group membership
+	chat, err := s.ensureGroupMember(ctx, userID, chatID)
+	if err != nil {
+		return nil, err
+	}
+	_ = chat
+
+	// Check permission: admin OR message sender
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("không tìm thấy tin nhắn")
+	}
+	if msg.ChatID != chatID {
+		return nil, fmt.Errorf("tin nhắn không thuộc nhóm này")
+	}
+	if msg.DeletedAt != nil {
+		return nil, fmt.Errorf("không thể ghim tin nhắn đã xóa")
+	}
+
+	if !isAdmin && msg.SenderID != userID {
+		return nil, fmt.Errorf("chỉ admin hoặc người gửi tin nhắn mới có thể ghim")
+	}
+
+	// Check if already pinned
+	pinned, err := s.chatRepo.IsMessagePinned(ctx, chatID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if pinned {
+		return nil, fmt.Errorf("tin nhắn đã được ghim")
+	}
+
+	// Auto-unpin oldest if at max
+	count, err := s.chatRepo.CountPinnedMessages(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	if count >= 2 {
+		if err := s.chatRepo.AutoUnpinOldest(ctx, chatID); err != nil {
+			return nil, err
+		}
+	}
+
+	pm, err := s.chatRepo.PinMessage(ctx, chatID, messageID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt content
+	content := msg.Content
+	if err := s.DecryptMessageContent(ctx, msg); err == nil {
+		content = msg.Content
+	}
+
+	senderName := s.chatRepo.GetDisplayName(ctx, msg.SenderID)
+
+	return &dto.PinnedMessageDTO{
+		ID:         pm.ID,
+		MessageID:  pm.MessageID,
+		PinnedBy:   pm.PinnedBy,
+		PinnedAt:   pm.PinnedAt,
+		Content:    content,
+		SenderID:   msg.SenderID,
+		SenderName: senderName,
+	}, nil
+}
+
+func (s *GroupMessageService) UnpinMessage(ctx context.Context, userID, chatID, messageID string) error {
+	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
+		return err
+	}
+
+	// Check permission: admin OR the person who originally pinned it
+	// (simplified: allow admin or message sender to unpin)
+	isAdmin, err := s.groupRepo.IsUserAdmin(ctx, chatID, userID)
+	if err != nil {
+		return err
+	}
+
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return fmt.Errorf("không tìm thấy tin nhắn")
+	}
+
+	if !isAdmin && msg.SenderID != userID {
+		return fmt.Errorf("chỉ admin hoặc người gửi tin nhắn mới có thể bỏ ghim")
+	}
+
+	return s.chatRepo.UnpinMessage(ctx, chatID, messageID)
+}
+
+func (s *GroupMessageService) GetPinnedMessages(ctx context.Context, userID, chatID string) ([]dto.PinnedMessageDTO, error) {
+	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+
+	pins, err := s.chatRepo.GetPinnedMessages(ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt content for each pinned message
+	for i := range pins {
+		tmpMsg := &models.Message{Content: pins[i].Content}
+		if err := s.DecryptMessageContent(ctx, tmpMsg); err == nil {
+			pins[i].Content = tmpMsg.Content
+		}
+	}
+
+	return pins, nil
+}
+
+// MarkMessageRead nâng watermark đọc của user trong group chat lên một tin.
+// Nhánh group dùng chung bảng chat_reads (chat_id = group chat id).
+func (s *GroupMessageService) MarkMessageRead(ctx context.Context, userID, chatID, messageID string) (*dto.MessageReadStatePayload, error) {
+	if err := s.JoinRoom(ctx, userID, chatID); err != nil {
+		return nil, err
+	}
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if msg.ChatID != chatID {
+		return nil, fmt.Errorf("tin nhắn không thuộc hội thoại này")
+	}
+
+	advanced, err := s.chatRepo.UpsertChatRead(ctx, chatID, userID, messageID, msg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if !advanced {
+		return nil, nil
+	}
+	return &dto.MessageReadStatePayload{
+		ChatID:        chatID,
+		UserID:        userID,
+		LastMessageID: messageID,
+		LastReadAt:    msg.CreatedAt,
+	}, nil
+}
+
+// GetChatReadWatermarks trả về watermark đọc của toàn group chat.
+func (s *GroupMessageService) GetChatReadWatermarks(ctx context.Context, chatID string) (map[string]time.Time, error) {
+	return s.chatRepo.GetChatReadWatermarks(ctx, chatID)
+}
+
+// ── Message reactions (Phase 4) ─────────────────────────────────────────────
+
+func (s *GroupMessageService) ReactToMessage(ctx context.Context, userID, chatID, messageID, emojiID string) (string, []dto.MessageReactionPayload, error) {
+	if err := s.JoinRoom(ctx, userID, chatID); err != nil {
+		return "", nil, err
+	}
+	if emojiID == "" {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeEmojiRequired)
+	}
+	msg, err := s.chatRepo.FindMessageByID(ctx, messageID)
+	if err != nil {
+		return "", nil, err
+	}
+	if msg.ChatID != chatID {
+		return "", nil, fmt.Errorf("tin nhắn không thuộc hội thoại này")
+	}
+	ok, err := s.chatRepo.IsEmojiExists(ctx, emojiID)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return "", nil, errorsapp.New(errorsapp.ErrCodeGCEmojiNotFound)
+	}
+
+	action, err := s.chatRepo.ToggleMessageReaction(ctx, messageID, userID, emojiID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	reactions := s.GetMessageReactions(ctx, []string{messageID})[messageID]
+
+	// Thông báo "thích" tin nhắn cho người gửi (chỉ khi thêm reaction mới).
+	if action == "added" && userID != msg.SenderID && s.notifService != nil {
+		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+	}
+
+	return action, reactions, nil
+}
+
+func (s *GroupMessageService) GetMessageReactions(ctx context.Context, messageIDs []string) map[string][]dto.MessageReactionPayload {
+	result := make(map[string][]dto.MessageReactionPayload)
+	raw := s.chatRepo.GetMessageReactions(ctx, messageIDs)
+	for messageID, list := range raw {
+		payloads := make([]dto.MessageReactionPayload, 0, len(list))
+		for _, r := range list {
+			payloads = append(payloads, dto.MessageReactionPayload{
+				MessageID: r.MessageID,
+				UserID:    r.UserID,
+				EmojiID:   r.EmojiID,
+				CreatedAt: r.CreatedAt,
+			})
+		}
+		result[messageID] = payloads
+	}
+	return result
 }

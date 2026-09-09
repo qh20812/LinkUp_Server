@@ -13,6 +13,7 @@ func RegisterGroupChatRoutes(router *gin.Engine, ctrl *controllers.GroupChatCont
 	groupChatGroup := router.Group("/api/group-chats")
 	groupChatGroup.Use(middlewares.AuthMiddleware(env, db))
 	{
+		groupChatGroup.GET("", ctrl.ListGroups)
 		groupChatGroup.POST("", ctrl.CreateGroup)
 		groupChatGroup.POST("/:chatID/add-member", ctrl.AddMember)
 		groupChatGroup.POST("/:chatID/member-requests/:requestID/approve", ctrl.ApproveMemberRequest)
@@ -25,5 +26,6 @@ func RegisterGroupChatRoutes(router *gin.Engine, ctrl *controllers.GroupChatCont
 		groupChatGroup.PUT("/:chatID/settings", ctrl.UpdateSettings)
 		groupChatGroup.POST("/:chatID/mute", ctrl.MuteMember)
 		groupChatGroup.POST("/:chatID/unmute", ctrl.UnmuteMember)
+		groupChatGroup.POST("/:chatID/leave", ctrl.LeaveGroup)
 	}
 }

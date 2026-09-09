@@ -91,7 +91,7 @@ func ServeWS(hub *Hub, env config.Env, db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		client := NewClient(context.Background(), conn, hub, nil, nil, claims.UserID)
+		client := NewClient(context.Background(), conn, hub, nil, nil, nil, claims.UserID)
 		hub.register <- client
 
 		go client.WritePump()

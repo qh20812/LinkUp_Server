@@ -44,9 +44,55 @@ func (r *MediaRepository) GetByID(ctx context.Context, id string) (*models.Media
 	return &media, nil
 }
 
+func (r *MediaRepository) GetFileTypesByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+	var rows []struct {
+		ID       string
+		FileType string
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Select("id, file_type").
+		Where("id IN ?", ids).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(rows))
+	for _, row := range rows {
+		result[row.ID] = row.FileType
+	}
+	return result, nil
+}
+
+func (r *MediaRepository) GetMediaDurationsByIDs(ctx context.Context, ids []string) (map[string]int, error) {
+	if len(ids) == 0 {
+		return map[string]int{}, nil
+	}
+	var rows []struct {
+		ID       string
+		Duration int
+	}
+	err := r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Select("id, duration_seconds").
+		Where("id IN ?", ids).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]int, len(rows))
+	for _, row := range rows {
+		result[row.ID] = row.Duration
+	}
+	return result, nil
+}
+
 func (r *MediaRepository) GetByUserID(ctx context.Context, userID string) ([]models.Media, error) {
 	var medias []models.Media
-	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&medias).Error
+	err := r.db.WithContext(ctx).Where("user_id = ? AND status != ?", userID, models.MediaStatusRejected).Find(&medias).Error
 	return medias, err
 }
 
@@ -140,7 +186,7 @@ func (r *MediaRepository) GetByPostIDs(ctx context.Context, postIDs []string) (m
 
 	var medias []models.Media
 	if err := r.db.WithContext(ctx).
-		Where("post_id IN ?", postIDs).
+		Where("post_id IN ? AND status != ?", postIDs, models.MediaStatusRejected).
 		Order("created_at ASC").
 		Find(&medias).Error; err != nil {
 		return nil, err

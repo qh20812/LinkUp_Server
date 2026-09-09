@@ -27,7 +27,9 @@ func (r *SearchRepository) SearchUsers(ctx context.Context, keyword string) ([]d
 		Model(&models.User{}).
 		Select("users.id, users.username, COALESCE(profiles.display_name, '') AS display_name, COALESCE(profiles.avatar_uri, '') AS avatar_uri").
 		Joins("LEFT JOIN profiles ON profiles.user_id = users.id").
+		Joins("LEFT JOIN user_settings ON user_settings.user_id = users.id").
 		Where("users.status = ?", models.UserStatusActive).
+		Where("(user_settings.discoverable_in_search IS NULL OR user_settings.discoverable_in_search = ?)", true).
 		Where("users.username LIKE ? OR users.email LIKE ? OR profiles.display_name LIKE ?", like, like, like).
 		Where("NOT EXISTS (SELECT 1 FROM user_roles JOIN roles ON roles.id = user_roles.role_id WHERE user_roles.user_id = users.id AND roles.name IN (?, ?))", models.RoleSuperAdmin, models.RoleAdmin).
 		Limit(10).
@@ -112,6 +114,42 @@ func (r *SearchRepository) SearchHashtags(ctx context.Context, keyword string) (
 		Scan(&results).Error
 	if err != nil {
 		return nil, fmt.Errorf("search hashtags: %w", err)
+	}
+	return results, nil
+}
+
+func (r *SearchRepository) SearchCommunities(ctx context.Context, keyword string) ([]dto.CommunitySearchResult, error) {
+	type communityRow struct {
+		ID          string `gorm:"column:id"`
+		Name        string `gorm:"column:name"`
+		AvatarURI   string `gorm:"column:avatar_uri"`
+		MemberCount int    `gorm:"column:member_count"`
+		Privacy     string `gorm:"column:privacy"`
+	}
+
+	var rows []communityRow
+	err := r.db.WithContext(ctx).
+		Table("communities").
+		Select(`communities.id, communities.name, communities.avatar_uri, communities.privacy,
+			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
+		Where("communities.status = ? AND communities.name ILIKE ?",
+			models.CommunityStatusActive, "%"+keyword+"%").
+		Order("member_count DESC").
+		Limit(10).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("search communities: %w", err)
+	}
+
+	results := make([]dto.CommunitySearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, dto.CommunitySearchResult{
+			ID:          row.ID,
+			Name:        row.Name,
+			AvatarURI:   row.AvatarURI,
+			MemberCount: row.MemberCount,
+			Privacy:     row.Privacy,
+		})
 	}
 	return results, nil
 }

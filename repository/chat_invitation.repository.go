@@ -50,6 +50,18 @@ func (r *ChatInvitationRepository) FindPendingBetween(ctx context.Context, reque
     return &invite, nil
 }
 
+func (r *ChatInvitationRepository) FindPendingByTarget(ctx context.Context, targetID string) ([]models.ChatInvite, error) {
+	var invites []models.ChatInvite
+	err := r.db.WithContext(ctx).
+		Where("target_id = ? AND status = ?", targetID, models.ChatInviteStatusPending).
+		Order("created_at DESC").
+		Find(&invites).Error
+	if err != nil {
+		return nil, fmt.Errorf("find pending invites by target: %w", err)
+	}
+	return invites, nil
+}
+
 func (r *ChatInvitationRepository) UpdateStatus(ctx context.Context, inviteID string, status models.ChatInviteStatus, chatID *string) error {
 	update := map[string]any{"status": status, "updated_at": time.Now().UTC()}
 	if chatID != nil {

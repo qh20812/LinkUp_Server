@@ -4,12 +4,17 @@ import "time"
 
 type Profile struct {
 	ID                         string     `json:"id"`
-	UserID                     string     `json:"user_id"`
+	UserID                     string     `json:"user_id" gorm:"type:varchar(36)"`
 	DisplayName                string     `json:"display_name"`
 	PhoneNumber                string     `json:"phone_number"`
 	DateOfBirth                *time.Time `json:"date_of_birth,omitempty"`
 	AvatarURI                  string     `json:"avatar_uri"`
+	CoverURI                   string     `json:"cover_uri"`
 	Bio                        string     `json:"bio"`
+	Location                   string     `json:"location"`
+	Work                       string     `json:"work"`
+	Education                  string     `json:"education"`
+	Website                    string     `json:"website"`
 	IsPrivateProfile           bool       `json:"is_private_profile"`
 	IsPrivatePosts             bool       `json:"is_private_posts"`
 	AllowStrangerFriendRequest bool       `json:"allow_stranger_friend_request"`
@@ -24,6 +29,7 @@ func NewProfile(userID, displayName, phoneNumber string, dateOfBirth *time.Time,
 		PhoneNumber:                phoneNumber,
 		DateOfBirth:                dateOfBirth,
 		AvatarURI:                  avatarURI,
+		CoverURI:                   "",
 		Bio:                        bio,
 		IsPrivateProfile:           false,
 		IsPrivatePosts:             false,

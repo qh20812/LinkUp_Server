@@ -37,7 +37,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 	}
 
 	for i := 0; i < 8; i++ {
-		reporterID := state.UserIDs[i%len(state.UserIDs)]
+		reporterID := state.UserIDs[i%18+2]
 
 		var targetUserID *string
 		var targetPostID *string
@@ -97,7 +97,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 		}
 		action := pick(actions)
 		targetType := pick(targetTypes)
-		targetID := state.UserIDs[i%len(state.UserIDs)]
+		targetID := state.UserIDs[i%18+2]
 		reason := pick([]string{
 			"Violation of terms of service",
 			"Reported by multiple users",

@@ -2,7 +2,7 @@ package services
 
 import (
 	"context"
-	"errors"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -39,7 +39,7 @@ func (s *CommunityRuleService) CreateRule(ctx context.Context, userID, community
 
 	exists, err := s.ruleRepo.ExistsByCommunityCategoryTitle(ctx, communityID, category, title)
 	if err != nil {
-		return nil, errors.New("lỗi khi kiểm tra trùng lặp nội quy")
+		return nil, errorsapp.New(errorsapp.ErrCodeRuleCheckFailed)
 	}
 	if exists {
 		return nil, validations.ErrRuleTitleDuplicate
@@ -48,7 +48,7 @@ func (s *CommunityRuleService) CreateRule(ctx context.Context, userID, community
 	if position == nil {
 		maxPos, err := s.ruleRepo.GetMaxPosition(ctx, communityID, category)
 		if err != nil {
-			return nil, errors.New("lỗi khi xác định vị trí nội quy")
+			return nil, errorsapp.New(errorsapp.ErrCodeRulePositionFailed)
 		}
 		pos = maxPos + 1
 	}
@@ -67,7 +67,7 @@ func (s *CommunityRuleService) CreateRule(ctx context.Context, userID, community
 func (s *CommunityRuleService) UpdateRule(ctx context.Context, userID, ruleID, title, content string, category *models.RuleCategory, position *int) (*models.CommunityRule, error) {
 	existing, err := s.ruleRepo.FindByID(ctx, ruleID)
 	if err != nil {
-		return nil, errors.New("nội quy không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodeRuleNotFound)
 	}
 
 	if err := s.groupRole.RequireRole(ctx, existing.CommunityID, userID, models.GroupRoleAdmin); err != nil {
@@ -111,7 +111,7 @@ func (s *CommunityRuleService) UpdateRule(ctx context.Context, userID, ruleID, t
 func (s *CommunityRuleService) DeleteRule(ctx context.Context, userID, ruleID string) error {
 	existing, err := s.ruleRepo.FindByID(ctx, ruleID)
 	if err != nil {
-		return errors.New("nội quy không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeRuleNotFound)
 	}
 
 	if err := s.groupRole.RequireRole(ctx, existing.CommunityID, userID, models.GroupRoleAdmin); err != nil {

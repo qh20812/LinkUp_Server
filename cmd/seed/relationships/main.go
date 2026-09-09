@@ -133,8 +133,16 @@ func Run(env config.Env, state *internal.SeedState) error {
 		modIdx := ci*2 + 3
 		members = append(members, memberData{communityIdx: ci, userIdx: adminIdx, role: "GROUP_ADMIN"})
 		members = append(members, memberData{communityIdx: ci, userIdx: modIdx, role: "GROUP_MOD"})
+		// Pick 3 group members từ các user thường, loại trừ admin/mod/creator để tránh trùng khóa (idx_group_members_pair)
+		var candidates []int
+		for u := 2; u < len(state.UserIDs); u++ {
+			if u == adminIdx || u == modIdx || u == communities[ci].creatorIdx {
+				continue
+			}
+			candidates = append(candidates, u)
+		}
 		for m := 0; m < 3; m++ {
-			idx := (ci*5+m+4)%19 + 1
+			idx := candidates[(ci*3+m)%len(candidates)]
 			members = append(members, memberData{communityIdx: ci, userIdx: idx, role: "GROUP_MEMBER"})
 		}
 	}

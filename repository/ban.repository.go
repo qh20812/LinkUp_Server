@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrBanNotFound = errors.New("không tìm thấy bản ghi ban")
+var ErrBanNotFound = errors.New("ban not found")
 
 type BanRepository struct {
 	db *gorm.DB

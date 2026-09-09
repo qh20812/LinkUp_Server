@@ -9,7 +9,6 @@ type CommunityPrivacy string
 
 const (
 	PrivacyPublic         CommunityPrivacy = "public"
-	PrivacyCode           CommunityPrivacy = "code"
 	PrivacyInvitationOnly CommunityPrivacy = "invitation_only"
 )
 
@@ -35,14 +34,17 @@ type Community struct {
 	UpdatedAt     *time.Time       `json:"updated_at,omitempty"`
 }
 
-func NewCommunity(creatorID, name, description, avatarURI string) Community {
+func NewCommunity(creatorID, name, description, avatarURI, backgroundURI string, privacy CommunityPrivacy) Community {
+	if privacy == "" {
+		privacy = PrivacyPublic
+	}
 	return Community{
 		CreatorID:     creatorID,
 		Name:          name,
 		Description:   description,
 		AvatarURI:     avatarURI,
-		BackgroundURI: "",
-		Privacy:       PrivacyPublic,
+		BackgroundURI: backgroundURI,
+		Privacy:       privacy,
 		Status:        CommunityStatusActive,
 	}
 }
@@ -59,5 +61,14 @@ func ParseCommunityStatus(value string) CommunityStatus {
 		return CommunityStatusArchived
 	default:
 		return CommunityStatusActive
+	}
+}
+
+func ParseCommunityPrivacy(value string) CommunityPrivacy {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(PrivacyInvitationOnly):
+		return PrivacyInvitationOnly
+	default:
+		return PrivacyPublic
 	}
 }

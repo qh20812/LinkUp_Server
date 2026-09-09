@@ -1,15 +1,15 @@
 package validations
 
-import "errors"
+import errorsapp "linkup/errors"
 
 var (
-	ErrAdminGroupActionInvalid      = errors.New("hành động moderation không hợp lệ")
-	ErrAdminGroupReasonRequired     = errors.New("lý do là bắt buộc")
-	ErrAdminGroupReasonTooShort     = errors.New("lý do phải có ít nhất 10 ký tự")
-	ErrAdminGroupReasonTooLong      = errors.New("lý do không được vượt quá 1000 ký tự")
-	ErrAdminGroupTransferSelf       = errors.New("không thể chuyển quyền cho chính mình")
-	ErrAdminGroupTransferEmpty      = errors.New("người nhận không được để trống")
-	ErrAdminGroupActionNotAllowed   = errors.New("action không được hỗ trợ cho group chat")
+	ErrAdminGroupActionInvalid    = errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
+	ErrAdminGroupReasonRequired   = errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
+	ErrAdminGroupReasonTooShort   = errorsapp.New(errorsapp.ErrCodeAdminReasonTooShort)
+	ErrAdminGroupReasonTooLong    = errorsapp.New(errorsapp.ErrCodeAdminReasonTooLong)
+	ErrAdminGroupTransferSelf     = errorsapp.New(errorsapp.ErrCodeAdminTransferSelf)
+	ErrAdminGroupTransferEmpty    = errorsapp.New(errorsapp.ErrCodeAdminTransferEmpty)
+	ErrAdminGroupActionNotAllowed = errorsapp.New(errorsapp.ErrCodeAdminActionNotAllowedGroup)
 )
 
 var AllowedGroupModerationActions = []string{"hide", "unhide", "archive", "warn"}

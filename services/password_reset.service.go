@@ -3,14 +3,18 @@ package services
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -18,19 +22,36 @@ import (
 )
 
 type PasswordResetService struct {
-	resetRepo  *repository.PasswordResetRepository
-	authRepo   *repository.AuthRepository
-	validation *validations.AuthValidation
-	env        config.Env
+	resetRepo          *repository.PasswordResetRepository
+	authRepo           *repository.AuthRepository
+	adminSettingsRepo  *repository.AdminSettingsRepository
+	validation         *validations.AuthValidation
+	env                config.Env
 }
 
-func NewPasswordResetService(resetRepo *repository.PasswordResetRepository, authRepo *repository.AuthRepository, validation *validations.AuthValidation, env config.Env) *PasswordResetService {
+func NewPasswordResetService(resetRepo *repository.PasswordResetRepository, authRepo *repository.AuthRepository, adminSettingsRepo *repository.AdminSettingsRepository, validation *validations.AuthValidation, env config.Env) *PasswordResetService {
 	return &PasswordResetService{
-		resetRepo:  resetRepo,
-		authRepo:   authRepo,
-		validation: validation,
-		env:        env,
+		resetRepo:          resetRepo,
+		authRepo:           authRepo,
+		adminSettingsRepo:  adminSettingsRepo,
+		validation:         validation,
+		env:                env,
 	}
+}
+
+func (s *PasswordResetService) getMinPasswordLength(ctx context.Context) int {
+	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "password_min_length")
+	if err != nil || cfg == nil {
+		return 8
+	}
+	n, err := strconv.Atoi(cfg.Value)
+	if err != nil || n < 8 {
+		return 8
+	}
+	if n > 50 {
+		return 50
+	}
+	return n
 }
 
 // Gửi email quên mật khẩu
@@ -45,8 +66,15 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 		return dto.ForgotPasswordResponse{}, err
 	}
 
-	token := s.generateResetToken()
-	resetToken := models.NewPasswordResetToken(user.ID, token, 10*time.Minute)
+	if err := s.resetRepo.DeleteExpired(ctx); err != nil {
+		return dto.ForgotPasswordResponse{}, err
+	}
+	if err := s.resetRepo.DeleteUserOldToken(ctx, user.ID); err != nil {
+		return dto.ForgotPasswordResponse{}, err
+	}
+
+	rawToken, hashedToken := s.generateResetToken()
+	resetToken := models.NewPasswordResetToken(user.ID, hashedToken, 10*time.Minute)
 	resetToken.ID = utils.GenerateUUID()
 
 	if _, err := s.resetRepo.Create(ctx, &resetToken); err != nil {
@@ -57,9 +85,12 @@ func (s *PasswordResetService) ForgotPassword(ctx context.Context, input dto.For
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
-	resetLink := fmt.Sprintf("%s?token=%s", frontendURL, token)
+	resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, rawToken)
 
-	if err := utils.SendResetPasswordEmail(user.Email, user.Username, resetLink); err != nil {
+	deepLink := fmt.Sprintf("linkupmobile://reset-password?token=%s", rawToken)
+	mobileResetLink := fmt.Sprintf("%s/open-app?redirect=%s", frontendURL, url.QueryEscape(deepLink))
+
+	if err := utils.SendResetPasswordEmail(user.Email, user.Username, resetLink, mobileResetLink); err != nil {
 		fmt.Printf("Warning: Failed to send email: %v\n", err)
 	}
 
@@ -106,21 +137,29 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 	resetToken, err := s.resetRepo.FindByToken(ctx, input.Token)
 	if err != nil {
 		if errors.Is(err, repository.ErrResetTokenNotFound) {
-			return dto.ResetPasswordResponse{}, errors.New("token không hợp lệ")
+			return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetTokenNotFound)
 		}
 		return dto.ResetPasswordResponse{}, err
 	}
 
 	if resetToken.IsExpired() {
-		return dto.ResetPasswordResponse{}, errors.New("token đã hết hạn")
+		return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetTokenExpired)
 	}
 
 	if resetToken.IsUsed() {
-		return dto.ResetPasswordResponse{}, errors.New("token đã được sử dụng")
+		return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetTokenUsed)
 	}
 
 	if err := s.validation.ValidatePassword(input.NewPassword); err != nil {
 		return dto.ResetPasswordResponse{}, err
+	}
+
+	minLen := s.getMinPasswordLength(ctx)
+	if len(input.NewPassword) < minLen {
+		return dto.ResetPasswordResponse{}, errorsapp.Newf(errorsapp.ErrCodeResetPasswordShort, map[string]any{"min": minLen})
+	}
+	if len(input.NewPassword) > 50 {
+		return dto.ResetPasswordResponse{}, errorsapp.New(errorsapp.ErrCodeResetPasswordLong)
 	}
 
 	hashedPassword, err := utils.HashPassword(input.NewPassword)
@@ -141,9 +180,12 @@ func (s *PasswordResetService) ResetPassword(ctx context.Context, input dto.Rese
 	}, nil
 }
 
-// Helper: Tạo random token
-func (s *PasswordResetService) generateResetToken() string {
+// Helper: Tạo random token (raw dùng cho link email, hashed lưu DB)
+func (s *PasswordResetService) generateResetToken() (raw string, hashed string) {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	raw = hex.EncodeToString(bytes)
+	sum := sha256.Sum256([]byte(raw))
+	hashed = hex.EncodeToString(sum[:])
+	return
 }

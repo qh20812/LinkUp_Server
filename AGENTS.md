@@ -1,6 +1,6 @@
 # LinkUp Server — AGENTS.md
 
-> `.gitignore`d. Local-only. No CI.
+> `.gitignore`d. CI/CD on push to `main` (see root `AGENTS.md`).
 
 ## Build & run
 
@@ -89,7 +89,7 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 
 ## WebSocket
 
-**Two Hub types (`ws.Hub`, `groupws.Hub`), three Hub instances, four WS endpoints:**
+**Two Hub types (`ws.Hub`, `groupws.Hub`), three Hub instances, five WS endpoints:**
 
 | Endpoint | Hub type | Instance | Service | Auth | Purpose |
 |---|---|---|---|---|---|
@@ -97,6 +97,7 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 | `GET /api/chats/ws` | `ws.Hub` | `chatHub` | `ChatService` set → processes chat events | `AuthMiddleware` (Bearer) | Encrypted direct/group chat |
 | `GET /api/calls/ws` | `ws.Hub` | `hub` (shared) | `callService` set, `service=nil` → processes call events | `AuthMiddleware` (Bearer) | WebRTC signaling |
 | `GET /api/group-chats/ws` | `groupws.Hub` | `groupHub` | `GroupMessageService` + `GroupChatService` | `?token=` access JWT | Group chat real-time (messages, members, admin) |
+| `GET /api/group-calls/ws` | `groupws.Hub` | `groupHub` (shared) | Group call events | `?token=` access JWT | Group call signaling |
 
 - **Import cycle avoided**: `services` imports `ws`; `ws/chat.service.go` and `ws/call.service.go` define interfaces implemented in `services/`.
 - **Chat WS events** (`ws.Hub` → `chatHub`): `chat:join`, `message:send`, `typing:start/stop`, `message:delete`, `message:search`.

@@ -100,3 +100,48 @@ type CommunityTransferOwnershipInput struct {
 	TargetUserID string `json:"target_user_id" binding:"required"`
 	KeepAdmin    bool   `json:"keep_admin"`
 }
+
+// UpdateCommunityInput là input cho tính năng cập nhật thông tin cộng đồng.
+type UpdateCommunityInput struct {
+	Name        string  `json:"name" binding:"omitempty,min=3,max=100"`
+	Description *string `json:"description" binding:"omitempty,max=500"`
+	Privacy     *string `json:"privacy" binding:"omitempty,oneof=public invitation_only"`
+	AutoApprove *bool   `json:"auto_approve" binding:"omitempty"`
+}
+
+// ── User-facing Community List/Detail ──
+
+type CommunityListItem struct {
+	ID          string    `json:"id"`
+	CreatorID   string    `json:"-"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	AvatarURI   string    `json:"avatar_uri"`
+	Privacy     string    `json:"privacy"`
+	MemberCount int       `json:"member_count"`
+	IsCreator   bool      `json:"is_creator"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CommunityListResponse struct {
+	Communities []CommunityListItem `json:"communities"`
+	Total       int64               `json:"total"`
+	Page        int                 `json:"page"`
+	PageSize    int                 `json:"page_size"`
+}
+
+type CommunityDetailResponse struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	AvatarURI        string    `json:"avatar_uri"`
+	BackgroundURI    string    `json:"background_uri"`
+	CreatorID        string    `json:"creator_id"`
+	CreatorName      string    `json:"creator_name"`
+	Privacy          string    `json:"privacy"`
+	AutoApprove      bool      `json:"auto_approve"`
+	MemberCount      int       `json:"member_count"`
+	MembershipStatus string    `json:"membership_status"`
+	UserMemberRole   string    `json:"user_member_role,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}

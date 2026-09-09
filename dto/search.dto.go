@@ -27,9 +27,18 @@ type HashtagSearchResult struct {
 	PostCount int64  `json:"post_count"`
 }
 
+type CommunitySearchResult struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	AvatarURI   string `json:"avatar_uri"`
+	MemberCount int    `json:"member_count"`
+	Privacy     string `json:"privacy"`
+}
+
 type SearchResponse struct {
-	Users    []UserSearchResult    `json:"users,omitempty"`
-	Posts    []PostSearchResult    `json:"posts,omitempty"`
-	Hashtags []HashtagSearchResult `json:"hashtags,omitempty"`
-	Message  string                `json:"message,omitempty"`
+	Users       []UserSearchResult       `json:"users,omitempty"`
+	Posts       []PostSearchResult       `json:"posts,omitempty"`
+	Hashtags    []HashtagSearchResult    `json:"hashtags,omitempty"`
+	Communities []CommunitySearchResult  `json:"communities,omitempty"`
+	Message     string                   `json:"message,omitempty"`
 }

@@ -20,12 +20,12 @@ func TestValidateCreateCommunity(t *testing.T) {
 	}{
 		{"valid minimal", "Go Developers", "", "", ""},
 		{"valid full", "Cloud Architects", "A community for cloud architecture", "https://example.com/avatar.png", ""},
-		{"empty name", "", "Some description", "", "tên cộng đồng không được để trống"},
-		{"name too short", "AB", "Some description", "", "tên cộng đồng phải có ít nhất 3 ký tự"},
-		{"name too long", string(make([]rune, 101)), "Some description", "", "tên cộng đồng không được vượt quá 100 ký tự"},
-		{"description too long", "Valid Name", string(make([]rune, 501)), "", "mô tả cộng đồng không được vượt quá 500 ký tự"},
-		{"invalid avatar", "Valid Name", "", "not-a-url", "avatar URI không hợp lệ"},
-		{"avatar without scheme", "Valid Name", "", "example.com/avatar.png", "avatar URI không hợp lệ"},
+		{"empty name", "", "Some description", "", "Tên cộng đồng không được để trống"},
+		{"name too short", "AB", "Some description", "", "Tên cộng đồng phải có ít nhất 3 ký tự"},
+		{"name too long", string(make([]rune, 101)), "Some description", "", "Tên cộng đồng không được vượt quá 100 ký tự"},
+		{"description too long", "Valid Name", string(make([]rune, 501)), "", "Mô tả cộng đồng không được vượt quá 500 ký tự"},
+		{"invalid avatar", "Valid Name", "", "not-a-url", "Avatar URI không hợp lệ"},
+		{"avatar without scheme", "Valid Name", "", "example.com/avatar.png", "Avatar URI không hợp lệ"},
 	}
 
 	for _, tt := range tests {
@@ -56,7 +56,7 @@ func TestValidateName_EdgeCases(t *testing.T) {
 	}{
 		{"exactly 3 chars", "ABC", ""},
 		{"exactly 100 chars", string(make([]rune, 100)), ""},
-		{"whitespace only", "   ", "tên cộng đồng không được để trống"},
+		{"whitespace only", "   ", "Tên cộng đồng không được để trống"},
 		{"unicode name", "Cộng Đồng Việt Nam", ""},
 	}
 
@@ -88,7 +88,7 @@ func TestValidateDescription_Boundaries(t *testing.T) {
 	}{
 		{"empty", "", ""},
 		{"exactly 500 chars", string(make([]rune, 500)), ""},
-		{"501 chars", string(make([]rune, 501)), "mô tả cộng đồng không được vượt quá 500 ký tự"},
+		{"501 chars", string(make([]rune, 501)), "Mô tả cộng đồng không được vượt quá 500 ký tự"},
 	}
 
 	for _, tt := range tests {
@@ -118,10 +118,10 @@ func TestValidateInviteCode(t *testing.T) {
 		code    *models.CommunityInviteCode
 		wantErr string
 	}{
-		{"nil code", nil, "mã mời không tồn tại"},
-		{"inactive", &models.CommunityInviteCode{IsActive: false}, "mã mời đã bị vô hiệu hóa"},
-		{"expired", &models.CommunityInviteCode{IsActive: true, ExpiresAt: ptrTime(now.Add(-1 * time.Hour))}, "mã mời đã hết hạn"},
-		{"max uses reached", &models.CommunityInviteCode{IsActive: true, MaxUses: 5, UsedCount: 5}, "mã mời đã đạt số lần sử dụng tối đa"},
+		{"nil code", nil, "Mã mời không tồn tại"},
+		{"inactive", &models.CommunityInviteCode{IsActive: false}, "Mã mời đã bị vô hiệu hóa"},
+		{"expired", &models.CommunityInviteCode{IsActive: true, ExpiresAt: ptrTime(now.Add(-1 * time.Hour))}, "Mã mời đã hết hạn"},
+		{"max uses reached", &models.CommunityInviteCode{IsActive: true, MaxUses: 5, UsedCount: 5}, "Mã mời đã đạt số lần sử dụng tối đa"},
 		{"under max uses", &models.CommunityInviteCode{IsActive: true, MaxUses: 5, UsedCount: 3}, ""},
 		{"unlimited uses", &models.CommunityInviteCode{IsActive: true, MaxUses: 0, UsedCount: 100}, ""},
 		{"not expired yet", &models.CommunityInviteCode{IsActive: true, ExpiresAt: ptrTime(now.Add(1 * time.Hour))}, ""},
@@ -161,7 +161,7 @@ func TestValidateAvatarURI_ValidURLs(t *testing.T) {
 		{"empty", "", ""},
 		{"https", "https://res.cloudinary.com/demo/image/upload/v1/avatar.jpg", ""},
 		{"http", "http://example.com/avatar.png", ""},
-		{"no scheme", "ftp://example.com/avatar.png", "avatar URI không hợp lệ"},
+		{"no scheme", "ftp://example.com/avatar.png", "Avatar URI không hợp lệ"},
 	}
 
 	for _, tt := range tests {

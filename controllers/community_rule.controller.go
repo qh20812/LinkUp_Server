@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/services"
 	"net/http"
@@ -19,7 +20,7 @@ func NewCommunityRuleController(ruleService *services.CommunityRuleService) *Com
 func (ctrl *CommunityRuleController) CreateRule(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	uid := userID.(string)
@@ -28,13 +29,13 @@ func (ctrl *CommunityRuleController) CreateRule(c *gin.Context) {
 
 	var input dto.CreateCommunityRuleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ hoặc thiếu trường bắt buộc"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	rule, err := ctrl.ruleService.CreateRule(c.Request.Context(), uid, communityID, input.Category, input.Title, input.Content, &input.Position)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -47,7 +48,7 @@ func (ctrl *CommunityRuleController) CreateRule(c *gin.Context) {
 func (ctrl *CommunityRuleController) UpdateRule(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	uid := userID.(string)
@@ -56,13 +57,13 @@ func (ctrl *CommunityRuleController) UpdateRule(c *gin.Context) {
 
 	var input dto.UpdateCommunityRuleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
 	rule, err := ctrl.ruleService.UpdateRule(c.Request.Context(), uid, ruleID, input.Title, input.Content, &input.Category, input.Position)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -75,7 +76,7 @@ func (ctrl *CommunityRuleController) UpdateRule(c *gin.Context) {
 func (ctrl *CommunityRuleController) DeleteRule(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Không tìm thấy thông tin chứng thực người dùng"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
 		return
 	}
 	uid := userID.(string)
@@ -83,7 +84,7 @@ func (ctrl *CommunityRuleController) DeleteRule(c *gin.Context) {
 	ruleID := c.Param("ruleID")
 
 	if err := ctrl.ruleService.DeleteRule(c.Request.Context(), uid, ruleID); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -95,7 +96,7 @@ func (ctrl *CommunityRuleController) GetRules(c *gin.Context) {
 
 	rules, err := ctrl.ruleService.GetRulesByCommunity(c.Request.Context(), communityID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 

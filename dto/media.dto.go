@@ -5,6 +5,7 @@ type UploadMediaResponse struct {
 	FileURI          string  `json:"file_uri"`
 	FileType         string  `json:"file_type"`
 	FileSize         float64 `json:"file_size"`
+	DurationSeconds  int     `json:"duration_seconds"`
 	Status           string  `json:"status"`
 	AvailableStorage float64 `json:"available_storage_bytes"`
 }

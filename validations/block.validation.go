@@ -1,13 +1,8 @@
 package validations
 
 import (
-	"errors"
+	errorsapp "linkup/errors"
 	"strings"
-)
-
-var (
-	ErrTargetUserRequired = errors.New("target_user_id là bắt buộc")
-	ErrSelfBlock          = errors.New("không thể chặn chính mình")
 )
 
 type BlockValidation struct{}
@@ -18,10 +13,10 @@ func NewBlockValidation() *BlockValidation {
 
 func (v *BlockValidation) ValidateToggleBlock(userID, targetUserID string) error {
 	if strings.TrimSpace(targetUserID) == "" {
-		return ErrTargetUserRequired
+		return errorsapp.New(errorsapp.ErrCodeBlockTargetRequired)
 	}
 	if userID == targetUserID {
-		return ErrSelfBlock
+		return errorsapp.New(errorsapp.ErrCodeBlockSelf)
 	}
 	return nil
 }

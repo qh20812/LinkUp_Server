@@ -8,10 +8,17 @@ type Message struct {
 	SenderID           string     `json:"sender_id" db:"sender_id"`
 	Content            string     `json:"content" db:"content"`
 	MediaID            *string    `json:"media_id,omitempty" db:"media_id"`
+	MediaGroupID       *string    `json:"media_group_id,omitempty" db:"media_group_id"`
 	EmojiID            *string    `json:"emoji_id,omitempty" db:"emoji_id"`
 	ReplyToMessageID   *string    `json:"reply_to_message_id,omitempty" db:"reply_to_message_id"`
+	SharedPostID       *string    `json:"shared_post_id,omitempty" db:"shared_post_id"`
+	ForwardedFrom      *string    `json:"forwarded_from,omitempty" db:"forwarded_from"`
+	ForwardsCount      int        `json:"forwards_count" db:"forwards_count"`
 	IsAnonymized       bool       `json:"is_anonymized" db:"is_anonymized"`
 	AnonymousName      *string    `json:"anonymous_name,omitempty" db:"anonymous_name"`
+	E2EVersion         int        `json:"e2e_version" db:"e2e_version" gorm:"column:e2e_version"`
+	Type               string     `json:"type" db:"type" gorm:"column:type;default:'text'"`
+	MessageCategory    string     `json:"message_category" db:"message_category" gorm:"column:message_category;default:'user'"`
 	DeletedForSender   bool       `json:"deleted_for_sender" db:"deleted_for_sender"`
 	DeletedForReceiver bool       `json:"deleted_for_receiver" db:"deleted_for_receiver"`
 	DeletedAt          *time.Time `json:"deleted_at,omitempty" db:"deleted_at"`
@@ -20,4 +27,8 @@ type Message struct {
 
 func NewMessage(chatID, senderID string, content string, mediaID, emojiID *string) Message {
 	return Message{ChatID: chatID, SenderID: senderID, Content: content, MediaID: mediaID, EmojiID: emojiID}
+}
+
+func NewGroupedMessage(chatID, senderID string, content string, mediaID, emojiID, mediaGroupID *string) Message {
+	return Message{ChatID: chatID, SenderID: senderID, Content: content, MediaID: mediaID, EmojiID: emojiID, MediaGroupID: mediaGroupID}
 }

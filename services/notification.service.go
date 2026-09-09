@@ -2,10 +2,10 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -13,25 +13,29 @@ import (
 )
 
 type NotificationService struct {
-	notifRepo   *repository.NotificationRepository
-	prefRepo    *repository.NotificationPreferenceRepository
-	profileRepo *repository.ProfileRepository
-	hub         *ws.Hub
+	notifRepo      *repository.NotificationRepository
+	prefRepo       *repository.NotificationPreferenceRepository
+	profileRepo    *repository.ProfileRepository
+	pushTokenRepo  *repository.PushTokenRepository
+	pushService    *PushService
+	hub            *ws.Hub
 }
 
-func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub) *NotificationService {
+func NewNotificationService(notifRepo *repository.NotificationRepository, prefRepo *repository.NotificationPreferenceRepository, profileRepo *repository.ProfileRepository, hub *ws.Hub, pushTokenRepo *repository.PushTokenRepository, pushService *PushService) *NotificationService {
 	return &NotificationService{
-		notifRepo:   notifRepo,
-		prefRepo:    prefRepo,
-		profileRepo: profileRepo,
-		hub:         hub,
+		notifRepo:     notifRepo,
+		prefRepo:      prefRepo,
+		profileRepo:   profileRepo,
+		pushTokenRepo: pushTokenRepo,
+		pushService:   pushService,
+		hub:           hub,
 	}
 }
 
 func (s *NotificationService) Create(ctx context.Context, receiverID string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string) (*models.Notification, error) {
 	pref, err := s.prefRepo.GetByUserID(ctx, receiverID)
 	if err != nil {
-		return nil, fmt.Errorf("create notification: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
 	}
 
 	if pref != nil && !isNotificationEnabled(pref, notifType) {
@@ -53,12 +57,22 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	}
 
 	if err := s.notifRepo.Create(ctx, notification); err != nil {
-		return nil, fmt.Errorf("create notification: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
 	}
 
+	senderMap := s.loadSenderProfiles(ctx, senderID)
+	resp := dto.ToNotificationResponseList([]models.Notification{*notification}, senderMap)[0]
 	s.hub.SendToUser(receiverID, ws.OutgoingMessage{
 		Type: "notification",
-		Data: notification,
+		Data: &resp,
+	})
+
+	// Send push notification
+	s.sendPush(ctx, receiverID, content, map[string]interface{}{
+		"type":           string(notifType),
+		"redirect_post_id":    redirectPostID,
+		"redirect_user_id":    redirectUserID,
+		"redirect_comment_id": redirectCommentID,
 	})
 
 	return notification, nil
@@ -100,13 +114,23 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 	}
 
 	if err := s.notifRepo.CreateBulk(ctx, notifications); err != nil {
-		return nil, fmt.Errorf("create notifications bulk: %w", err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationBulkFailed, err)
 	}
 
+	senderMap := s.loadSenderProfiles(ctx, senderID)
 	for i := range notifications {
+		resp := dto.ToNotificationResponseList([]models.Notification{notifications[i]}, senderMap)[0]
 		s.hub.SendToUser(notifications[i].ReceiverID, ws.OutgoingMessage{
 			Type: "notification",
-			Data: &notifications[i],
+			Data: &resp,
+		})
+
+		// Send push notification
+		s.sendPush(ctx, notifications[i].ReceiverID, content, map[string]interface{}{
+			"type":           string(notifType),
+			"redirect_post_id":    redirectPostID,
+			"redirect_user_id":    redirectUserID,
+			"redirect_comment_id": redirectCommentID,
 		})
 	}
 
@@ -179,10 +203,53 @@ func (s *NotificationService) UpdatePreferences(ctx context.Context, pref *model
 	return s.prefRepo.Upsert(ctx, pref)
 }
 
+func (s *NotificationService) UpsertPushToken(ctx context.Context, token *models.PushToken) error {
+	return s.pushTokenRepo.Upsert(ctx, token)
+}
+
+func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *string) map[string]dto.SenderProfile {
+	if senderID == nil {
+		return nil
+	}
+
+	profiles, err := s.profileRepo.FindByIDs(ctx, []string{*senderID})
+	if err != nil {
+		return nil
+	}
+
+	senderMap := make(map[string]dto.SenderProfile, len(profiles))
+	for _, p := range profiles {
+		name := p.DisplayName
+		if name == "" {
+			name = "User"
+		}
+		senderMap[p.UserID] = dto.SenderProfile{
+			DisplayName: name,
+			AvatarURI:   p.AvatarURI,
+		}
+	}
+	return senderMap
+}
+
+func (s *NotificationService) sendPush(ctx context.Context, receiverID, content string, data map[string]interface{}) {
+	if s.pushTokenRepo == nil || s.pushService == nil {
+		return
+	}
+	tokens, err := s.pushTokenRepo.FindByUserID(ctx, receiverID)
+	if err != nil || len(tokens) == 0 {
+		return
+	}
+	for _, t := range tokens {
+		go s.pushService.SendBatch(t.PushToken, "LinkUp", content, data)
+	}
+}
+
 func isNotificationEnabled(pref *models.NotificationPreference, notifType models.NotificationType) bool {
 	switch notifType {
 	case models.NotificationTypeLike:
 		return pref.LikeEnabled
+	case models.NotificationTypeStoryReact:
+		return pref.StoryReactEnabled
 	case models.NotificationTypeComment:
 		return pref.CommentEnabled
 	case models.NotificationTypeFollow:
@@ -191,6 +258,11 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 		return pref.MessageEnabled
 	case models.NotificationTypeFriendRequest, models.NotificationTypeFriendAccepted:
 		return pref.FriendRequestEnabled
+	case models.NotificationTypeShare:
+		return pref.ShareEnabled
+	case models.NotificationTypeMediaApproved, models.NotificationTypeMediaRejected,
+		models.NotificationTypeMediaFlagged:
+		return pref.MediaEnabled
 	case models.NotificationTypeCommunityJoinRequest, models.NotificationTypeCommunityJoinApproved,
 		models.NotificationTypeCommunityJoinRejected, models.NotificationTypeCommunityRoleChanged,
 		models.NotificationTypeCommunityMemberLeft, models.NotificationTypeCommunityMemberKicked,

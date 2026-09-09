@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"net/http"
 
@@ -18,13 +19,13 @@ func NewTagController(tagService *services.TagService) *TagController {
 func (ctrl *TagController) GetPostsByHashtag(c *gin.Context) {
 	tagName := c.Param("name")
 	if tagName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Vui lòng cung cấp tên hashtag cần tìm"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	postIDs, err := ctrl.tagService.GetPostIDsByHashtag(c.Request.Context(), tagName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Lỗi khi tìm kiếm bài viết: " + err.Error()})
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 

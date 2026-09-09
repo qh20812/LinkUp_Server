@@ -157,6 +157,8 @@ func Run(env config.Env) error {
 			content LONGTEXT,
 			views_count INT NOT NULL DEFAULT 0,
 			status VARCHAR(20) NOT NULL DEFAULT 'public',
+			is_pinned TINYINT(1) NOT NULL DEFAULT 0,
+			pinned_at DATETIME NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -220,6 +222,7 @@ func Run(env config.Env) error {
 			file_uri VARCHAR(512) NOT NULL,
 			file_type VARCHAR(50) NOT NULL DEFAULT '',
 			file_size DOUBLE NOT NULL DEFAULT 0,
+			duration_seconds INT NOT NULL DEFAULT 0,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
 			review_reason TEXT NULL,
 			created_at DATETIME NOT NULL,
@@ -229,23 +232,28 @@ func Run(env config.Env) error {
 			INDEX idx_media_post_id (post_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 7. Depends on media
+		// 7. Depends on users (ads không còn media_id — media chuyển sang ad_media)
 		`CREATE TABLE IF NOT EXISTS ads (
             id VARCHAR(36) PRIMARY KEY,
             partner_id VARCHAR(36) NOT NULL,
-            title VARCHAR(255) NOT NULL,
-            content TEXT,
-            media_id VARCHAR(36) NULL,
-            target_url VARCHAR(512) NOT NULL DEFAULT '',
-		status VARCHAR(20) NOT NULL DEFAULT 'public',
+            package_id VARCHAR(36) NULL,
+            title VARCHAR(100) NOT NULL,
+            content TEXT NOT NULL,
+            format VARCHAR(20) NOT NULL DEFAULT 'image',
+            target_url TEXT NOT NULL,
+		status VARCHAR(20) NOT NULL DEFAULT 'active',
             budget DOUBLE NOT NULL DEFAULT 0,
+            daily_budget DOUBLE NOT NULL DEFAULT 0,
+            total_spent DOUBLE NOT NULL DEFAULT 0,
+            cpm_price DOUBLE NOT NULL DEFAULT 0,
+            cpc_price DOUBLE NOT NULL DEFAULT 0,
+            max_impressions INT NOT NULL DEFAULT 0,
             started_at DATETIME NULL,
             expires_at DATETIME NULL,
             created_at DATETIME NOT NULL,
-            FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
             FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE CASCADE,
             INDEX idx_ads_partner_id (partner_id),
-            INDEX idx_ads_media_id (media_id),
+            INDEX idx_ads_package_id (package_id),
             INDEX idx_ads_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -381,7 +389,10 @@ func Run(env config.Env) error {
 			sender_id VARCHAR(36) NOT NULL,
 			content TEXT NOT NULL,
 			media_id VARCHAR(36) NULL,
+			media_group_id VARCHAR(36) NULL,
 			emoji_id VARCHAR(36) NULL,
+			forwarded_from VARCHAR(36) NULL,
+			forwards_count INT NOT NULL DEFAULT 0,
 			deleted_for_sender TINYINT(1) NOT NULL DEFAULT 0,
 			deleted_for_receiver TINYINT(1) NOT NULL DEFAULT 0,
 			deleted_at DATETIME NULL,
@@ -391,10 +402,38 @@ func Run(env config.Env) error {
 			FOREIGN KEY (media_id) REFERENCES media(id) ON DELETE SET NULL,
 			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE SET NULL,
 			INDEX idx_messages_chat_id (chat_id),
-			INDEX idx_messages_sender_id (sender_id)
+			INDEX idx_messages_sender_id (sender_id),
+			INDEX idx_messages_media_group_id (media_group_id),
+			INDEX idx_messages_forwarded_from (forwarded_from)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 18. Depends on users
+		// 18. Read receipts: watermark đọc từng thành viên trong chat
+		`CREATE TABLE IF NOT EXISTS chat_reads (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			last_read_at DATETIME NOT NULL,
+			last_message_id VARCHAR(36) NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, user_id),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 19. Message reactions: emoji reak của user trên tin nhắn
+		`CREATE TABLE IF NOT EXISTS message_reactions (
+			message_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			emoji_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (message_id, user_id),
+			FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE CASCADE,
+			INDEX idx_message_reactions_message (message_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 20. Depends on users
 		`CREATE TABLE IF NOT EXISTS stories (
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
@@ -407,7 +446,7 @@ func Run(env config.Env) error {
 			INDEX idx_stories_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 19. Depends on users
+		// 20. Depends on users
 		`CREATE TABLE IF NOT EXISTS bans (
 			id VARCHAR(36) PRIMARY KEY,
 			user_id VARCHAR(36) NOT NULL,
@@ -525,6 +564,9 @@ func Run(env config.Env) error {
 			follow_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			message_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			friend_request_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			story_react_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			share_enabled TINYINT(1) NOT NULL DEFAULT 1,
+			media_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -552,7 +594,20 @@ func Run(env config.Env) error {
 			INDEX idx_password_reset_tokens_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 29. Depends on users, posts
+		// 29. Depends on users
+		`CREATE TABLE IF NOT EXISTS email_verification_tokens (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			token VARCHAR(255) NOT NULL UNIQUE,
+			expires_at DATETIME NOT NULL,
+			used_at DATETIME NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_email_verification_tokens_token (token),
+			INDEX idx_email_verification_tokens_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 30. Depends on users, posts
 		`CREATE TABLE IF NOT EXISTS post_shares (
 			id VARCHAR(36) PRIMARY KEY,
 			post_id VARCHAR(36) NOT NULL,
@@ -560,10 +615,11 @@ func Run(env config.Env) error {
 			content TEXT NOT NULL,
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_post_shares_user_post (user_id, post_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 30. Chat_invite
+		// 31. Chat_invite
 		`CREATE TABLE IF NOT EXISTS chat_invitations (
 			id VARCHAR(36) PRIMARY KEY,
 			requester_id VARCHAR(36) NOT NULL,
@@ -577,9 +633,9 @@ func Run(env config.Env) error {
 			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 31. Message Security — moved to idempotent addColumnIfMissing below
+		// 32. Message Security — moved to idempotent addColumnIfMissing below
 
-		// 32. group_chat_settings
+		// 33. group_chat_settings
 		`CREATE TABLE IF NOT EXISTS group_chat_settings (
 			chat_id VARCHAR(64) PRIMARY KEY,
 			allow_member_add BOOLEAN NOT NULL DEFAULT TRUE,
@@ -588,7 +644,7 @@ func Run(env config.Env) error {
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 33. group_chat_member_settings
+		// 34. group_chat_member_settings
 		`CREATE TABLE IF NOT EXISTS group_chat_member_settings (
 			chat_id VARCHAR(36) NOT NULL,
 			user_id VARCHAR(36) NOT NULL,
@@ -599,7 +655,7 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 34. group_chat_mutes
+		// 35. group_chat_mutes
 		`CREATE TABLE IF NOT EXISTS group_chat_mutes (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -611,7 +667,7 @@ func Run(env config.Env) error {
 			INDEX idx_group_chat_mutes_chat_user (chat_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 35. Depends on communities - Community contribution policy
+		// 36. Depends on communities - Community contribution policy
 		`CREATE TABLE IF NOT EXISTS community_policies (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL UNIQUE,
@@ -629,7 +685,7 @@ func Run(env config.Env) error {
 			INDEX idx_community_policies_community (community_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 36. Depends on communities, users - Member contribution tracking
+		// 37. Depends on communities, users - Member contribution tracking
 		`CREATE TABLE IF NOT EXISTS member_contributions (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -650,8 +706,8 @@ func Run(env config.Env) error {
 			INDEX idx_member_contributions_score (community_id, contribution_score DESC)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 37. Depends on communities, users - Community challenges
-		// 36b. Depends on communities, users — Invite codes
+		// 38. Depends on communities, users - Community challenges
+		// 37b. Depends on communities, users — Invite codes
 		`CREATE TABLE IF NOT EXISTS community_invite_codes (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -668,7 +724,7 @@ func Run(env config.Env) error {
 			INDEX idx_invite_codes_community (community_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 36c. Depends on communities, users — Direct invitations
+		// 37c. Depends on communities, users — Direct invitations
 		`CREATE TABLE IF NOT EXISTS community_invitations (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -684,7 +740,7 @@ func Run(env config.Env) error {
 			INDEX idx_invitations_invitee (invitee_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 37. Depends on community_policies, users — Community challenges
+		// 38. Depends on community_policies, users — Community challenges
 		`CREATE TABLE IF NOT EXISTS community_challenges (
 			id VARCHAR(36) PRIMARY KEY,
 			community_id VARCHAR(36) NOT NULL,
@@ -704,7 +760,7 @@ func Run(env config.Env) error {
 			INDEX idx_community_challenges_status (status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 38. Depends on community_challenges, users - Challenge participants
+		// 39. Depends on community_challenges, users - Challenge participants
 		`CREATE TABLE IF NOT EXISTS challenge_participants (
 			id VARCHAR(36) PRIMARY KEY,
 			challenge_id VARCHAR(36) NOT NULL,
@@ -717,7 +773,7 @@ func Run(env config.Env) error {
 			UNIQUE INDEX idx_challenge_participants_pair (challenge_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 39. Soft-delete for call history (user-level hide, row stays for the other party)
+		// 40. Soft-delete for call history (user-level hide, row stays for the other party)
 		`CREATE TABLE IF NOT EXISTS call_hidden (
 			call_id VARCHAR(36) NOT NULL,
 			user_id VARCHAR(36) NOT NULL,
@@ -726,7 +782,7 @@ func Run(env config.Env) error {
 			FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-		// 39. group_chat_member_request:
+		// 41. group_chat_member_request:
 		`CREATE TABLE IF NOT EXISTS group_chat_member_requests (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -744,15 +800,15 @@ func Run(env config.Env) error {
 			FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
-		// 40. Add 2 columns to messages
+		// 42. Add 2 columns to messages
 		`ALTER TABLE messages
 		ADD COLUMN is_anonymized TINYINT(1) NOT NULL DEFAULT 0,
 		ADD COLUMN anonymous_name VARCHAR(255) NULL`,
 
-		// 41. Reply Messges
+		// 43. Reply Messges
 		`ALTER TABLE messages ADD COLUMN reply_to_message_id VARCHAR(36) NULL`,
 
-		// 35. Depends on chats, users — group chat bans
+		// 44. Depends on chats, users — group chat bans
 		`CREATE TABLE IF NOT EXISTS group_chat_bans (
 			id VARCHAR(36) PRIMARY KEY,
 			chat_id VARCHAR(36) NOT NULL,
@@ -763,6 +819,75 @@ func Run(env config.Env) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (banned_by) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_group_chat_bans_chat_user (chat_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 45. system_configs — cài đặt hệ thống (không dependency)
+		`CREATE TABLE IF NOT EXISTS system_configs (
+			` + "`key`" + ` VARCHAR(100) PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 46. user_settings — cài đặt quyền riêng tư của user (1-1 với users)
+		`CREATE TABLE IF NOT EXISTS user_settings (
+			user_id VARCHAR(36) PRIMARY KEY,
+			discoverable_in_search TINYINT(1) NOT NULL DEFAULT 1,
+			allow_stranger_messages TINYINT(1) NOT NULL DEFAULT 0,
+			theme VARCHAR(10) NOT NULL DEFAULT 'light',
+			language VARCHAR(5) NOT NULL DEFAULT 'vi',
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 47. user_sessions — phiên đăng nhập (id = JWT jti)
+		`CREATE TABLE IF NOT EXISTS user_sessions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			device_name VARCHAR(255) NOT NULL DEFAULT '',
+			ip_address VARCHAR(45) NOT NULL DEFAULT '',
+			user_agent VARCHAR(512) NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			expires_at DATETIME NOT NULL,
+			last_active_at DATETIME NOT NULL,
+			revoked_at DATETIME NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_user_sessions_user_id (user_id),
+			INDEX idx_user_sessions_expires_at (expires_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 48. user_e2e_keys — public key ECDH của user (private key chỉ ở client)
+		`CREATE TABLE IF NOT EXISTS user_e2e_keys (
+			user_id VARCHAR(36) PRIMARY KEY,
+			public_key TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 49. chat_e2e_keys — khóa AES của chat được bọc riêng cho từng user
+		`CREATE TABLE IF NOT EXISTS chat_e2e_keys (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			wrapped_key TEXT NOT NULL,
+			nonce VARCHAR(64) NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, user_id),
+			FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_chat_e2e_keys_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// comment_reactions — depends on users, comments, emojis
+		`CREATE TABLE IF NOT EXISTS comment_reactions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			comment_id VARCHAR(36) NOT NULL,
+			emoji_id VARCHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			UNIQUE INDEX idx_comment_reaction (user_id, comment_id),
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE,
+			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE CASCADE,
+			INDEX idx_comment_reactions_comment_id (comment_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
@@ -790,9 +915,30 @@ func Run(env config.Env) error {
 		return fmt.Errorf("schema: add fk_posts_community: %w", err)
 	}
 
+	// Bookmark cursor metadata columns on posts (read-only in the Post model via gorm:"->").
+	// Populated by the saved-posts listing (FetchSaved JOINs bookmarks); harmless NULLs elsewhere.
+	if err := addColumnIfMissing(database, "posts", "bookmark_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.bookmark_id: %w", err)
+	}
+	if err := addColumnIfMissing(database, "posts", "saved_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.saved_at: %w", err)
+	}
+
 	// 31. Message encryption column
 	if err := addColumnIfMissing(database, "messages", "is_encrypted", "BOOLEAN DEFAULT true"); err != nil {
 		return fmt.Errorf("schema: add is_encrypted: %w", err)
+	}
+	// 31b. E2E version column (0 = legacy server-encrypted, 1 = end-to-end encrypted)
+	if err := addColumnIfMissing(database, "messages", "e2e_version", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add e2e_version: %w", err)
+	}
+	// 31c. Message type column (text, shared_post, member_invited, etc.)
+	if err := addColumnIfMissing(database, "messages", "type", "VARCHAR(30) NOT NULL DEFAULT 'text'"); err != nil {
+		return fmt.Errorf("schema: add messages.type: %w", err)
+	}
+	// 31d. Message category column (user, system, call)
+	if err := addColumnIfMissing(database, "messages", "message_category", "VARCHAR(20) NOT NULL DEFAULT 'user'"); err != nil {
+		return fmt.Errorf("schema: add messages.message_category: %w", err)
 	}
 
 	// Phase 1: Admin Manage Groups/Communities — idempotent column additions
@@ -858,6 +1004,20 @@ func Run(env config.Env) error {
 	if err := addColumnIfMissing(database, "notification_preferences", "voice_call_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
 		return fmt.Errorf("schema: add notification_preferences.voice_call_enabled: %w", err)
 	}
+	if err := addColumnIfMissing(database, "notification_preferences", "story_react_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.story_react_enabled: %w", err)
+	}
+	if err := addColumnIfMissing(database, "notification_preferences", "share_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.share_enabled: %w", err)
+	}
+	if err := addColumnIfMissing(database, "notification_preferences", "media_enabled", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add notification_preferences.media_enabled: %w", err)
+	}
+
+	// Phase 2b: duration_seconds trên media table cho tin nhắn thoại (voice notes)
+	if err := addColumnIfMissing(database, "media", "duration_seconds", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add media.duration_seconds: %w", err)
+	}
 
 	// Phase 3: indexes for admin ListPosts performance (correlated subqueries in ListPosts)
 	if err := addIndexIfMissing(database, "post_reactions", "idx_post_reactions_post_id",
@@ -867,6 +1027,10 @@ func Run(env config.Env) error {
 	if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_post_id",
 		"INDEX idx_post_shares_post_id (post_id)"); err != nil {
 		return fmt.Errorf("schema: add idx_post_shares_post_id: %w", err)
+	}
+	if err := addIndexIfMissing(database, "post_shares", "idx_post_shares_user_post",
+		"UNIQUE INDEX idx_post_shares_user_post (user_id, post_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_post_shares_user_post: %w", err)
 	}
 
 	// Phase 4: comment moderation columns (status + review_reason for report handling)
@@ -882,6 +1046,82 @@ func Run(env config.Env) error {
 	if err := addIndexIfMissing(database, "comments", "idx_comments_status",
 		"INDEX idx_comments_status (status)"); err != nil {
 		return fmt.Errorf("schema: add idx_comments_status: %w", err)
+	}
+
+	// Comment likes count for relevance sorting
+	if err := addColumnIfMissing(database, "comments", "likes_count", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add comments.likes_count: %w", err)
+	}
+	if err := addIndexIfMissing(database, "comments", "idx_comments_likes_count",
+		"INDEX idx_comments_likes_count (likes_count)"); err != nil {
+		return fmt.Errorf("schema: add idx_comments_likes_count: %w", err)
+	}
+
+	// Login attempt tracking columns (max_login_attempts lockout)
+	if err := addColumnIfMissing(database, "users", "login_attempts", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add users.login_attempts: %w", err)
+	}
+	if err := addColumnIfMissing(database, "users", "locked_until", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.locked_until: %w", err)
+	}
+
+	// Email verification column
+	if err := addColumnIfMissing(database, "users", "email_verified_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.email_verified_at: %w", err)
+	}
+
+	// Google OAuth column
+	if err := addColumnIfMissing(database, "users", "google_id", "VARCHAR(255) NULL"); err != nil {
+		return fmt.Errorf("schema: add users.google_id: %w", err)
+	}
+	if err := addIndexIfMissing(database, "users", "idx_users_google_id",
+		"UNIQUE INDEX idx_users_google_id (google_id)"); err != nil {
+		return fmt.Errorf("schema: add users.google_id index: %w", err)
+	}
+	// Self deactivation column (user deactivates own account; reactivates on login)
+	if err := addColumnIfMissing(database, "users", "self_deactivated_at", "DATETIME NULL"); err != nil {
+		return fmt.Errorf("schema: add users.self_deactivated_at: %w", err)
+	}
+
+	// Share-to-chat column on messages
+	if err := addColumnIfMissing(database, "messages", "shared_post_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add messages.shared_post_id: %w", err)
+	}
+	if err := addForeignKeyIfMissing(database, "messages", "fk_messages_shared_post",
+		"CONSTRAINT fk_messages_shared_post FOREIGN KEY (shared_post_id) REFERENCES posts(id) ON DELETE SET NULL"); err != nil {
+		return fmt.Errorf("schema: add fk_messages_shared_post: %w", err)
+	}
+
+	// Repost / Share-to-timeline columns on posts
+	if err := addColumnIfMissing(database, "posts", "shared_from_post_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.shared_from_post_id: %w", err)
+	}
+	if err := addColumnIfMissing(database, "posts", "share_content", "TEXT NULL"); err != nil {
+		return fmt.Errorf("schema: add posts.share_content: %w", err)
+	}
+	if err := addIndexIfMissing(database, "posts", "idx_posts_shared_from",
+		"INDEX idx_posts_shared_from (shared_from_post_id)"); err != nil {
+		return fmt.Errorf("schema: add idx_posts_shared_from: %w", err)
+	}
+	if err := addForeignKeyIfMissing(database, "posts", "fk_posts_shared_from",
+		"CONSTRAINT fk_posts_shared_from FOREIGN KEY (shared_from_post_id) REFERENCES posts(id) ON DELETE CASCADE"); err != nil {
+		return fmt.Errorf("schema: add fk_posts_shared_from: %w", err)
+	}
+
+	// ===== PUSH TOKENS TABLE =====
+	pushTokensSchema := `CREATE TABLE IF NOT EXISTS push_tokens (
+		id VARCHAR(36) PRIMARY KEY,
+		user_id VARCHAR(36) NOT NULL,
+		push_token VARCHAR(255) NOT NULL,
+		platform VARCHAR(20) NOT NULL DEFAULT 'expo',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		UNIQUE INDEX idx_push_tokens_token (push_token),
+		INDEX idx_push_tokens_user (user_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+	if _, err := database.Exec(pushTokensSchema); err != nil {
+		return fmt.Errorf("schema: create push_tokens: %w", err)
 	}
 
 	return nil

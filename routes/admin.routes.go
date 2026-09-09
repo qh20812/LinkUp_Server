@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminController, env config.Env, db *gorm.DB) {
+func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminController, adminSettingsController *controllers.AdminSettingsController, env config.Env, db *gorm.DB) {
 	adminGroup := router.Group("/api/admin")
 	adminGroup.Use(middlewares.AuthMiddleware(env, db))
 	adminGroup.Use(middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin))
@@ -66,4 +66,8 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.GET("/ads", adminController.ListAds)
 	adminGroup.PATCH("/ads/:id/status", adminController.UpdateAdStatus)
 	adminGroup.DELETE("/ads/:id", adminController.DeleteAd)
+
+	// ── Admin Settings (Super Admin only — checked in service) ──
+	adminGroup.GET("/settings", adminSettingsController.GetSettings)
+	adminGroup.PUT("/settings", adminSettingsController.UpdateSettings)
 }

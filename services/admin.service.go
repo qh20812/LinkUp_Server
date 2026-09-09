@@ -2,9 +2,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
@@ -223,7 +223,7 @@ func (s *AdminService) ListUsers(ctx context.Context, userID string, input dto.A
 		switch statusFilter {
 		case string(models.UserStatusActive), string(models.UserStatusBanned), string(models.UserStatusSuspended):
 		default:
-			return dto.AdminUserListResponse{}, fmt.Errorf("trạng thái không hợp lệ")
+			return dto.AdminUserListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}
 	}
 
@@ -256,7 +256,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 		return err
 	}
 	if !isSuperAdmin {
-		return fmt.Errorf("chỉ superadmin mới có quyền")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
 	}
 
 	targetUser, err := s.authRepo.FindByID(ctx, targetUserID)
@@ -269,7 +269,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 		return err
 	}
 	if isTargetSuperAdmin {
-		return fmt.Errorf("Không thể chỉnh sửa trạng thái của superadmin")
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
 
 	statusValue := strings.TrimSpace(strings.ToLower(input.Status))
@@ -282,7 +282,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	case string(models.UserStatusSuspended):
 		status = models.UserStatusSuspended
 	default:
-		return fmt.Errorf("trạng thái không hợp lệ")
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
 
 	if targetUser.Status == status {
@@ -294,8 +294,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	}
 
 	statusMsg := fmt.Sprintf("Trạng thái tài khoản của bạn đã được cập nhật thành: %s", status)
-	senderID := superAdminID
-	_, _ = s.notificationService.Create(ctx, targetUserID, &senderID, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
+	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
 
 	return nil
 }
@@ -315,7 +314,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 		return dto.AdminBanUserResponse{}, err
 	}
 	if isTargetSuperAdmin {
-		return dto.AdminBanUserResponse{}, fmt.Errorf("không thể ban superadmin")
+		return dto.AdminBanUserResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
 	}
 
 	isTargetAdmin, err := s.authRepo.HasRole(ctx, targetUserID, models.RoleAdmin)
@@ -323,11 +322,11 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 		return dto.AdminBanUserResponse{}, err
 	}
 	if isTargetAdmin {
-		return dto.AdminBanUserResponse{}, fmt.Errorf("không thể ban admin")
+		return dto.AdminBanUserResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
 	}
 
 	if targetUser.Status == models.UserStatusBanned {
-		return dto.AdminBanUserResponse{}, fmt.Errorf("người dùng đã bị ban")
+		return dto.AdminBanUserResponse{}, errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	var expiresAt *time.Time
@@ -336,7 +335,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if durationKey != "permanent" {
 		duration, ok := banDurationMap[durationKey]
 		if !ok {
-			return dto.AdminBanUserResponse{}, fmt.Errorf("thời hạn ban không hợp lệ")
+			return dto.AdminBanUserResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidBanDuration)
 		}
 		t := time.Now().UTC().Add(duration)
 		expiresAt = &t
@@ -360,8 +359,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if expiresAt != nil {
 		banMsg += fmt.Sprintf(". Thời hạn: %s", expiresAt.Format("02/01/2006 15:04"))
 	}
-	senderID := superAdminID
-	_, _ = s.notificationService.Create(ctx, targetUserID, &senderID, models.NotificationTypeMessage, banMsg, nil, &targetUserID, nil)
+	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, banMsg, nil, &targetUserID, nil)
 
 	return dto.AdminBanUserResponse{
 		Message: "ban user thành công",
@@ -371,7 +369,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 
 func (s *AdminService) ListPosts(ctx context.Context, adminID string, input dto.AdminPostFilterInput) (dto.AdminPostListResponse, error) {
 	if adminID == "" {
-		return dto.AdminPostListResponse{}, errors.New("không có quyền truy cập")
+		return dto.AdminPostListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNoAccess)
 	}
 
 	if err := s.ensureAdmin(ctx, adminID); err != nil {
@@ -399,7 +397,7 @@ func (s *AdminService) ListPosts(ctx context.Context, adminID string, input dto.
 			string(models.PostStatusFriend),
 			string(models.PostStatusDeleted):
 		default:
-			return dto.AdminPostListResponse{}, fmt.Errorf("trạng thái bài viết không hợp lệ")
+			return dto.AdminPostListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}
 	}
 
@@ -504,11 +502,11 @@ func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string
 
 	post, err := s.postRepo.FindByID(ctx, postID)
 	if err != nil {
-		return fmt.Errorf("bài viết không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	if post.Status == models.PostStatusHidden {
-		return errors.New("bài viết đã ở trạng thái ẩn")
+		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetPost, postID, input.Reason)
@@ -523,12 +521,11 @@ func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string
 		return err
 	}
 
-	senderID := superAdminID
 	postIDPtr := postID
 	_, err = s.notificationService.Create(
 		ctx,
 		post.UserID,
-		&senderID,
+		nil,
 		models.NotificationTypeMessage,
 		"Bài viết của bạn đã bị ẩn vì: "+input.Reason,
 		&postIDPtr,
@@ -549,7 +546,7 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 
 	post, err := s.postRepo.FindByID(ctx, postID)
 	if err != nil {
-		return fmt.Errorf("bài viết không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	statusValue := strings.TrimSpace(strings.ToLower(input.Status))
@@ -561,7 +558,7 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 		string(models.PostStatusFriend),
 		string(models.PostStatusDeleted):
 	default:
-		return fmt.Errorf("trạng thái bài viết không hợp lệ")
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
 
 	newStatus := models.ParsePostStatus(statusValue)
@@ -587,12 +584,11 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 		return err
 	}
 
-	senderID := superAdminID
 	postIDPtr := postID
 	_, err = s.notificationService.Create(
 		ctx,
 		post.UserID,
-		&senderID,
+		nil,
 		models.NotificationTypeMessage,
 		fmt.Sprintf("Bài viết của bạn đã được cập nhật trạng thái thành %s", newStatus),
 		&postIDPtr,
@@ -608,7 +604,7 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 
 func (s *AdminService) ListComments(ctx context.Context, adminID string, input dto.AdminCommentFilterInput) (dto.AdminCommentListResponse, error) {
 	if adminID == "" {
-		return dto.AdminCommentListResponse{}, errors.New("không có quyền truy cập")
+		return dto.AdminCommentListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNoAccess)
 	}
 
 	if err := s.ensureAdmin(ctx, adminID); err != nil {
@@ -634,7 +630,7 @@ func (s *AdminService) ListComments(ctx context.Context, adminID string, input d
 			string(models.CommentStatusHidden),
 			string(models.CommentStatusDeleted):
 		default:
-			return dto.AdminCommentListResponse{}, fmt.Errorf("trạng thái bình luận không hợp lệ")
+			return dto.AdminCommentListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}
 	}
 
@@ -715,11 +711,11 @@ func (s *AdminService) HideComment(ctx context.Context, superAdminID, commentID 
 
 	comment, err := s.postRepo.FindCommentByID(ctx, commentID)
 	if err != nil {
-		return fmt.Errorf("bình luận không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	if comment.Status == models.CommentStatusHidden {
-		return errors.New("bình luận đã ở trạng thái ẩn")
+		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetComment, commentID, input.Reason)
@@ -734,13 +730,12 @@ func (s *AdminService) HideComment(ctx context.Context, superAdminID, commentID 
 		return err
 	}
 
-	senderID := superAdminID
 	postIDPtr := comment.PostID
 	commentIDPtr := commentID
 	_, err = s.notificationService.Create(
 		ctx,
 		comment.UserID,
-		&senderID,
+		nil,
 		models.NotificationTypeMessage,
 		"Bình luận của bạn đã bị ẩn vì: "+input.Reason,
 		&postIDPtr,
@@ -761,11 +756,11 @@ func (s *AdminService) RevealComment(ctx context.Context, superAdminID, commentI
 
 	comment, err := s.postRepo.FindCommentByID(ctx, commentID)
 	if err != nil {
-		return fmt.Errorf("bình luận không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	if comment.Status != models.CommentStatusHidden {
-		return errors.New("bình luận không ở trạng thái ẩn")
+		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionUpdate, models.ModerationTargetComment, commentID, "Hiện bình luận")
@@ -780,13 +775,12 @@ func (s *AdminService) RevealComment(ctx context.Context, superAdminID, commentI
 		return err
 	}
 
-	senderID := superAdminID
 	postIDPtr := comment.PostID
 	commentIDPtr := commentID
 	_, err = s.notificationService.Create(
 		ctx,
 		comment.UserID,
-		&senderID,
+		nil,
 		models.NotificationTypeMessage,
 		"Bình luận của bạn đã được hiện lại",
 		&postIDPtr,
@@ -924,16 +918,16 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	}
 
 	if isReportFinalStatus(report.Status) {
-		return errors.New("báo cáo đã được xử lý")
+		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	action := strings.TrimSpace(strings.ToLower(input.Action))
 	if action != "cancel" && action != "hide" && action != "ban" {
-		return errors.New("action không hợp lệ, chỉ chấp nhận cancel, hide hoặc ban")
+		return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 	}
 
 	if (action == "hide" || action == "ban") && strings.TrimSpace(input.Reason) == "" {
-		return errors.New("lý do là bắt buộc cho hành động hide hoặc ban")
+		return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
 	}
 
 	status := models.ReportStatusRejected
@@ -951,7 +945,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 				return fmt.Errorf("create moderation log: %w", err)
 			}
 		} else if report.TargetUserID != nil {
-			return errors.New("hide chỉ hỗ trợ với báo cáo bài viết; báo cáo người dùng cần logic xử lý khác")
+			return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 		} else if report.TargetCommentID != nil {
 			if _, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID); err != nil {
 				return fmt.Errorf("comment không tồn tại: %w", err)
@@ -972,13 +966,13 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 				return fmt.Errorf("create moderation log: %w", err)
 			}
 		} else {
-			return errors.New("loại báo cáo không được hỗ trợ")
+			return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 		}
 	}
 
 	if action == "ban" {
 		if report.TargetUserID == nil {
-			return errors.New("ban chỉ hỗ trợ cho báo cáo người dùng")
+			return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 		}
 
 		expiresAt, err := s.resolveBanExpiresAt(input.Duration)
@@ -1014,22 +1008,22 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	}
 
 	reporterMessage := fmt.Sprintf("Báo cáo %s đã được xử lý bằng hành động: %s.", report.ID, action)
-	_, _ = s.notificationService.Create(ctx, report.ReporterID, &superAdminID, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
+	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
 
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
 		if err == nil {
 			targetMessage := fmt.Sprintf("Bài viết của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
-			_, _ = s.notificationService.Create(ctx, post.UserID, &superAdminID, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
+			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
 		}
 	} else if report.TargetUserID != nil {
 		targetMessage := fmt.Sprintf("Tài khoản của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
-		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, &superAdminID, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
 		if err == nil {
 			targetMessage := fmt.Sprintf("Bình luận của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
-			_, _ = s.notificationService.Create(ctx, comment.UserID, &superAdminID, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
+			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
 		}
 	}
 
@@ -1037,7 +1031,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		_, _ = s.notificationService.Create(
 			ctx,
 			*report.TargetUserID,
-			&superAdminID,
+			nil,
 			models.NotificationTypeMessage,
 			"Tài khoản của bạn đã bị cấm vì vi phạm báo cáo.",
 			nil,
@@ -1129,7 +1123,7 @@ func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string,
 
 	media, err := s.mediaRepo.GetByID(ctx, mediaID)
 	if err != nil {
-		return fmt.Errorf("media không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	var newStatus models.MediaStatus
@@ -1143,12 +1137,12 @@ func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string,
 		newStatus = models.MediaStatusRejected
 		notificationMsg = "Ảnh/video của bạn đã bị admin từ chối: " + input.Reason
 	default:
-		return fmt.Errorf("hành động không hợp lệ: %s", input.Action)
+		return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 	}
 
 	allowed, ok := mediaReviewTransitions[media.Status]
 	if !ok {
-		return fmt.Errorf("media ở trạng thái %s không thể review", media.Status)
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
 	validTransition := false
 	for _, s := range allowed {
@@ -1158,7 +1152,7 @@ func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string,
 		}
 	}
 	if !validTransition {
-		return fmt.Errorf("không thể chuyển media từ %s sang %s", media.Status, newStatus)
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
 
 	if err := s.mediaRepo.UpdateStatusAndReview(ctx, mediaID, newStatus, input.Reason); err != nil {
@@ -1173,8 +1167,20 @@ func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string,
 		return fmt.Errorf("ghi log kiểm duyệt thất bại: %w", err)
 	}
 
-	if _, err := s.notificationService.Create(ctx, media.UserID, &adminID,
-		models.NotificationTypeMessage, notificationMsg, nil, nil, nil); err != nil {
+	var notifType models.NotificationType
+	switch newStatus {
+	case models.MediaStatusApproved:
+		notifType = models.NotificationTypeMediaApproved
+	case models.MediaStatusRejected:
+		notifType = models.NotificationTypeMediaRejected
+	case models.MediaStatusFlagged:
+		notifType = models.NotificationTypeMediaFlagged
+	default:
+		notifType = models.NotificationTypeMessage
+	}
+
+	if _, err := s.notificationService.Create(ctx, media.UserID, nil,
+		notifType, notificationMsg, media.PostID, nil, nil); err != nil {
 		return fmt.Errorf("gửi thông báo thất bại: %w", err)
 	}
 
@@ -1292,7 +1298,7 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 
 	ad, err := s.adRepo.FindByID(adID)
 	if err != nil {
-		return fmt.Errorf("quảng cáo không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	newStatus := strings.TrimSpace(strings.ToLower(input.Status))
@@ -1306,7 +1312,7 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	}
 
 	if !isSuperAdmin && newStatus == string(models.AdStatusActive) {
-		return errors.New("admin không có quyền kích hoạt quảng cáo, chỉ superadmin mới được phép")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
 	}
 
 	ad.Status = models.ParseAdStatus(newStatus)
@@ -1333,7 +1339,7 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 
 func (s *AdminService) ensureAdmin(ctx context.Context, userID string) error {
 	if userID == "" {
-		return errors.New("không có quyền truy cập")
+		return errorsapp.New(errorsapp.ErrCodeAdminNoAccess)
 	}
 	isSuperAdmin, err := s.authRepo.HasRole(ctx, userID, models.RoleSuperAdmin)
 	if err != nil {
@@ -1349,7 +1355,7 @@ func (s *AdminService) ensureAdmin(ctx context.Context, userID string) error {
 	if isAdmin {
 		return nil
 	}
-	return errors.New("chỉ có admin/superadmin mới được phép")
+	return errorsapp.New(errorsapp.ErrCodeAdminNoAccess)
 }
 
 func (s *AdminService) resolvePageSize(page, pageSize int) (int, int) {
@@ -1380,7 +1386,7 @@ func (s *AdminService) ListGroups(ctx context.Context, userID string, input dto.
 		switch status {
 		case string(models.ChatStatusActive), string(models.ChatStatusHidden), string(models.ChatStatusArchived):
 		default:
-			return dto.AdminGroupListResponse{}, fmt.Errorf("trạng thái group không hợp lệ")
+			return dto.AdminGroupListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}
 	}
 
@@ -1409,10 +1415,10 @@ func (s *AdminService) GetGroupDetail(ctx context.Context, userID, chatID string
 
 	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
-		return dto.AdminGroupDetailResponse{}, fmt.Errorf("group không tồn tại")
+		return dto.AdminGroupDetailResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 	if chat.Type != models.ChatTypeGroup {
-		return dto.AdminGroupDetailResponse{}, fmt.Errorf("ID không phải là group chat")
+		return dto.AdminGroupDetailResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNotGroupChat)
 	}
 
 	members, err := s.chatRepo.GetGroupMembers(ctx, chatID)
@@ -1449,10 +1455,10 @@ func (s *AdminService) ListGroupMembers(ctx context.Context, userID, chatID stri
 
 	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
-		return nil, fmt.Errorf("group không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 	if chat.Type != models.ChatTypeGroup {
-		return nil, fmt.Errorf("ID không phải là group chat")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdminNotGroupChat)
 	}
 
 	return s.chatRepo.GetGroupMembers(ctx, chatID)
@@ -1490,18 +1496,18 @@ func (s *AdminService) moderateGroup(ctx context.Context, superAdminID, chatID s
 
 	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
-		return fmt.Errorf("group không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 	if chat.Type != models.ChatTypeGroup {
-		return fmt.Errorf("ID không phải là group chat")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotGroupChat)
 	}
 
 	if chat.Status == models.ChatStatusArchived && newStatus != models.ChatStatusArchived {
-		return fmt.Errorf("không thể thao tác trên group đã bị đình chỉ")
+		return errorsapp.New(errorsapp.ErrCodeAdminArchivedRestricted)
 	}
 
 	if chat.Status == newStatus {
-		return fmt.Errorf("group đã ở trạng thái %s", actionLabel)
+		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, logAction, models.ModerationTargetGroupChat, chatID, reason)
@@ -1517,8 +1523,7 @@ func (s *AdminService) moderateGroup(ctx context.Context, superAdminID, chatID s
 
 	if chat.CreatorID != nil {
 		content := fmt.Sprintf("Nhóm chat '%s' đã bị %s bởi quản trị viên. Lý do: %s", chat.Name, actionLabel, reason)
-		senderID := superAdminID
-		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
 	}
 
 	return nil
@@ -1543,10 +1548,10 @@ func (s *AdminService) WarnGroup(ctx context.Context, superAdminID, chatID strin
 
 	chat, err := s.chatRepo.FindChatByID(ctx, chatID)
 	if err != nil {
-		return fmt.Errorf("group không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 	if chat.Type != models.ChatTypeGroup {
-		return fmt.Errorf("ID không phải là group chat")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotGroupChat)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionWarn, models.ModerationTargetGroupChat, chatID, input.Reason)
@@ -1558,8 +1563,7 @@ func (s *AdminService) WarnGroup(ctx context.Context, superAdminID, chatID strin
 
 	if chat.CreatorID != nil {
 		content := fmt.Sprintf("Cảnh báo nhóm chat '%s': %s", chat.Name, input.Message)
-		senderID := superAdminID
-		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
 	}
 
 	return nil
@@ -1580,16 +1584,16 @@ func (s *AdminService) ListCommunities(ctx context.Context, userID string, input
 		switch status {
 		case string(models.CommunityStatusActive), string(models.CommunityStatusHidden), string(models.CommunityStatusArchived):
 		default:
-			return dto.AdminCommunityListResponse{}, fmt.Errorf("trạng thái community không hợp lệ")
+			return dto.AdminCommunityListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}
 	}
 
 	privacy := strings.TrimSpace(strings.ToLower(input.Privacy))
 	if privacy != "" {
 		switch privacy {
-		case string(models.PrivacyPublic), string(models.PrivacyCode), string(models.PrivacyInvitationOnly):
+		case string(models.PrivacyPublic), string(models.PrivacyInvitationOnly):
 		default:
-			return dto.AdminCommunityListResponse{}, fmt.Errorf("quyền riêng tư không hợp lệ")
+			return dto.AdminCommunityListResponse{}, errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 		}
 	}
 
@@ -1618,7 +1622,7 @@ func (s *AdminService) GetCommunityDetail(ctx context.Context, userID, community
 
 	community, err := s.communityRepo.FindByID(ctx, communityID)
 	if err != nil {
-		return dto.AdminCommunityDetailResponse{}, fmt.Errorf("cộng đồng không tồn tại")
+		return dto.AdminCommunityDetailResponse{}, errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	members, err := s.communityRepo.FindCommunityMembersWithProfiles(ctx, communityID)
@@ -1656,7 +1660,7 @@ func (s *AdminService) ListCommunityMembers(ctx context.Context, userID, communi
 	}
 
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
-		return nil, fmt.Errorf("cộng đồng không tồn tại")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	return s.communityRepo.FindCommunityMembersWithProfiles(ctx, communityID)
@@ -1694,15 +1698,15 @@ func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, comm
 
 	community, err := s.communityRepo.FindByID(ctx, communityID)
 	if err != nil {
-		return fmt.Errorf("cộng đồng không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	if community.Status == models.CommunityStatusArchived && newStatus != models.CommunityStatusArchived && newStatus != models.CommunityStatusActive {
-		return fmt.Errorf("không thể thao tác trên cộng đồng đã bị đình chỉ")
+		return errorsapp.New(errorsapp.ErrCodeAdminArchivedRestricted)
 	}
 
 	if community.Status == newStatus {
-		return fmt.Errorf("cộng đồng đã ở trạng thái %s", actionLabel)
+		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, logAction, models.ModerationTargetCommunity, communityID, reason)
@@ -1717,8 +1721,7 @@ func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, comm
 	}
 
 	content := fmt.Sprintf("Cộng đồng '%s' đã bị %s bởi quản trị viên. Lý do: %s", community.Name, actionLabel, reason)
-	senderID := superAdminID
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
 
 	return nil
 }
@@ -1746,7 +1749,7 @@ func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communit
 
 	community, err := s.communityRepo.FindByID(ctx, communityID)
 	if err != nil {
-		return fmt.Errorf("cộng đồng không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionWarn, models.ModerationTargetCommunity, communityID, input.Reason)
@@ -1757,22 +1760,21 @@ func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communit
 	}
 
 	content := fmt.Sprintf("Cảnh báo cộng đồng '%s': %s", community.Name, input.Message)
-	senderID := superAdminID
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, &senderID, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
 
 	return nil
 }
 
 func (s *AdminService) ensureSuperAdmin(ctx context.Context, userID string) error {
 	if userID == "" {
-		return errors.New("không có quyền truy cập")
+		return errorsapp.New(errorsapp.ErrCodeAdminNoAccess)
 	}
 	isSuperAdmin, err := s.authRepo.HasRole(ctx, userID, models.RoleSuperAdmin)
 	if err != nil {
 		return fmt.Errorf("check superadmin: %w", err)
 	}
 	if !isSuperAdmin {
-		return errors.New("chỉ có superadmin mới có được phép")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
 	}
 	return nil
 }
@@ -1817,7 +1819,7 @@ func (s *AdminService) resolveBanExpiresAt(durationKey string) (*time.Time, erro
 
 	duration, ok := banDurationMap[durationKey]
 	if !ok {
-		return nil, fmt.Errorf("thời hạn ban không hợp lệ")
+		return nil, errorsapp.New(errorsapp.ErrCodeAdminInvalidBanDuration)
 	}
 
 	t := time.Now().UTC().Add(duration)
@@ -1912,7 +1914,7 @@ func (s *AdminService) DeleteGroup(ctx context.Context, superAdminID, chatID str
 		return err
 	}
 	if chat.Type != models.ChatTypeGroup {
-		return fmt.Errorf("chỉ có thể xóa group chat")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotGroupChat)
 	}
 
 	participantIDs, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
@@ -1921,7 +1923,7 @@ func (s *AdminService) DeleteGroup(ctx context.Context, superAdminID, chatID str
 	}
 
 	if len(participantIDs) > 1 {
-		return fmt.Errorf("không thể xóa group chat còn thành viên khác; hãy chuyển quyền sở hữu trước")
+		return errorsapp.New(errorsapp.ErrCodeAdminHasOtherMembers)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetGroupChat, chatID, input.Reason)
@@ -1941,10 +1943,10 @@ func (s *AdminService) DeleteCommunity(ctx context.Context, superAdminID, commun
 
 	community, err := s.communityRepo.FindByID(ctx, communityID)
 	if err != nil {
-		return fmt.Errorf("cộng đồng không tồn tại")
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 	if community.CreatorID == "" {
-		return fmt.Errorf("cộng đồng không có người tạo")
+		return errorsapp.New(errorsapp.ErrCodeAdminNoCreator)
 	}
 
 	memberIDs, err := s.communityRepo.FindCommunityMemberIDs(ctx, communityID)
@@ -1953,7 +1955,7 @@ func (s *AdminService) DeleteCommunity(ctx context.Context, superAdminID, commun
 	}
 
 	if len(memberIDs) > 1 {
-		return fmt.Errorf("không thể xóa cộng đồng còn thành viên khác; hãy chuyển quyền sở hữu trước")
+		return errorsapp.New(errorsapp.ErrCodeAdminHasOtherMembers)
 	}
 
 	moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetCommunity, communityID, input.Reason)

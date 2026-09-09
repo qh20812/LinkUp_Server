@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"linkup/dto"
+	"linkup/models"
 	"linkup/services"
+	"linkup/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -139,20 +141,119 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msgs := make([]dto.MessagePayload, 0, len(history))
-			for _, m := range history {
-				msgs = append(msgs, dto.MessagePayload{
-					ID:               m.ID,
-					ChatID:           m.ChatID,
-					SenderID:         m.SenderID,
-					Content:          m.Content,
-					EmojiID:          m.EmojiID,
-					MediaID:          m.MediaID,
-					ReplyToMessageID: m.ReplyToMessageID,
-					IsAnonymized:     m.IsAnonymized,
-					AnonymousName:    m.AnonymousName,
-					CreatedAt:        m.CreatedAt,
-				})
+		for i := range history {
+			_ = c.messageService.DecryptMessageContent(c.ctx, &history[i])
+		}
+
+		senderIDs := make([]string, 0, len(history))
+		seen := make(map[string]struct{})
+		actorIDs := make(map[string]string)
+		for _, m := range history {
+			if m.MessageCategory != "system" {
+				if _, ok := seen[m.SenderID]; !ok {
+					senderIDs = append(senderIDs, m.SenderID)
+					seen[m.SenderID] = struct{}{}
+				}
+			}
+			if m.MessageCategory == "system" && strings.Contains(m.Content, "|") {
+				parts := strings.SplitN(m.Content, "|", 3)
+				if len(parts) >= 2 {
+					actorIDs[m.ID] = parts[1]
+					if _, ok := seen[parts[1]]; !ok {
+						senderIDs = append(senderIDs, parts[1])
+						seen[parts[1]] = struct{}{}
+					}
+				}
+			}
+		}
+		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
+		sharedPosts := c.messageService.LoadSharedPosts(c.ctx, history)
+		mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(history))
+		mediaDurations := c.messageService.GetMediaDurations(c.ctx, collectGroupMediaIDs(history))
+
+		msgs := make([]dto.MessagePayload, 0, len(history))
+		for _, m := range history {
+			p := dto.MessagePayload{
+				ID:               m.ID,
+				ChatID:           m.ChatID,
+				SenderID:         m.SenderID,
+				Content:          m.Content,
+				EmojiID:          m.EmojiID,
+				MediaID:          m.MediaID,
+				MediaGroupID:     m.MediaGroupID,
+				ReplyToMessageID: m.ReplyToMessageID,
+				SharedPostID:     m.SharedPostID,
+				ForwardedFrom:    m.ForwardedFrom,
+				ForwardsCount:    m.ForwardsCount,
+				Type:             m.Type,
+				MessageCategory:  m.MessageCategory,
+				IsAnonymized:     m.IsAnonymized,
+				AnonymousName:    m.AnonymousName,
+				Deleted:          m.DeletedAt != nil,
+				CreatedAt:        m.CreatedAt,
+			}
+			if m.MediaID != nil && mediaTypes != nil {
+				p.MediaType = mediaTypes[*m.MediaID]
+			}
+			if m.MediaID != nil && mediaDurations != nil {
+				p.DurationSeconds = mediaDurations[*m.MediaID]
+			}
+			if prof, ok := profiles[m.SenderID]; ok {
+				p.SenderName = prof.DisplayName
+				p.SenderAvatar = prof.AvatarURI
+			}
+			if m.MessageCategory == "system" {
+				if actorID, ok := actorIDs[m.ID]; ok {
+					p.SenderName = actorID
+				}
+			}
+			if sharedPosts != nil && m.SharedPostID != nil {
+				if sp, ok := sharedPosts[*m.SharedPostID]; ok {
+					p.SharedPost = sp
+				}
+			}
+			msgs = append(msgs, p)
+		}
+
+		replyIDs := make([]string, 0)
+		for _, m := range msgs {
+			if m.ReplyToMessageID != nil && *m.ReplyToMessageID != "" {
+				replyIDs = append(replyIDs, *m.ReplyToMessageID)
+			}
+		}
+		if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs); previews != nil {
+			if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
+				for _, preview := range previews {
+					if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+						preview.Content = decrypted
+					}
+				}
+			}
+for i := range msgs {
+					if msgs[i].ReplyToMessageID != nil {
+						if preview, ok := previews[*msgs[i].ReplyToMessageID]; ok {
+							msgs[i].ReplyTo = preview
+						}
+					}
+				}
+			}
+
+			// Read receipts: gắn seen_by cho từng tin nhắn trong lịch sử.
+			if watermarks, err := c.messageService.GetChatReadWatermarks(c.ctx, payload.ChatID); err == nil {
+				applySeenBy(msgs, watermarks)
+			}
+
+			// Message reactions: gắn danh sách cảm xúc cho từng tin nhắn.
+			msgIDs := make([]string, 0, len(msgs))
+			for _, m := range msgs {
+				msgIDs = append(msgIDs, m.ID)
+			}
+			if reactions := c.messageService.GetMessageReactions(c.ctx, msgIDs); reactions != nil {
+				for i := range msgs {
+					if list, ok := reactions[msgs[i].ID]; ok && list != nil {
+						msgs[i].Reactions = list
+					}
+				}
 			}
 
 			callDocs, err := c.messageService.GetGroupCallsByChatID(c.ctx, c.userID, payload.ChatID)
@@ -184,6 +285,11 @@ func (c *Client) ReadPump() {
 				Calls:    callItems,
 			})
 
+			// Gửi danh sách tin nhắn đã ghim
+			if pins, err := c.messageService.GetPinnedMessages(c.ctx, c.userID, payload.ChatID); err == nil && len(pins) > 0 {
+				c.sendEvent("group:message:pinned_list", map[string]any{"pinned_messages": pins})
+			}
+
 		case "group:message:send":
 			var payload dto.GroupSendMessagePayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -191,33 +297,75 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.messageService.SendMessage(
-				c.ctx,
-				c.userID,
-				payload.ChatID,
-				payload.Content,
-				payload.EmojiID,
-				payload.MediaID,
-				payload.ReplyToMessageID,
-			)
+		msg, err := c.messageService.SendMessage(
+			c.ctx,
+			c.userID,
+			payload.ChatID,
+			payload.Content,
+			payload.EmojiID,
+			payload.MediaID,
+			payload.GifURL,
+			payload.ReplyToMessageID,
+			payload.SharedPostID,
+			payload.MediaGroupID,
+			payload.ForwardedFrom,
+		)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
 			}
 
-			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type: "group:message:new",
-				Payload: mustMarshal(dto.MessagePayload{
-					ID:               msg.ID,
-					ChatID:           msg.ChatID,
-					SenderID:         msg.SenderID,
-					Content:          msg.Content,
-					EmojiID:          msg.EmojiID,
-					MediaID:          msg.MediaID,
-					ReplyToMessageID: msg.ReplyToMessageID,
-					CreatedAt:        msg.CreatedAt,
-				}),
-			})
+		_ = c.messageService.DecryptMessageContent(c.ctx, msg)
+
+		newPayload := dto.MessagePayload{
+			ID:               msg.ID,
+			ChatID:           msg.ChatID,
+			SenderID:         msg.SenderID,
+			Content:          msg.Content,
+			EmojiID:          msg.EmojiID,
+			MediaID:          msg.MediaID,
+			MediaGroupID:     msg.MediaGroupID,
+			ReplyToMessageID: msg.ReplyToMessageID,
+			SharedPostID:     msg.SharedPostID,
+			ForwardedFrom:    msg.ForwardedFrom,
+			ForwardsCount:    msg.ForwardsCount,
+			Type:             msg.Type,
+			CreatedAt:        msg.CreatedAt,
+		}
+		if msg.MediaID != nil && *msg.MediaID != "" {
+			newPayload.MediaType = c.messageService.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+			newPayload.DurationSeconds = c.messageService.GetMediaDurations(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+		}
+		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})
+		if prof, ok := profiles[msg.SenderID]; ok {
+			newPayload.SenderName = prof.DisplayName
+			newPayload.SenderAvatar = prof.AvatarURI
+		}
+		if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
+			if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
+				if preview, ok := previews[*msg.ReplyToMessageID]; ok {
+					if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
+						if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+							preview.Content = decrypted
+						}
+					}
+					newPayload.ReplyTo = preview
+				}
+			}
+		}
+
+		if msg.SharedPostID != nil && *msg.SharedPostID != "" {
+			if sharedPosts := c.messageService.LoadSharedPosts(c.ctx, []models.Message{*msg}); sharedPosts != nil {
+				if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
+					newPayload.SharedPost = sp
+				}
+			}
+		}
+
+		c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+			Type:    "group:message:new",
+			Payload: mustMarshal(newPayload),
+		})
 
 		case "group:typing:start", "group:typing:stop":
 			var payload dto.GroupTypingPayload
@@ -255,23 +403,147 @@ func (c *Client) ReadPump() {
 			}
 
 			out := make([]dto.MessagePayload, 0, len(messages))
+			mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(messages))
+			mediaDurations := c.messageService.GetMediaDurations(c.ctx, collectGroupMediaIDs(messages))
 			for _, m := range messages {
-				out = append(out, dto.MessagePayload{
-					ID:        m.ID,
-					ChatID:    m.ChatID,
-					SenderID:  m.SenderID,
-					Content:   m.Content,
-					EmojiID:   m.EmojiID,
-					MediaID:   m.MediaID,
-					CreatedAt: m.CreatedAt,
-				})
+				p := dto.MessagePayload{
+					ID:               m.ID,
+					ChatID:           m.ChatID,
+					SenderID:         m.SenderID,
+					Content:          m.Content,
+					EmojiID:          m.EmojiID,
+					MediaID:          m.MediaID,
+					MediaGroupID:     m.MediaGroupID,
+					ForwardedFrom:    m.ForwardedFrom,
+					ForwardsCount:    m.ForwardsCount,
+					CreatedAt:        m.CreatedAt,
+				}
+				if m.MediaID != nil && mediaTypes != nil {
+					p.MediaType = mediaTypes[*m.MediaID]
+				}
+				if m.MediaID != nil && mediaDurations != nil {
+					p.DurationSeconds = mediaDurations[*m.MediaID]
+				}
+				out = append(out, p)
 			}
 
-			c.sendEvent("group:message:search_result", map[string]any{
-				"chat_id":  payload.ChatID,
-				"keyword":  payload.Keyword,
-				"messages": out,
+		c.sendEvent("group:message:search_result", map[string]any{
+			"chat_id":  payload.ChatID,
+			"keyword":  payload.Keyword,
+			"messages": out,
+		})
+
+		case "group:message:pin":
+			var payload dto.PinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu ghim không hợp lệ")
+				continue
+			}
+
+			pinDTO, err := c.messageService.PinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:message:pinned",
+				Payload: mustMarshal(pinDTO),
 			})
+
+		case "group:message:unpin":
+			var payload dto.UnpinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu bỏ ghim không hợp lệ")
+				continue
+			}
+
+			if err := c.messageService.UnpinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:message:unpinned",
+				Payload: mustMarshal(dto.MessageUnpinnedPayload{ChatID: payload.ChatID, MessageID: payload.MessageID}),
+			})
+
+		case "group:message:read":
+			var payload dto.MessageReadPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu đã đọc không hợp lệ")
+				continue
+			}
+
+			state, err := c.messageService.MarkMessageRead(c.ctx, c.userID, payload.ChatID, payload.LastMessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if state == nil {
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type:    "group:message:read",
+				Payload: mustMarshal(state),
+			})
+
+		case "group:message:react":
+			var payload dto.ReactMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu cảm xúc không hợp lệ")
+				continue
+			}
+
+			action, reactions, err := c.messageService.ReactToMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID, payload.EmojiID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
+				Type: "group:message:reacted",
+				Payload: mustMarshal(dto.MessageReactedPayload{
+					ChatID:    payload.ChatID,
+					MessageID: payload.MessageID,
+					UserID:    c.userID,
+					Action:    action,
+					EmojiID:   payload.EmojiID,
+					Reactions: reactions,
+				}),
+			})
+
+		case "group:message:delete":
+			var payload dto.DeleteMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu xóa không hợp lệ")
+				continue
+			}
+
+			msg, err := c.messageService.DeleteMessage(c.ctx, c.userID, payload.MessageID, payload.Mode)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			deletedPayload := dto.MessageDeletedPayload{
+				ChatID:    msg.ChatID,
+				MessageID: msg.ID,
+				DeletedBy: c.userID,
+				Mode:      payload.Mode,
+			}
+
+			ack, _ := json.Marshal(dto.WsEvent{
+				Type:    "group:message:deleted",
+				Payload: mustMarshal(deletedPayload),
+			})
+
+			if strings.EqualFold(payload.Mode, "all") {
+				c.hub.broadcast <- &BroadcastMessage{ChatID: msg.ChatID, Data: ack}
+			} else {
+				c.send <- ack
+			}
 
 		case "group:leave":
 			var payload dto.GroupLeavePayload
@@ -401,12 +673,14 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			targetName := c.groupService.GetDisplayName(c.ctx, payload.TargetUserID)
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
 				Type: "group:admin:transferred",
 				Payload: mustMarshal(map[string]any{
 					"chat_id":        payload.ChatID,
 					"target_user_id": payload.TargetUserID,
 					"by":             c.userID,
+					"actor_name":     targetName,
 				}),
 			})
 
@@ -428,9 +702,30 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
+			actorName := c.groupService.GetDisplayName(c.ctx, c.userID)
+			detail := ""
+			text := ""
+
+			if payload.Name != nil {
+				detail = "name_changed"
+				text = fmt.Sprintf("%s đã đổi tên nhóm thành \"%s\"", actorName, *payload.Name)
+			}
+			if payload.AvatarURI != nil {
+				detail = "avatar_changed"
+				text = fmt.Sprintf("%s đã đổi ảnh nhóm", actorName)
+			}
+
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type:    "group:settings:updated",
-				Payload: mustMarshal(settings),
+				Type: "group:settings:updated",
+				Payload: mustMarshal(map[string]any{
+					"chat_id":    payload.ChatID,
+					"name":       settings.Name,
+					"avatar_uri": settings.AvatarURI,
+					"by":         c.userID,
+					"actor_name": actorName,
+					"detail":     detail,
+					"text":       text,
+				}),
 			})
 
 		case "group:call:create":
@@ -491,7 +786,7 @@ func (c *Client) ReadPump() {
 					Payload: mustMarshal(createdPayload),
 				})
 			}
-			c.sendGroupChatSystemMessage(payload.ChatID, "Cuộc gọi đã được bắt đầu")
+			c.sendGroupChatSystemMessage(payload.ChatID, "call_started", "call_started", c.userID)
 
 		case "group:call:request-join":
 			var payload dto.GroupCallJoinRequestPayload
@@ -683,7 +978,7 @@ func (c *Client) ReadPump() {
 				if c.groupChatHub != nil {
 					c.groupChatHub.Broadcast(result.ChatID, event)
 				}
-				c.sendGroupChatSystemMessage(result.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc bởi %s", c.userID))
+				c.sendGroupChatSystemMessage(result.ChatID, "call_ended", "call_ended", c.userID)
 			} else {
 				event := dto.WsEvent{
 					Type: "group:call:left",
@@ -890,6 +1185,36 @@ func mustMarshal(v any) []byte {
 	return out
 }
 
+// applySeenBy gắn seen_by (danh sách user đã đọc) cho từng tin nhắn dựa trên
+// watermark đọc của từng thành viên trong chat. Bỏ qua chính người gửi.
+func applySeenBy(payloads []dto.MessagePayload, watermarks map[string]time.Time) {
+	for i := range payloads {
+		p := &payloads[i]
+		var seen []string
+		for userID, readAt := range watermarks {
+			if userID == p.SenderID {
+				continue
+			}
+			if !readAt.Before(p.CreatedAt) {
+				seen = append(seen, userID)
+			}
+		}
+		if len(seen) > 0 {
+			p.SeenBy = seen
+		}
+	}
+}
+
+func collectGroupMediaIDs(messages []models.Message) []string {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaID != nil && *m.MediaID != "" {
+			ids = append(ids, *m.MediaID)
+		}
+	}
+	return ids
+}
+
 func (c *Client) cleanupCallSession() {
 	// Backward-compatible shim: cleanup hiện được xử lý theo toàn bộ session user đang tham gia.
 	c.cleanupDisconnectedCallSessions()
@@ -928,7 +1253,7 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 			if c.groupChatHub != nil {
 				c.groupChatHub.Broadcast(result.ChatID, event)
 			}
-			c.sendGroupChatSystemMessage(result.ChatID, fmt.Sprintf("Cuộc gọi đã kết thúc bởi %s", c.userID))
+			c.sendGroupChatSystemMessage(result.ChatID, "call_ended", "call_ended", c.userID)
 			continue
 		}
 
@@ -945,9 +1270,9 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 	c.clearActiveCall()
 }
 
-func (c *Client) sendGroupChatSystemMessage(chatID, content string) {
+func (c *Client) sendGroupChatSystemMessage(chatID, translationKey, msgType, actorID string, extra ...string) {
 	if c.messageService == nil {
 		return
 	}
-	_, _ = c.messageService.CreateSystemMessage(c.ctx, chatID, content)
+	_, _ = c.messageService.CreateSystemMessage(c.ctx, chatID, translationKey, msgType, actorID, extra...)
 }

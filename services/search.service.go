@@ -85,6 +85,8 @@ func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.
 		resp.Posts, err = s.searchRepo.SearchPosts(ctx, input.Keyword)
 	case "hashtags":
 		resp.Hashtags, err = s.searchRepo.SearchHashtags(ctx, input.Keyword)
+	case "communities":
+		resp.Communities, err = s.searchRepo.SearchCommunities(ctx, input.Keyword)
 	default:
 		resp.Users, err = s.searchRepo.SearchUsers(ctx, input.Keyword)
 		if err != nil {
@@ -97,6 +99,10 @@ func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.
 		resp.Hashtags, err = s.searchRepo.SearchHashtags(ctx, input.Keyword)
 		if err != nil {
 			return dto.SearchResponse{}, fmt.Errorf("search hashtags: %w", err)
+		}
+		resp.Communities, err = s.searchRepo.SearchCommunities(ctx, input.Keyword)
+		if err != nil {
+			return dto.SearchResponse{}, fmt.Errorf("search communities: %w", err)
 		}
 		setSearchMessage(&resp)
 		return resp, nil
@@ -111,7 +117,7 @@ func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.
 }
 
 func setSearchMessage(resp *dto.SearchResponse) {
-	if len(resp.Users) == 0 && len(resp.Posts) == 0 && len(resp.Hashtags) == 0 {
+	if len(resp.Users) == 0 && len(resp.Posts) == 0 && len(resp.Hashtags) == 0 && len(resp.Communities) == 0 {
 		resp.Message = "Không tìm thấy kết quả phù hợp"
 	}
 }

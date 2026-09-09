@@ -10,12 +10,12 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"linkup/cmd/migrate"
 	"linkup/config"
 	"linkup/controllers"
 	"linkup/db"
 	"linkup/groupws"
 	"linkup/middlewares"
-	"linkup/models"
 	"linkup/repository"
 	"linkup/routes"
 	"linkup/services"
@@ -49,7 +49,9 @@ func main() {
 		log.Println("DB connection: success")
 		defer database.Close()
 
-		gormDB, err = gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{})
+		gormDB, err = gorm.Open(mysql.New(mysql.Config{Conn: database}), &gorm.Config{
+			DisableForeignKeyConstraintWhenMigrating: true,
+		})
 		if err != nil {
 			log.Fatalf("failed to init gorm: %v", err)
 		}
@@ -69,73 +71,62 @@ func main() {
 
 	// 5. Nếu kết nối cơ sở dữ liệu thành công, bắt đầu khởi tạo cấu trúc dự án qua GORM
 	if gormDB != nil {
+		// Schema migration + seed dữ liệu mặc định
+		migrate.Run(gormDB)
 		// ====================================================================
-		// TỰ ĐỘNG MIGRATION CHO STORIES & ADVERTISEMENT
-		// ====================================================================
 
-		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
-			_ = gormDB.Exec("ALTER TABLE partner_subscriptions DROP FOREIGN KEY fk_partner_subscriptions_package")
-		}
-
-		if gormDB.Migrator().HasTable(&models.AdPackage{}) {
-			_ = gormDB.Exec("ALTER TABLE ad_packages MODIFY COLUMN id VARCHAR(36) NOT NULL")
-		}
-
-		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
-			_ = gormDB.Exec("ALTER TABLE partner_subscriptions MODIFY COLUMN package_id VARCHAR(36) NOT NULL")
-		}
-
-		log.Println("Running database auto-migration...")
-		err = gormDB.AutoMigrate(
-			&models.User{},
-			&models.StoryView{},
-			&models.StoryInteract{},
-			&models.AdPackage{},
-			&models.PartnerSubscription{},
-			&models.Ad{},
-			&models.AdMedia{},
-			&models.AdAnalytics{},
-		)
-		if err != nil {
-			log.Printf("Warning: Migration failed: %v", err)
-		}
-
-		// Tự động kiểm tra và đồng bộ lại tất cả các cột của struct Ad vào MySQL
-		// (Giải quyết trường hợp DB đã tạo bảng cũ nhưng thiếu cột mới)
-		if gormDB.Migrator().HasTable(&models.Ad{}) {
-			_ = gormDB.Migrator().AutoMigrate(&models.Ad{})
-		}
-
-		// Tạo Index giải quyết cảnh báo SLOW SQL cho Partner Subscriptions
-		if gormDB.Migrator().HasTable(&models.PartnerSubscription{}) {
-			if !gormDB.Migrator().HasIndex(&models.PartnerSubscription{}, "idx_user_status_expires") {
-				_ = gormDB.Exec("ALTER TABLE partner_subscriptions ADD INDEX idx_user_status_expires (user_id, status, expires_at)")
-			}
-		}
-
-		// Seed dữ liệu mặc định cho các Gói Quảng Cáo
-		seedAdPackages(gormDB)
-		// ====================================================================
+		// ===== KHỞI TẠO TẦNG ADMIN SETTINGS =====
+		adminSettingsRepository := repository.NewAdminSettingsRepository(gormDB)
+		adminSettingsService := services.NewAdminSettingsService(adminSettingsRepository, env)
+		adminSettingsController := controllers.NewAdminSettingsController(adminSettingsService)
 
 		// ===== KHỞI TẠO TẦNG AUTH & PROFILE =====
 		authRepository := repository.NewAuthRepository(gormDB)
 		profileRepository := repository.NewProfileRepository(gormDB)
 		banRepository := repository.NewBanRepository(gormDB)
-		authService := services.NewAuthService(authRepository, profileRepository, banRepository, env)
+		authService := services.NewAuthService(authRepository, profileRepository, banRepository, adminSettingsRepository, env)
 		authValidation := validations.NewAuthValidation()
 		authController := controllers.NewAuthController(authService, authValidation)
-		routes.RegisterAuthRoutes(router, authController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG USER SESSION (QUẢN LÝ PHIÊN ĐĂNG NHẬP) =====
+		userSessionRepository := repository.NewUserSessionRepository(gormDB)
+		authService.SetSessionRepository(userSessionRepository)
+
+		// ===== KHỞI TẠO TẦNG EMAIL VERIFICATION =====
+		emailVerifRepository := repository.NewEmailVerificationRepository(gormDB)
+		emailVerifService := services.NewEmailVerificationService(emailVerifRepository, authRepository, adminSettingsRepository, env)
+		emailVerifController := controllers.NewEmailVerificationController(emailVerifService, authValidation)
+		authService.SetEmailVerificationService(emailVerifService)
+
+		// ===== KHỞI TẠO GOOGLE SIGN-IN (ID-token verification) =====
+		if googleVerifier, gerr := services.NewGoogleIDTokenVerifier(context.Background(), env.GoogleClientIDs); gerr != nil {
+			log.Printf("Google auth: init failed (%v)", gerr)
+		} else {
+			authService.SetGoogleIDTokenVerifier(googleVerifier)
+		}
+
+		routes.RegisterAuthRoutes(router, authController, emailVerifController, env, gormDB)
+
+		adminSettingsService.SetAuthRepository(authRepository)
 
 		// ===== KHỞI TẠO TẦNG PASSWORD RESET =====
 		resetRepository := repository.NewPasswordResetRepository(gormDB)
-		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, authValidation, env)
+		passwordResetService := services.NewPasswordResetService(resetRepository, authRepository, adminSettingsRepository, authValidation, env)
 		passwordResetController := controllers.NewPasswordResetController(passwordResetService, authValidation)
 		routes.RegisterPasswordResetRoutes(router, passwordResetController)
+
+		// ===== KHỞI TẠO TẦNG USER SETTINGS (CÀI ĐẶT & QUYỀN RIÊNG TƯ) =====
+		userSettingsRepository := repository.NewUserSettingsRepository(gormDB)
+		userSettingsService := services.NewUserSettingsService(userSettingsRepository, userSessionRepository, authRepository, env)
+		userSettingsController := controllers.NewUserSettingsController(userSettingsService)
+		routes.RegisterSettingsRoutes(router, userSettingsController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG NOTIFICATION (HỖ TRỢ THÔNG BÁO TIN NHẮN/LIKE/COMMENT) =====
 		notificationRepository := repository.NewNotificationRepository(gormDB)
 		notificationPreferenceRepository := repository.NewNotificationPreferenceRepository(gormDB)
-		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, profileRepository, hub)
+		pushTokenRepository := repository.NewPushTokenRepository(gormDB)
+		pushService := services.NewPushService()
+		notificationService := services.NewNotificationService(notificationRepository, notificationPreferenceRepository, profileRepository, hub, pushTokenRepository, pushService)
 		notificationController := controllers.NewNotificationController(notificationService)
 		routes.RegisterNotificationRoutes(router, notificationController, env, gormDB)
 
@@ -175,9 +166,14 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG STORY (BẢN TIN HIỂN THỊ 24H) =====
 		storyRepository := repository.NewStoryRepository(gormDB)
-		storyService := services.NewStoryService(storyRepository, mediaService)
+		blockRepository := repository.NewBlockRepository(gormDB)
+		storyService := services.NewStoryService(storyRepository, profileRepository, mediaService, notificationService, followRepository, blockRepository)
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
+
+		// Wire sau khi cả media + story repo đã khởi tạo
+		mediaService.SetStoryRepo(storyRepository)
+		profileService.SetMediaRepo(mediaRepository)
 
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
 		reportRepository := repository.NewReportRepository(gormDB)
@@ -187,7 +183,6 @@ func main() {
 		routes.RegisterReportRoutes(router, reportController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG BLOCK (CHẶN USER) =====
-		blockRepository := repository.NewBlockRepository(gormDB)
 		blockValidation := validations.NewBlockValidation()
 		blockService := services.NewBlockService(blockRepository, authRepository, blockValidation)
 		blockController := controllers.NewBlockController(blockService)
@@ -212,26 +207,39 @@ func main() {
 		friendRepository = repository.NewFriendRepository(gormDB)
 		inviteRepository := repository.NewChatInvitationRepository(gormDB)
 		chatValidation := validations.NewChatValidation()
-		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, notificationService, chatValidation)
+		chatService := services.NewChatService(chatRepository, friendRepository, inviteRepository, mediaRepository, postRepository, userSettingsRepository, profileRepository, notificationService, chatValidation)
 		chatHub := ws.NewHub()
 		go chatHub.Run()
-		chatController := controllers.NewChatController(chatHub, chatService, env)
+		chatController := controllers.NewChatController(chatHub, chatService, mediaService, postRepository, env)
 		routes.RegisterChatRoutes(router, chatController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG PRESENCE (ONLINE/OFFLINE STATUS) =====
+		presenceRepository := repository.NewPresenceRepository(gormDB)
+		presenceService := services.NewPresenceService(presenceRepository, userSettingsRepository, friendRepository, chatRepository)
+		presenceController := controllers.NewPresenceController(presenceService)
+		routes.RegisterPresenceRoutes(router, presenceController, env, gormDB)
+		hub.SetPresenceService(presenceService)
+
+		// ===== KHỞI TẠO TẦNG E2E (MÃ HÓA ĐẦU CUỐI CHO TIN NHẮN TRỰC TIẾP) =====
+		e2eRepository := repository.NewE2ERepository(gormDB)
+		e2eService := services.NewE2EService(e2eRepository, chatRepository)
+		e2eController := controllers.NewE2EController(e2eService)
+		routes.RegisterE2ERoutes(router, e2eController, env, gormDB)
 
 		// ===== KHỞI TẠO GROUP CHAT (TIN NHẮN NHÓM, RỜI NHÓM, CHẶN QUAY LẠI) =====
 		groupHub := groupws.NewHub()
 		go groupHub.Run()
 		groupChatRepository := repository.NewGroupChatRepository(gormDB)
-		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, notificationService, validations.NewGroupChatValidation())
-		groupChatController := controllers.NewGroupChatController(groupChatService, chatService)
+		groupChatService := services.NewGroupChatService(groupChatRepository, chatRepository, chatService, notificationService, validations.NewGroupChatValidation())
+		groupChatController := controllers.NewGroupChatController(groupChatService, chatService, groupHub)
 		routes.RegisterGroupChatRoutes(router, groupChatController, env, gormDB)
-		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, notificationService, chatValidation)
+		groupMessageService := services.NewGroupMessageService(chatRepository, groupChatRepository, mediaRepository, postRepository, notificationService, chatValidation)
 		routes.RegisterGroupChatWebSocketRoute(router, groupHub, groupMessageService, groupChatService, env, gormDB)
 
 		// ===== KHỞI TẠO COMMUNITY (NHÓM CỘNG ĐỒNG BÀI VIẾT) =====
 		communityRepository := repository.NewCommunityRepository(gormDB)
 		communityValidation := validations.NewCommunityValidation()
-		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService)
+		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService, postRepository)
 		communityController := controllers.NewCommunityController(communityService, mediaService)
 		routes.RegisterCommunityRoutes(router, communityController, env, gormDB)
 
@@ -270,13 +278,25 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminController := controllers.NewAdminController(adminService)
-		routes.RegisterAdminRoutes(router, adminController, env, gormDB)
+		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 
 		// ===== KHỞI TẠO VOICE/VIDEO CALL =====
 		callRepository := repository.NewCallRepository(gormDB)
-		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, hub)
+		callService := services.NewVoiceCallService(callRepository, friendRepository, profileRepository, notificationService, hub)
 		callController := controllers.NewVoiceCallController(hub, callService, env)
 		routes.RegisterCallRoutes(router, callController, env, gormDB)
+
+		// Dọn dẹp cuộc gọi bị bỏ dở khi user mất kết nối hoàn toàn: nếu socket
+		// cuối cùng của user đóng mà họ còn một cuộc gọi đang "calling"/"ringing"/
+		// "connected", kết thúc cuộc gọi đó (hủy/nhỡ/kết thúc) để không chặn
+		// các cuộc gọi sau này qua CreateIfNotBusy.
+		hub.SetOnClientDisconnect(func(userID string) {
+			if !hub.IsUserOnline(userID) {
+				if err := callService.CleanupDisconnectedCalls(context.Background(), userID); err != nil {
+					log.Printf("cleanup disconnected calls for %s: %v", userID, err)
+				}
+			}
+		})
 
 		// ===== GROUP CALL =====
 		groupCallHub := groupws.NewHub()
@@ -304,57 +324,4 @@ func main() {
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
-}
-
-// seedAdPackages hỗ trợ khởi tạo sẵn 3 gói cước mẫu cho hệ thống
-func seedAdPackages(db *gorm.DB) {
-	var count int64
-	db.Model(&models.AdPackage{}).Count(&count)
-	if count > 0 {
-		return
-	}
-
-	packages := []models.AdPackage{
-		{
-			ID:                   "pkg_basic",
-			Name:                 "Gói Cơ Bản (Basic)",
-			Description:          "Phù hợp cho cá nhân kinh doanh nhỏ, hỗ trợ 3 chiến dịch ảnh tĩnh.",
-			PriceMonthly:         500000,
-			MaxSlots:             3,
-			MaxDurationDays:      30,
-			SupportsVideo:        false,
-			SupportsCarousel:     false,
-			HasAdvancedAnalytics: false,
-			SortOrder:            1,
-		},
-		{
-			ID:                   "pkg_standard",
-			Name:                 "Gói Tiêu Chuẩn (Standard)",
-			Description:          "Dành cho doanh nghiệp vừa, hỗ trợ tối đa 10 chiến dịch và định dạng Video.",
-			PriceMonthly:         1500000,
-			MaxSlots:             10,
-			MaxDurationDays:      30,
-			SupportsVideo:        true,
-			SupportsCarousel:     true,
-			HasAdvancedAnalytics: true,
-			SortOrder:            2,
-		},
-		{
-			ID:                   "pkg_vip",
-			Name:                 "Gói VIP Pro",
-			Description:          "Không giới hạn sáng tạo, full tính năng Carousel, Video & Analytics nâng cao.",
-			PriceMonthly:         3500000,
-			MaxSlots:             30,
-			MaxDurationDays:      60,
-			SupportsVideo:        true,
-			SupportsCarousel:     true,
-			HasAdvancedAnalytics: true,
-			SortOrder:            3,
-		},
-	}
-
-	for _, pkg := range packages {
-		db.Create(&pkg)
-	}
-	log.Println("[Seed] Đã tạo thành công 3 gói quảng cáo mẫu!")
 }

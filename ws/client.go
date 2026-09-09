@@ -10,15 +10,19 @@ import (
 
 	"linkup/dto"
 	"linkup/models"
+	"linkup/repository"
+	"linkup/utils"
 
 	"github.com/gorilla/websocket"
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 8192
+	writeWait             = 10 * time.Second
+	pongWait              = 60 * time.Second
+	pingPeriod            = (pongWait * 9) / 10
+	maxMessageSize        = 8192
+	defaultHistoryLimit   = 30
+	maxHistoryLimit       = 100
 )
 
 type Client struct {
@@ -27,19 +31,21 @@ type Client struct {
 	hub         *Hub
 	service     ChatService
 	callService CallService
+	postRepo    *repository.PostRepository
 	userID      string
 	send        chan []byte
 	joinedChats map[string]struct{}
 	typingChats map[string]bool
 }
 
-func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, callService CallService, userID string) *Client {
+func NewClient(ctx context.Context, conn *websocket.Conn, hub *Hub, service ChatService, callService CallService, postRepo *repository.PostRepository, userID string) *Client {
 	return &Client{
 		ctx:         ctx,
 		conn:        conn,
 		hub:         hub,
 		service:     service,
 		callService: callService,
+		postRepo:    postRepo,
 		userID:      userID,
 		send:        make(chan []byte, 256),
 		joinedChats: make(map[string]struct{}),
@@ -77,7 +83,7 @@ func (c *Client) ReadPump() {
 		// Chat events cần ChatService. Call events có nil check riêng.
 		if c.service == nil {
 			switch event.Type {
-			case "chat:join", "message:send", "typing:start", "typing:stop", "message:delete", "message:search":
+			case "chat:join", "chat:history:more", "message:send", "typing:start", "typing:stop", "message:delete", "message:search", "message:pin", "message:unpin", "message:read", "message:react":
 				continue
 			}
 		}
@@ -96,20 +102,32 @@ func (c *Client) ReadPump() {
 			c.joinedChats[payload.ChatID] = struct{}{}
 			c.hub.JoinChat(payload.ChatID, c)
 
-			history, err := c.service.GetAllMessages(c.ctx, c.userID, payload.ChatID)
-			if err != nil {
-				c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
-				continue
+			c.sendChatHistory("message:history", payload.ChatID, payload.BeforeCursor, resolveHistoryLimit(payload.Limit))
+
+			// Gửi danh sách tin nhắn đã ghim
+			if pins, err := c.service.GetPinnedMessages(c.ctx, c.userID, payload.ChatID); err == nil && len(pins) > 0 {
+				pinResp, _ := json.Marshal(dto.WsEvent{
+					Type:    "message:pinned_list",
+					Payload: mustMarshal(map[string]any{"pinned_messages": pins}),
+				})
+				c.send <- pinResp
 			}
 
-			resp, _ := json.Marshal(dto.WsEvent{
-				Type: "message:history",
-				Payload: mustMarshal(map[string]any{
-					"chat_id":  payload.ChatID,
-					"messages": toMessagePayloads(history),
-				}),
-			})
-			c.send <- resp
+		case "chat:history:more":
+			var payload dto.ChatHistoryMorePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu tải lịch sử không hợp lệ")
+				continue
+			}
+			if _, ok := c.joinedChats[payload.ChatID]; !ok {
+				if err := c.service.JoinChat(c.ctx, c.userID, payload.ChatID); err != nil {
+					c.sendError(err.Error())
+					continue
+				}
+				c.joinedChats[payload.ChatID] = struct{}{}
+				c.hub.JoinChat(payload.ChatID, c)
+			}
+			c.sendChatHistory("message:history_more", payload.ChatID, &payload.Cursor, resolveHistoryLimit(payload.Limit))
 
 		case "message:send":
 			var payload dto.SendMessagePayload
@@ -118,21 +136,64 @@ func (c *Client) ReadPump() {
 				continue
 			}
 
-			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.EmojiID, payload.MediaID, payload.ReplyToMessageID)
+			msg, err := c.service.SendMessage(c.ctx, c.userID, payload.ChatID, payload.Content, payload.E2EVersion, payload.EmojiID, payload.MediaID, payload.GifURL, payload.ReplyToMessageID, payload.SharedPostID, payload.MediaGroupID, payload.ForwardedFrom)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
+			}
+
+			// Tin nhắn E2E: server không đọc được nội dung, chuyển ciphertext
+			// nguyên trạng cho các client cùng chat (mỗi client tự giải mã).
+			content := msg.Content
+			if msg.E2EVersion == 0 {
+				decrypted, err := c.service.DecryptMessage(c.ctx, msg.ChatID, msg.Content)
+				if err != nil {
+					c.sendError("giải mã tin nhắn thất bại")
+					continue
+				}
+				content = decrypted
 			}
 
 			messagePayload := dto.MessagePayload{
 				ID:               msg.ID,
 				ChatID:           msg.ChatID,
 				SenderID:         msg.SenderID,
-				Content:          msg.Content,
+				Content:          content,
 				EmojiID:          msg.EmojiID,
 				MediaID:          msg.MediaID,
+				MediaGroupID:     msg.MediaGroupID,
 				ReplyToMessageID: msg.ReplyToMessageID,
+				SharedPostID:     msg.SharedPostID,
+				ForwardedFrom:    msg.ForwardedFrom,
+				ForwardsCount:    msg.ForwardsCount,
+				Type:             msg.Type,
+				E2EVersion:       msg.E2EVersion,
 				CreatedAt:        msg.CreatedAt,
+			}
+			if msg.MediaID != nil && *msg.MediaID != "" {
+				messagePayload.MediaType = c.service.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+				messagePayload.DurationSeconds = c.service.GetMediaDurations(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+			}
+			if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
+				if previews := c.service.GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
+					if preview, ok := previews[*msg.ReplyToMessageID]; ok {
+						encKey, _ := c.service.GetEncryptionKey(c.ctx, msg.ChatID)
+						if encKey != "" {
+							if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+								preview.Content = decrypted
+							}
+						}
+						messagePayload.ReplyTo = preview
+					}
+				}
+			}
+
+			if msg.SharedPostID != nil && *msg.SharedPostID != "" && c.postRepo != nil {
+				if sharedPosts := loadSharedPostsForMessages(c.ctx, []models.Message{*msg}, c.postRepo); sharedPosts != nil {
+					if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
+						messagePayload.SharedPost = sp
+					}
+				}
 			}
 
 			resp, _ := json.Marshal(dto.WsEvent{
@@ -219,10 +280,95 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(dto.SearchMessageResultPayload{
 					ChatID:   payload.ChatID,
 					Keyword:  payload.Keyword,
-					Messages: toMessagePayloads(messages),
+					Messages: toMessagePayloads(messages, c.userID, nil, loadMediaTypesForMessages(c.ctx, c.service, messages), loadMediaDurationsForMessages(c.ctx, c.service, messages)),
 				}),
 			})
 			c.send <- resp
+
+		case "message:pin":
+			var payload dto.PinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu ghim không hợp lệ")
+				continue
+			}
+
+			pinDTO, err := c.service.PinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			pinnedResp, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:pinned",
+				Payload: mustMarshal(pinDTO),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: pinnedResp}
+
+		case "message:unpin":
+			var payload dto.UnpinMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu bỏ ghim không hợp lệ")
+				continue
+			}
+
+			if err := c.service.UnpinMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			unpinnedResp, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:unpinned",
+				Payload: mustMarshal(dto.MessageUnpinnedPayload{ChatID: payload.ChatID, MessageID: payload.MessageID}),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: unpinnedResp}
+
+		case "message:read":
+			var payload dto.MessageReadPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu đã đọc không hợp lệ")
+				continue
+			}
+
+			state, err := c.service.MarkMessageRead(c.ctx, c.userID, payload.ChatID, payload.LastMessageID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+			if state == nil {
+				continue
+			}
+
+			readResp, _ := json.Marshal(dto.WsEvent{
+				Type:    "message:read",
+				Payload: mustMarshal(state),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: readResp}
+
+		case "message:react":
+			var payload dto.ReactMessagePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				c.sendError("dữ liệu cảm xúc không hợp lệ")
+				continue
+			}
+
+			action, reactions, err := c.service.ReactToMessage(c.ctx, c.userID, payload.ChatID, payload.MessageID, payload.EmojiID)
+			if err != nil {
+				c.sendError(err.Error())
+				continue
+			}
+
+			reactedResp, _ := json.Marshal(dto.WsEvent{
+				Type: "message:reacted",
+				Payload: mustMarshal(dto.MessageReactedPayload{
+					ChatID:    payload.ChatID,
+					MessageID: payload.MessageID,
+					UserID:    c.userID,
+					Action:    action,
+					EmojiID:   payload.EmojiID,
+					Reactions: reactions,
+				}),
+			})
+			c.hub.broadcast <- &BroadcastMessage{ChatID: payload.ChatID, Data: reactedResp}
 
 		case "call:busy":
 			// Client xác nhận đã nhận được thông báo busy — bỏ qua, không cần xử lý thêm
@@ -424,21 +570,227 @@ func mustMarshal(v any) json.RawMessage {
 	return out
 }
 
-func toMessagePayloads(messages []models.Message) []dto.MessagePayload {
+func toMessagePayloads(messages []models.Message, userID string, sharedPosts map[string]*dto.SharedPostPayload, mediaTypes map[string]string, mediaDurations map[string]int) []dto.MessagePayload {
 	result := make([]dto.MessagePayload, 0, len(messages))
 	for _, msg := range messages {
-		result = append(result, dto.MessagePayload{
-			ID:        msg.ID,
-			ChatID:    msg.ChatID,
-			SenderID:  msg.SenderID,
-			Content:   msg.Content,
-			EmojiID:   msg.EmojiID,
-			MediaID:   msg.MediaID,
+		deleted := isMessageDeletedFor(msg, userID)
+		content := msg.Content
+		if deleted {
+			content = ""
+		}
+		payload := dto.MessagePayload{
+			ID:               msg.ID,
+			ChatID:           msg.ChatID,
+			SenderID:         msg.SenderID,
+			Content:          content,
+			EmojiID:          msg.EmojiID,
+			MediaID:          msg.MediaID,
+			MediaGroupID:     msg.MediaGroupID,
 			ReplyToMessageID: msg.ReplyToMessageID,
-			CreatedAt: msg.CreatedAt,
-		})
+			SharedPostID:     msg.SharedPostID,
+			ForwardedFrom:    msg.ForwardedFrom,
+			ForwardsCount:    msg.ForwardsCount,
+			Type:             msg.Type,
+			E2EVersion:       msg.E2EVersion,
+			Deleted:          deleted,
+			CreatedAt:        msg.CreatedAt,
+		}
+		if msg.MediaID != nil && mediaTypes != nil {
+			payload.MediaType = mediaTypes[*msg.MediaID]
+		}
+		if msg.MediaID != nil && mediaDurations != nil {
+			payload.DurationSeconds = mediaDurations[*msg.MediaID]
+		}
+		if sharedPosts != nil && msg.SharedPostID != nil {
+			if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
+				payload.SharedPost = sp
+			}
+		}
+		result = append(result, payload)
 	}
 	return result
+}
+
+// applySeenBy gắn danh sách user đã đọc (seen_by) cho từng tin nhắn dựa trên
+// watermark đọc của từng thành viên trong chat. Bỏ qua chính người gửi.
+func applySeenBy(payloads []dto.MessagePayload, watermarks map[string]time.Time) {
+	for i := range payloads {
+		p := &payloads[i]
+		var seen []string
+		for userID, readAt := range watermarks {
+			if userID == p.SenderID {
+				continue
+			}
+			if !readAt.Before(p.CreatedAt) {
+				seen = append(seen, userID)
+			}
+		}
+		if len(seen) > 0 {
+			p.SeenBy = seen
+		}
+	}
+}
+
+func loadMediaTypesForMessages(ctx context.Context, service ChatService, messages []models.Message) map[string]string {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaID != nil && *m.MediaID != "" {
+			ids = append(ids, *m.MediaID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return service.GetMediaFileTypes(ctx, ids)
+}
+
+func loadMediaDurationsForMessages(ctx context.Context, service ChatService, messages []models.Message) map[string]int {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaID != nil && *m.MediaID != "" {
+			ids = append(ids, *m.MediaID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return service.GetMediaDurations(ctx, ids)
+}
+
+func loadSharedPostsForMessages(ctx context.Context, messages []models.Message, postRepo *repository.PostRepository) map[string]*dto.SharedPostPayload {
+	postIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		if m.SharedPostID != nil && *m.SharedPostID != "" {
+			if _, ok := seen[*m.SharedPostID]; !ok {
+				postIDs = append(postIDs, *m.SharedPostID)
+				seen[*m.SharedPostID] = struct{}{}
+			}
+		}
+	}
+	if len(postIDs) == 0 {
+		return nil
+	}
+	posts, err := postRepo.FindByIDs(ctx, postIDs)
+	if err != nil || len(posts) == 0 {
+		return nil
+	}
+	result := make(map[string]*dto.SharedPostPayload, len(posts))
+	for i := range posts {
+		p := &posts[i]
+		result[p.ID] = &dto.SharedPostPayload{
+			ID:          p.ID,
+			UserID:      p.UserID,
+			Username:    p.Username,
+			DisplayName: p.DisplayName,
+			AvatarURI:   p.AvatarURI,
+			Title:       p.Title,
+			Content:     p.Content,
+		}
+		if len(p.Media) > 0 {
+			result[p.ID].MediaURI = p.Media[0].FileURI
+			result[p.ID].MediaType = p.Media[0].FileType
+		}
+	}
+	return result
+}
+
+func isMessageDeletedFor(msg models.Message, userID string) bool {
+	if msg.SenderID == userID {
+		return msg.DeletedForSender
+	}
+	return msg.DeletedForReceiver
+}
+
+func resolveHistoryLimit(limit *int) int {
+	if limit == nil || *limit <= 0 {
+		return defaultHistoryLimit
+	}
+	if *limit > maxHistoryLimit {
+		return maxHistoryLimit
+	}
+	return *limit
+}
+
+// sendChatHistory tải một trang lịch sử (mới → cũ theo cursor), enrich reply
+// previews + shared posts rồi gửi qua WS. eventType = "message:history" (lần
+// đầu) hoặc "message:history_more" (tải thêm trang cũ hơn).
+func (c *Client) sendChatHistory(eventType, chatID string, cursor *dto.HistoryCursor, limit int) {
+	history, err := c.service.GetMessagesHistory(c.ctx, c.userID, chatID, cursor, limit)
+	if err != nil {
+		c.sendError(fmt.Sprintf("lấy lịch sử: %v", err))
+		return
+	}
+
+	hasMore := false
+	var nextCursor *dto.HistoryCursor
+	if len(history) > limit {
+		history = history[:limit]
+		hasMore = true
+	}
+	if len(history) > 0 {
+		oldest := history[len(history)-1]
+		nextCursor = &dto.HistoryCursor{CreatedAt: oldest.CreatedAt, ID: oldest.ID}
+	}
+
+	var sharedPosts map[string]*dto.SharedPostPayload
+	if c.postRepo != nil {
+		sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
+	}
+	payloads := toMessagePayloads(history, c.userID, sharedPosts, loadMediaTypesForMessages(c.ctx, c.service, history), loadMediaDurationsForMessages(c.ctx, c.service, history))
+
+	replyIDs := make([]string, 0)
+	for _, p := range payloads {
+		if p.ReplyToMessageID != nil && *p.ReplyToMessageID != "" {
+			replyIDs = append(replyIDs, *p.ReplyToMessageID)
+		}
+	}
+	if previews := c.service.GetReplyPreviews(c.ctx, replyIDs); previews != nil {
+		encKey, _ := c.service.GetEncryptionKey(c.ctx, chatID)
+		for _, preview := range previews {
+			if encKey != "" {
+				if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+					preview.Content = decrypted
+				}
+			}
+		}
+		for i := range payloads {
+			if payloads[i].ReplyToMessageID != nil {
+				if preview, ok := previews[*payloads[i].ReplyToMessageID]; ok {
+					payloads[i].ReplyTo = preview
+				}
+			}
+		}
+	}
+
+	// Read receipts: gắn danh sách user đã đọc từng tin nhắn (watermark đọc).
+	if watermarks, err := c.service.GetChatReadWatermarks(c.ctx, chatID); err == nil {
+		applySeenBy(payloads, watermarks)
+	}
+
+	// Message reactions: gắn danh sách cảm xúc cho từng tin nhắn.
+	ids := make([]string, 0, len(payloads))
+	for _, p := range payloads {
+		ids = append(ids, p.ID)
+	}
+	if reactions := c.service.GetMessageReactions(c.ctx, ids); reactions != nil {
+		for i := range payloads {
+			if list, ok := reactions[payloads[i].ID]; ok && list != nil {
+				payloads[i].Reactions = list
+			}
+		}
+	}
+
+	resp, _ := json.Marshal(dto.WsEvent{
+		Type: eventType,
+		Payload: mustMarshal(map[string]any{
+			"chat_id":     chatID,
+			"messages":    payloads,
+			"has_more":    hasMore,
+			"next_cursor": nextCursor,
+		}),
+	})
+	c.send <- resp
 }
 
 func (c *Client) handleTypingEvent(chatID, eventType string) bool {

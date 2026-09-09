@@ -23,8 +23,13 @@ type Post struct {
 	Content     string     `json:"content"`
 	ViewsCount  int        `json:"views_count"`
 	Status      PostStatus `json:"status"`
+	IsPinned    bool       `json:"is_pinned"`
+	PinnedAt    *time.Time `json:"pinned_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
+
+	SharedFromPostID *string `json:"shared_from_post_id,omitempty"`
+	ShareContent     *string `json:"share_content,omitempty"`
 
 	LikesCount    int `json:"likes_count" gorm:"->"`
 	CommentsCount int `json:"comments_count" gorm:"->"`
@@ -34,11 +39,18 @@ type Post struct {
 	DisplayName string `json:"display_name" gorm:"->"`
 	AvatarURI   string `json:"avatar_uri" gorm:"->"`
 
-	Media []Media `json:"media" gorm:"-"`
+	Media      []Media `json:"media" gorm:"-"`
+	SharedPost *Post   `json:"shared_post,omitempty" gorm:"-"`
 
 	IsLiked     bool `json:"is_liked" gorm:"->"`
 	IsSaved     bool `json:"is_saved" gorm:"->"`
+	IsShared    bool `json:"is_shared" gorm:"->"`
 	IsFollowing bool `json:"is_following" gorm:"->"`
+
+	FeedScore float64 `json:"-" gorm:"->"`
+
+	SavedAt    *time.Time `json:"saved_at,omitempty" gorm:"->"`
+	BookmarkID *string    `json:"bookmark_id,omitempty" gorm:"->"`
 }
 
 func NewPost(userID, title, content string, status PostStatus) Post {

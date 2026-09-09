@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/services"
 	"net/http"
 
@@ -21,19 +22,19 @@ func NewReportController(reportService *services.ReportService) *ReportControlle
 func (h *ReportController) CreateReport(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	var input dto.CreateReportInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	response, err := h.reportService.CreateReport(c.Request.Context(), userID.(string), input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -43,25 +44,25 @@ func (h *ReportController) CreateReport(c *gin.Context) {
 func (h *ReportController) UpdateReport(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "người dùng chưa xác thực"})
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
 
 	reportID := c.Param("id")
 	if reportID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "report id không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	var input dto.UpdateReportInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dữ liệu đầu vào không hợp lệ"})
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
 
 	response, err := h.reportService.UpdateReport(c.Request.Context(), userID.(string), reportID, input)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 

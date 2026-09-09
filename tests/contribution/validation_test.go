@@ -2,6 +2,7 @@ package contribution_test
 
 import (
 	"testing"
+	"time"
 
 	"linkup/dto"
 	"linkup/validations"
@@ -37,7 +38,7 @@ func TestValidatePolicyInput(t *testing.T) {
 				TopContributorThreshold:     2500,
 				ModeratorPromotionThreshold: 5000,
 			},
-			wantErr: "trọng số bài viết phải từ 0 đến 100",
+			wantErr: "Trọng số bài viết phải từ 0 đến 100",
 		},
 		{
 			name: "threshold order invalid",
@@ -49,7 +50,7 @@ func TestValidatePolicyInput(t *testing.T) {
 				TopContributorThreshold:     5000,
 				ModeratorPromotionThreshold: 2500,
 			},
-			wantErr: "ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor",
+			wantErr: "Ngưỡng Moderator phải lớn hơn ngưỡng Top Contributor",
 		},
 	}
 
@@ -75,6 +76,10 @@ func TestValidatePolicyInput(t *testing.T) {
 func TestValidateCreateChallenge(t *testing.T) {
 	v := validations.NewContributionValidation()
 
+	// Dates relative to now so the "must be in the future" rule never goes stale.
+	start := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
+	end := time.Now().Add(48 * time.Hour).Format(time.RFC3339)
+
 	tests := []struct {
 		name    string
 		input   dto.CreateChallengeInput
@@ -87,8 +92,8 @@ func TestValidateCreateChallenge(t *testing.T) {
 				Description:     "Share your best photo",
 				Hashtag:         "#LinkUpPhoto",
 				PointsPerPost:   15,
-				StartDate:       "2026-09-01T00:00:00Z",
-				EndDate:         "2026-09-07T00:00:00Z",
+				StartDate:       start,
+				EndDate:         end,
 				MaxParticipants: nil,
 			},
 			wantErr: "",
@@ -100,10 +105,10 @@ func TestValidateCreateChallenge(t *testing.T) {
 				Description:   "Share your best photo",
 				Hashtag:       "LinkUpPhoto",
 				PointsPerPost: 15,
-				StartDate:     "2026-09-01T00:00:00Z",
-				EndDate:       "2026-09-07T00:00:00Z",
+				StartDate:     start,
+				EndDate:       end,
 			},
-			wantErr: "hashtag phải bắt đầu bằng #",
+			wantErr: "Hashtag phải bắt đầu bằng #",
 		},
 		{
 			name: "end before start",
@@ -115,7 +120,7 @@ func TestValidateCreateChallenge(t *testing.T) {
 				StartDate:     "2026-09-10T00:00:00Z",
 				EndDate:       "2026-09-03T00:00:00Z",
 			},
-			wantErr: "ngày kết thúc phải sau ngày bắt đầu",
+			wantErr: "Ngày kết thúc phải sau ngày bắt đầu",
 		},
 	}
 
