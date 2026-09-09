@@ -83,7 +83,7 @@ jobs:
             # Health check (up to 60s)
             echo "Waiting for server (up to 60s)..."
             for i in $(seq 1 20); do
-              if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              if curl -skf https://localhost/health > /dev/null 2>&1; then
                 echo "SERVER HEALTHY after ${i}x3s"
                 break
               fi
@@ -91,13 +91,13 @@ jobs:
             done
 
             # Rollback on failure
-            if ! curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+            if ! curl -skf https://localhost/health > /dev/null 2>&1; then
               echo "DEPLOY FAILED — rolling back to previous image..."
               docker compose down server
               docker tag linkup-server:prev linkup-server:latest 2>/dev/null || true
-              docker compose up -d server
+              docker compose up -d --no-build server
               sleep 10
-              if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              if curl -skf https://localhost/health > /dev/null 2>&1; then
                 echo "ROLLBACK OK — server restored from prev image"
               else
                 echo "ROLLBACK ALSO FAILED!"
