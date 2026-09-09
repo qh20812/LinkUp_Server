@@ -72,7 +72,7 @@ jobs:
             docker tag linkup-server:latest linkup-server:prev 2>/dev/null || true
 
             # Sync config files
-            cd /opt/linkup/server && git pull origin main && cd /opt/linkup
+            cd /opt/linkup/server && git fetch origin main && git reset --hard origin/main && cd /opt/linkup
 
             # Load new image
             docker load -i /tmp/server.tar.gz
