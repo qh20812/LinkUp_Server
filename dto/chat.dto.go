@@ -151,11 +151,25 @@ type ChatPartnerDTO struct {
 }
 
 type ChatConversationDTO struct {
-	ChatID      string          `json:"chat_id"`
-	Partner     ChatPartnerDTO  `json:"partner"`
-	LastMessage *MessagePayload `json:"last_message,omitempty"`
-	IsEncrypted bool            `json:"is_encrypted"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	ChatID          string          `json:"chat_id"`
+	Partner         ChatPartnerDTO  `json:"partner"`
+	LastMessage     *MessagePayload `json:"last_message,omitempty"`
+	IsEncrypted     bool            `json:"is_encrypted"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	BackgroundType  string          `json:"background_type,omitempty"`
+	BackgroundValue string          `json:"background_value,omitempty"`
+}
+
+// ChatBackgroundDTO is the request body for updating chat background.
+type ChatBackgroundDTO struct {
+	Type  string `json:"type" binding:"required"`
+	Value string `json:"value" binding:"required"`
+}
+
+// ChatBackgroundResponse is the response body for chat background.
+type ChatBackgroundResponse struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
 }
 
 type ChatListResponse struct {
@@ -256,4 +270,48 @@ type MessageReactedPayload struct {
 	Action    string                 `json:"action"`
 	EmojiID   string                 `json:"emoji_id,omitempty"`
 	Reactions []MessageReactionPayload `json:"reactions,omitempty"`
+}
+
+// ── Shared content (Chat Detail Sidebar) ──────────────────────────────────
+
+type SharedMediaItem struct {
+	MessageID       string  `json:"message_id"`
+	MediaID         string  `json:"media_id"`
+	FileURI         string  `json:"file_uri"`
+	FileType        string  `json:"file_type"`
+	FileSize        float64 `json:"file_size"`
+	DurationSeconds int     `json:"duration_seconds"`
+	CreatedAt       string  `json:"created_at"`
+}
+
+type SharedFileItem struct {
+	MessageID string  `json:"message_id"`
+	MediaID   string  `json:"media_id"`
+	FileURI   string  `json:"file_uri"`
+	FileType  string  `json:"file_type"`
+	FileName  string  `json:"file_name"`
+	FileSize  float64 `json:"file_size"`
+	CreatedAt string  `json:"created_at"`
+}
+
+type SharedLinkItem struct {
+	MessageID string `json:"message_id"`
+	URL       string `json:"url"`
+	SenderID  string `json:"sender_id"`
+	CreatedAt string `json:"created_at"`
+}
+
+type SharedPostItem struct {
+	MessageID    string `json:"message_id"`
+	PostID       string `json:"post_id"`
+	PostContent  string `json:"post_content"`
+	PostAuthorID string `json:"post_author_id"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type SharedContentResponse struct {
+	Media []SharedMediaItem `json:"media"`
+	Files []SharedFileItem  `json:"files"`
+	Links []SharedLinkItem  `json:"links"`
+	Posts []SharedPostItem  `json:"posts"`
 }

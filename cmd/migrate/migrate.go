@@ -147,6 +147,25 @@ func Run(db *gorm.DB) {
 	ensureForeignKey(db, "chat_reads", "fk_chat_reads_chat", "chat_id", "chats", "id")
 	ensureForeignKey(db, "chat_reads", "fk_chat_reads_user", "user_id", "users", "id")
 
+	// ===== Chat user settings (per-user per-chat background) =====
+	if !db.Migrator().HasTable(&models.ChatUserSettings{}) {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS chat_user_settings (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			background_type VARCHAR(20) NULL,
+			background_value VARCHAR(500) NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (chat_id, user_id),
+			KEY idx_cus_chat (chat_id),
+			KEY idx_cus_user (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create chat_user_settings table: %v", err)
+		}
+	}
+	ensureForeignKey(db, "chat_user_settings", "fk_cus_chat", "chat_id", "chats", "id")
+	ensureForeignKey(db, "chat_user_settings", "fk_cus_user", "user_id", "users", "id")
+
 	// ===== Message reactions (Phase 4) table =====
 	if !db.Migrator().HasTable(&models.MessageReaction{}) {
 		if err := db.Exec(`CREATE TABLE IF NOT EXISTS message_reactions (

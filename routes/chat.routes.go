@@ -26,5 +26,11 @@ func RegisterChatRoutes(router *gin.Engine, ctrl *controllers.ChatController, en
 		chatGroup.GET("/messages/:messageID/download", ctrl.DownloadMessageMedia)
 		chatGroup.DELETE("/:chatID", ctrl.DeleteChat)
 		chatGroup.POST("/share", ctrl.SharePost)
+
+		chatGroup.GET("/:chatID/background", ctrl.GetChatBackground)
+		chatGroup.PUT("/:chatID/background", ctrl.UpdateChatBackground)
+		chatGroup.DELETE("/:chatID/background", ctrl.DeleteChatBackground)
+
+		chatGroup.GET("/:chatID/shared-content", ctrl.GetSharedContent)
 	}
 }

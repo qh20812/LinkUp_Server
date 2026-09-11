@@ -398,7 +398,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		PartnerUserID      string     `gorm:"column:partner_user_id"`
 		PartnerDisplayName string     `gorm:"column:partner_display_name"`
 		PartnerAvatarURI   string     `gorm:"column:partner_avatar_uri"`
-LastMessageID        *string     `gorm:"column:last_message_id"`
+		LastMessageID        *string     `gorm:"column:last_message_id"`
 		LastContent          *string     `gorm:"column:last_content"`
 		LastSenderID         *string     `gorm:"column:last_sender_id"`
 		LastE2EVersion       *int        `gorm:"column:last_e2e_version"`
@@ -407,6 +407,8 @@ LastMessageID        *string     `gorm:"column:last_message_id"`
 		LastForwardedFrom    *string     `gorm:"column:last_forwarded_from"`
 		LastCreatedAt        *time.Time  `gorm:"column:last_created_at"`
 		UpdatedAt            time.Time   `gorm:"column:updated_at"`
+		BackgroundType       string      `gorm:"column:background_type"`
+		BackgroundValue      string      `gorm:"column:background_value"`
 	}{}
 
 	err := r.db.WithContext(ctx).
@@ -423,7 +425,9 @@ LastMessageID        *string     `gorm:"column:last_message_id"`
 			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
 			lm.forwarded_from AS last_forwarded_from,
 			lm.created_at AS last_created_at,
-			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
+			COALESCE(lm.created_at, chats.created_at) AS updated_at,
+			COALESCE(cus.background_type, '') AS background_type,
+			COALESCE(cus.background_value, '') AS background_value`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
 		Joins("JOIN chat_participants AS partner ON partner.chat_id = chats.id AND partner.user_id <> ?", userID).
 		Joins("LEFT JOIN profiles ON profiles.user_id = partner.user_id").
@@ -436,6 +440,7 @@ LastMessageID        *string     `gorm:"column:last_message_id"`
 			LIMIT 1
 		)`, userID, userID).
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
+		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeDirect).
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
@@ -453,6 +458,11 @@ LastMessageID        *string     `gorm:"column:last_message_id"`
 				AvatarURI:   row.PartnerAvatarURI,
 			},
 			UpdatedAt: row.UpdatedAt,
+		}
+
+		if row.BackgroundType != "" {
+			conv.BackgroundType = row.BackgroundType
+			conv.BackgroundValue = row.BackgroundValue
 		}
 
 		if row.LastMessageID != nil && row.LastContent != nil && row.LastCreatedAt != nil {
@@ -795,4 +805,134 @@ func (r *ChatRepository) CanReadMessage(ctx context.Context, messageID, userID s
 		return false, err
 	}
 	return r.IsUserParticipant(ctx, msg.ChatID, userID)
+}
+
+// ── Shared content (Chat Detail Sidebar) ──────────────────────────────────
+
+const e2eFilter = `AND NOT (
+	(m.sender_id = ? AND m.deleted_for_sender = true)
+	OR (m.sender_id <> ? AND m.deleted_for_receiver = true)
+)`
+
+func (r *ChatRepository) GetSharedMedia(ctx context.Context, chatID, userID string, offset, limit int) ([]dto.SharedMediaItem, error) {
+	var items []dto.SharedMediaItem
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT m.id AS message_id,
+			md.id AS media_id, md.file_uri, md.file_type, md.file_size, md.duration_seconds,
+			DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%SZ') AS created_at
+		FROM messages m
+		JOIN media md ON md.id = m.media_id
+		WHERE m.chat_id = ?
+			AND m.deleted_at IS NULL
+			AND (md.file_type LIKE 'image/%' OR md.file_type LIKE 'video/%')
+			`+e2eFilter+`
+		ORDER BY m.created_at DESC
+		LIMIT ? OFFSET ?`,
+		chatID, userID, userID, limit, offset,
+	).Scan(&items).Error
+	if err != nil {
+		return nil, fmt.Errorf("get shared media: %w", err)
+	}
+	return items, nil
+}
+
+func (r *ChatRepository) GetSharedFiles(ctx context.Context, chatID, userID string, offset, limit int) ([]dto.SharedFileItem, error) {
+	var items []dto.SharedFileItem
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT m.id AS message_id,
+			md.id AS media_id, md.file_uri, md.file_type, md.file_size,
+			COALESCE(SUBSTRING_INDEX(md.file_uri, '/', -1), 'file') AS file_name,
+			DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%SZ') AS created_at
+		FROM messages m
+		JOIN media md ON md.id = m.media_id
+		WHERE m.chat_id = ?
+			AND m.deleted_at IS NULL
+			AND md.file_type NOT LIKE 'image/%'
+			AND md.file_type NOT LIKE 'video/%'
+			`+e2eFilter+`
+		ORDER BY m.created_at DESC
+		LIMIT ? OFFSET ?`,
+		chatID, userID, userID, limit, offset,
+	).Scan(&items).Error
+	if err != nil {
+		return nil, fmt.Errorf("get shared files: %w", err)
+	}
+	return items, nil
+}
+
+func (r *ChatRepository) GetSharedLinks(ctx context.Context, chatID, userID string, offset, limit int) ([]dto.SharedLinkItem, error) {
+	var items []dto.SharedLinkItem
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT m.id AS message_id,
+			m.sender_id,
+			DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%SZ') AS created_at,
+			SUBSTRING_INDEX(SUBSTRING_INDEX(m.content, ' ', 1), '\n', 1) AS url
+		FROM messages m
+		WHERE m.chat_id = ?
+			AND m.deleted_at IS NULL
+			AND m.content REGEXP 'https?://'
+			`+e2eFilter+`
+		ORDER BY m.created_at DESC
+		LIMIT ? OFFSET ?`,
+		chatID, userID, userID, limit, offset,
+	).Scan(&items).Error
+	if err != nil {
+		return nil, fmt.Errorf("get shared links: %w", err)
+	}
+	for i := range items {
+		items[i].URL = extractFirstURL(items[i].URL)
+	}
+	return items, nil
+}
+
+func (r *ChatRepository) GetSharedPosts(ctx context.Context, chatID, userID string, offset, limit int) ([]dto.SharedPostItem, error) {
+	var items []dto.SharedPostItem
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT m.id AS message_id,
+			m.shared_post_id AS post_id,
+			COALESCE(p.content, '') AS post_content,
+			COALESCE(p.user_id, '') AS post_author_id,
+			DATE_FORMAT(m.created_at, '%Y-%m-%dT%H:%i:%SZ') AS created_at
+		FROM messages m
+		LEFT JOIN posts p ON p.id = m.shared_post_id
+		WHERE m.chat_id = ?
+			AND m.deleted_at IS NULL
+			AND m.shared_post_id IS NOT NULL
+			`+e2eFilter+`
+		ORDER BY m.created_at DESC
+		LIMIT ? OFFSET ?`,
+		chatID, userID, userID, limit, offset,
+	).Scan(&items).Error
+	if err != nil {
+		return nil, fmt.Errorf("get shared posts: %w", err)
+	}
+	return items, nil
+}
+
+// extractFirstURL lấy URL đầu tiên từ chuỗi nội dung tin nhắn.
+func extractFirstURL(content string) string {
+	for _, word := range splitWords(content) {
+		if len(word) > 8 && (substringMatch(word, "http://") || substringMatch(word, "https://")) {
+			return word
+		}
+	}
+	return content
+}
+
+func splitWords(s string) []string {
+	var words []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ' ' || s[i] == '\n' || s[i] == '\t' || s[i] == '\r' {
+			if i > start {
+				words = append(words, s[start:i])
+			}
+			start = i + 1
+		}
+	}
+	return words
+}
+
+func substringMatch(s, substr string) bool {
+	return len(s) >= len(substr) && s[:len(substr)] == substr
 }

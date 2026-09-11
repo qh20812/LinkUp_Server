@@ -9,6 +9,7 @@ import (
 	"linkup/groupws"
 	"linkup/services"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -435,6 +436,84 @@ func (ctrl *GroupChatController) broadcastToChat(chatID string, event dto.WsEven
 
 func (ctrl *GroupChatController) getActorName(ctx context.Context, userID string) string {
 	return ctrl.groupService.GetDisplayName(ctx, userID)
+}
+
+func (ctrl *GroupChatController) GetChatBackground(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	background, err := ctrl.groupService.GetChatBackground(c.Request.Context(), chatID, userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": background})
+}
+
+func (ctrl *GroupChatController) UpdateChatBackground(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	var input dto.ChatBackgroundDTO
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	background, err := ctrl.groupService.UpdateChatBackground(c.Request.Context(), chatID, userID, input.Type, input.Value)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": background})
+}
+
+func (ctrl *GroupChatController) DeleteChatBackground(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+
+	if err := ctrl.groupService.DeleteChatBackground(c.Request.Context(), chatID, userID); err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "background deleted"})
+}
+
+// ── Shared content (Chat Detail Sidebar) ──────────────────────────────────
+
+func (ctrl *GroupChatController) GetSharedContent(c *gin.Context) {
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	userID := fmt.Sprintf("%v", userIDVal)
+	chatID := c.Param("chatID")
+	tab := c.DefaultQuery("tab", "all")
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
+
+	content, err := ctrl.groupService.GetSharedContent(c.Request.Context(), chatID, userID, tab, offset, limit)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": content})
 }
 
 func mustMarshalCtrl(v any) []byte {

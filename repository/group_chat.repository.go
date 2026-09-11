@@ -432,6 +432,8 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		LastForwardedFrom *string    `gorm:"column:last_forwarded_from"`
 		LastCreated       *time.Time `gorm:"column:last_created_at"`
 		UpdatedAt         time.Time  `gorm:"column:updated_at"`
+		BackgroundType    string     `gorm:"column:background_type"`
+		BackgroundValue   string     `gorm:"column:background_value"`
 	}
 
 	var rows []row
@@ -449,7 +451,9 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
 			lm.forwarded_from AS last_forwarded_from,
 			lm.created_at AS last_created_at,
-			COALESCE(lm.created_at, chats.created_at) AS updated_at`).
+			COALESCE(lm.created_at, chats.created_at) AS updated_at,
+			COALESCE(cus.background_type, '') AS background_type,
+			COALESCE(cus.background_value, '') AS background_value`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
 		Joins("JOIN chat_participants AS cp2 ON cp2.chat_id = chats.id").
 		Joins(`LEFT JOIN messages AS lm ON lm.id = (
@@ -461,8 +465,9 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			LIMIT 1
 		)`, userID, userID).
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
+		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeGroup).
-		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at").
+		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -477,6 +482,10 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			AvatarURI:   r.AvatarURI,
 			MemberCount: r.MemberCount,
 			UpdatedAt:   r.UpdatedAt,
+		}
+		if r.BackgroundType != "" {
+			item.BackgroundType = r.BackgroundType
+			item.BackgroundValue = r.BackgroundValue
 		}
 		if r.LastMsgID != nil && r.LastContent != nil && r.LastCreated != nil {
 			item.LastMessage = &dto.MessagePayload{

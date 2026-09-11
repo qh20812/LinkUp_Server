@@ -28,20 +28,22 @@ type GroupInviteContent struct {
 }
 
 type GroupChatService struct {
-	groupRepo    *repository.GroupChatRepository
-	chatRepo     *repository.ChatRepository
-	chatService  *ChatService
-	notifService *NotificationService
-	validation   *validations.GroupChatValidation
+	groupRepo              *repository.GroupChatRepository
+	chatRepo               *repository.ChatRepository
+	chatService            *ChatService
+	notifService           *NotificationService
+	validation             *validations.GroupChatValidation
+	chatUserSettingsRepo   *repository.ChatUserSettingsRepository
 }
 
-func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *repository.ChatRepository, chatService *ChatService, notifService *NotificationService, validation *validations.GroupChatValidation) *GroupChatService {
+func NewGroupChatService(groupRepo *repository.GroupChatRepository, chatRepo *repository.ChatRepository, chatService *ChatService, notifService *NotificationService, validation *validations.GroupChatValidation, chatUserSettingsRepo *repository.ChatUserSettingsRepository) *GroupChatService {
 	return &GroupChatService{
-		groupRepo:    groupRepo,
-		chatRepo:     chatRepo,
-		chatService:  chatService,
-		notifService: notifService,
-		validation:   validation,
+		groupRepo:              groupRepo,
+		chatRepo:               chatRepo,
+		chatService:            chatService,
+		notifService:           notifService,
+		validation:             validation,
+		chatUserSettingsRepo:   chatUserSettingsRepo,
 	}
 }
 
@@ -821,4 +823,89 @@ func (s *GroupChatService) isNotificationsEnabled(ctx context.Context, chatID, u
 		return true
 	}
 	return settings.NotificationsEnabled
+}
+
+func (s *GroupChatService) GetChatBackground(ctx context.Context, chatID, userID string) (*dto.ChatBackgroundResponse, error) {
+	settings, err := s.chatUserSettingsRepo.GetByChatAndUser(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if settings == nil {
+		return &dto.ChatBackgroundResponse{Type: "", Value: ""}, nil
+	}
+	return &dto.ChatBackgroundResponse{
+		Type:  string(settings.BackgroundType),
+		Value: settings.BackgroundValue,
+	}, nil
+}
+
+func (s *GroupChatService) UpdateChatBackground(ctx context.Context, chatID, userID, bgType, bgValue string) (*dto.ChatBackgroundResponse, error) {
+	parsed := models.ParseBackgroundType(bgType)
+	if parsed == "" {
+		return nil, fmt.Errorf("invalid background type: %s", bgType)
+	}
+	settings := &models.ChatUserSettings{
+		ChatID:          chatID,
+		UserID:          userID,
+		BackgroundType:  parsed,
+		BackgroundValue: bgValue,
+	}
+	if err := s.chatUserSettingsRepo.Upsert(ctx, settings); err != nil {
+		return nil, err
+	}
+	return &dto.ChatBackgroundResponse{
+		Type:  string(parsed),
+		Value: bgValue,
+	}, nil
+}
+
+func (s *GroupChatService) DeleteChatBackground(ctx context.Context, chatID, userID string) error {
+	return s.chatUserSettingsRepo.Delete(ctx, chatID, userID)
+}
+
+// ── Shared content (Chat Detail Sidebar) ──────────────────────────────────
+
+func (s *GroupChatService) GetSharedContent(ctx context.Context, chatID, userID, tab string, offset, limit int) (*dto.SharedContentResponse, error) {
+	ok, err := s.chatRepo.IsUserParticipant(ctx, chatID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
+	}
+
+	if limit <= 0 {
+		limit = sharedContentPageSize
+	}
+
+	resp := &dto.SharedContentResponse{}
+
+	switch tab {
+	case "media":
+		resp.Media, err = s.chatRepo.GetSharedMedia(ctx, chatID, userID, offset, limit)
+	case "files":
+		resp.Files, err = s.chatRepo.GetSharedFiles(ctx, chatID, userID, offset, limit)
+	case "links":
+		resp.Links, err = s.chatRepo.GetSharedLinks(ctx, chatID, userID, offset, limit)
+	case "posts":
+		resp.Posts, err = s.chatRepo.GetSharedPosts(ctx, chatID, userID, offset, limit)
+	default: // "all"
+		resp.Media, err = s.chatRepo.GetSharedMedia(ctx, chatID, userID, 0, limit)
+		if err != nil {
+			return nil, err
+		}
+		resp.Files, err = s.chatRepo.GetSharedFiles(ctx, chatID, userID, 0, limit)
+		if err != nil {
+			return nil, err
+		}
+		resp.Links, err = s.chatRepo.GetSharedLinks(ctx, chatID, userID, 0, limit)
+		if err != nil {
+			return nil, err
+		}
+		resp.Posts, err = s.chatRepo.GetSharedPosts(ctx, chatID, userID, 0, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

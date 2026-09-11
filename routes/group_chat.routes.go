@@ -27,5 +27,11 @@ func RegisterGroupChatRoutes(router *gin.Engine, ctrl *controllers.GroupChatCont
 		groupChatGroup.POST("/:chatID/mute", ctrl.MuteMember)
 		groupChatGroup.POST("/:chatID/unmute", ctrl.UnmuteMember)
 		groupChatGroup.POST("/:chatID/leave", ctrl.LeaveGroup)
+
+		groupChatGroup.GET("/:chatID/background", ctrl.GetChatBackground)
+		groupChatGroup.PUT("/:chatID/background", ctrl.UpdateChatBackground)
+		groupChatGroup.DELETE("/:chatID/background", ctrl.DeleteChatBackground)
+
+		groupChatGroup.GET("/:chatID/shared-content", ctrl.GetSharedContent)
 	}
 }

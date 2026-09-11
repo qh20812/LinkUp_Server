@@ -324,3 +324,61 @@ func (ctrl *ChatController) UploadChatMedia(c *gin.Context) {
 		},
 	})
 }
+
+func (ctrl *ChatController) GetChatBackground(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("chatID")
+
+	background, err := ctrl.chatService.GetChatBackground(c.Request.Context(), chatID, userID)
+	if err != nil {
+		errorsapp.RespondError(c, http.StatusInternalServerError, errorsapp.New(errorsapp.ErrCodeInternal))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": background})
+}
+
+func (ctrl *ChatController) UpdateChatBackground(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("chatID")
+
+	var input dto.ChatBackgroundDTO
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	background, err := ctrl.chatService.UpdateChatBackground(c.Request.Context(), chatID, userID, input.Type, input.Value)
+	if err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": background})
+}
+
+func (ctrl *ChatController) DeleteChatBackground(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("chatID")
+
+	if err := ctrl.chatService.DeleteChatBackground(c.Request.Context(), chatID, userID); err != nil {
+		errorsapp.RespondError(c, http.StatusInternalServerError, errorsapp.New(errorsapp.ErrCodeInternal))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "background deleted"})
+}
+
+// ── Shared content (Chat Detail Sidebar) ──────────────────────────────────
+
+func (ctrl *ChatController) GetSharedContent(c *gin.Context) {
+	userID := c.GetString("userID")
+	chatID := c.Param("chatID")
+	tab := c.DefaultQuery("tab", "all")
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
+
+	content, err := ctrl.chatService.GetSharedContent(c.Request.Context(), chatID, userID, tab, offset, limit)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": content})
+}
