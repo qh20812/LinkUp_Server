@@ -75,7 +75,8 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 		return nil, nil
 	}
 
-	if s.hub.IsUserOnline(payload.CalleeID) {
+	calleeOnline := s.hub.IsUserOnline(payload.CalleeID)
+	if calleeOnline {
 		s.hub.SendToUser(payload.CalleeID, ws.OutgoingMessage{
 			Type: "call:incoming",
 			Data: dto.CallIncomingPayload{
@@ -85,6 +86,33 @@ func (s *VoiceCallService) InitiateCall(ctx context.Context, callerID string, pa
 				Timestamp: now.UnixMilli(),
 			},
 		})
+	} else {
+		// Callee is offline — mark call as missed immediately, notify caller,
+		// and create a missed-call notification so the callee sees it when
+		// they come back online.
+		endedAt := now
+		if err := s.callRepo.UpdateStatus(ctx, call.ID, models.CallStatusMissed, nil, &endedAt, 0); err != nil {
+			fmt.Printf("[voice_call] failed to update missed status: %v\n", err)
+		}
+
+		s.hub.SendToUser(callerID, ws.OutgoingMessage{
+			Type: "call:status",
+			Data: dto.CallStatusPayload{
+				CallID:             call.ID,
+				Status:             string(models.CallStatusMissed),
+				CallerID:           callerID,
+				CalleeID:           payload.CalleeID,
+				CallType:           string(callType),
+				VideoEnabledCaller: false,
+				VideoEnabledCallee: false,
+				EndedAt:            ptr(now.UnixMilli()),
+			},
+		})
+
+		if s.notifService != nil {
+			senderID := callerID
+			s.notifService.Create(ctx, payload.CalleeID, &senderID, models.NotificationTypeVoiceCall, "đã gọi nhỡ cho bạn", nil, &callerID, nil)
+		}
 	}
 
 	s.hub.SendToUser(callerID, ws.OutgoingMessage{
