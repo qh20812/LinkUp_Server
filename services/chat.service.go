@@ -250,6 +250,29 @@ func (s *ChatService) GetMediaFileTypes(ctx context.Context, mediaIDs []string) 
 	return result
 }
 
+func (s *ChatService) GetMediaInfo(ctx context.Context, mediaIDs []string) map[string]dto.MediaInfo {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	repoResult, err := s.mediaRepo.GetMediaInfoByIDs(ctx, ids)
+	if err != nil {
+		return map[string]dto.MediaInfo{}
+	}
+	result := make(map[string]dto.MediaInfo, len(repoResult))
+	for id, info := range repoResult {
+		result[id] = dto.MediaInfo{FileType: info.FileType, FileURI: info.FileURI}
+	}
+	return result
+}
+
 func (s *ChatService) GetMessagesHistory(ctx context.Context, userID, chatID string, cursor *dto.HistoryCursor, limit int) ([]models.Message, error) {
 	if err := s.JoinChat(ctx, userID, chatID); err != nil {
 		return nil, err

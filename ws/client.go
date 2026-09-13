@@ -169,7 +169,10 @@ func (c *Client) ReadPump() {
 				CreatedAt:        msg.CreatedAt,
 			}
 			if msg.MediaID != nil && *msg.MediaID != "" {
-				messagePayload.MediaType = c.service.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+				if info, ok := c.service.GetMediaInfo(c.ctx, []string{*msg.MediaID})[*msg.MediaID]; ok {
+					messagePayload.MediaType = info.FileType
+					messagePayload.MediaURI = info.FileURI
+				}
 			}
 			if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
 				if previews := c.service.GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
@@ -277,7 +280,7 @@ func (c *Client) ReadPump() {
 				Payload: mustMarshal(dto.SearchMessageResultPayload{
 					ChatID:   payload.ChatID,
 					Keyword:  payload.Keyword,
-					Messages: toMessagePayloads(messages, c.userID, nil, loadMediaTypesForMessages(c.ctx, c.service, messages)),
+					Messages: toMessagePayloads(messages, c.userID, nil, loadMediaInfoForMessages(c.ctx, c.service, messages)),
 				}),
 			})
 			c.send <- resp
@@ -519,7 +522,7 @@ func mustMarshal(v any) json.RawMessage {
 	return out
 }
 
-func toMessagePayloads(messages []models.Message, userID string, sharedPosts map[string]*dto.SharedPostPayload, mediaTypes map[string]string) []dto.MessagePayload {
+func toMessagePayloads(messages []models.Message, userID string, sharedPosts map[string]*dto.SharedPostPayload, mediaInfos map[string]dto.MediaInfo) []dto.MessagePayload {
 	result := make([]dto.MessagePayload, 0, len(messages))
 	for _, msg := range messages {
 		deleted := isMessageDeletedFor(msg, userID)
@@ -542,8 +545,11 @@ func toMessagePayloads(messages []models.Message, userID string, sharedPosts map
 			Deleted:          deleted,
 			CreatedAt:        msg.CreatedAt,
 		}
-		if msg.MediaID != nil && mediaTypes != nil {
-			payload.MediaType = mediaTypes[*msg.MediaID]
+		if msg.MediaID != nil && mediaInfos != nil {
+			if info, ok := mediaInfos[*msg.MediaID]; ok {
+				payload.MediaType = info.FileType
+				payload.MediaURI = info.FileURI
+			}
 		}
 		if sharedPosts != nil && msg.SharedPostID != nil {
 			if sp, ok := sharedPosts[*msg.SharedPostID]; ok {
@@ -555,7 +561,7 @@ func toMessagePayloads(messages []models.Message, userID string, sharedPosts map
 	return result
 }
 
-func loadMediaTypesForMessages(ctx context.Context, service ChatService, messages []models.Message) map[string]string {
+func loadMediaInfoForMessages(ctx context.Context, service ChatService, messages []models.Message) map[string]dto.MediaInfo {
 	ids := make([]string, 0, len(messages))
 	for _, m := range messages {
 		if m.MediaID != nil && *m.MediaID != "" {
@@ -565,7 +571,7 @@ func loadMediaTypesForMessages(ctx context.Context, service ChatService, message
 	if len(ids) == 0 {
 		return nil
 	}
-	return service.GetMediaFileTypes(ctx, ids)
+	return service.GetMediaInfo(ctx, ids)
 }
 
 func loadSharedPostsForMessages(ctx context.Context, messages []models.Message, postRepo *repository.PostRepository) map[string]*dto.SharedPostPayload {
@@ -648,7 +654,7 @@ func (c *Client) sendChatHistory(eventType, chatID string, cursor *dto.HistoryCu
 	if c.postRepo != nil {
 		sharedPosts = loadSharedPostsForMessages(c.ctx, history, c.postRepo)
 	}
-	payloads := toMessagePayloads(history, c.userID, sharedPosts, loadMediaTypesForMessages(c.ctx, c.service, history))
+	payloads := toMessagePayloads(history, c.userID, sharedPosts, loadMediaInfoForMessages(c.ctx, c.service, history))
 
 	replyIDs := make([]string, 0)
 	for _, p := range payloads {

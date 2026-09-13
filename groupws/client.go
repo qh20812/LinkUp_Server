@@ -168,7 +168,7 @@ func (c *Client) ReadPump() {
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
 		sharedPosts := c.messageService.LoadSharedPosts(c.ctx, history)
-		mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(history))
+		mediaInfos := c.messageService.GetMediaInfo(c.ctx, collectGroupMediaIDs(history))
 
 		msgs := make([]dto.MessagePayload, 0, len(history))
 		for _, m := range history {
@@ -189,8 +189,11 @@ func (c *Client) ReadPump() {
 				Deleted:          m.DeletedAt != nil,
 				CreatedAt:        m.CreatedAt,
 			}
-			if m.MediaID != nil && mediaTypes != nil {
-				p.MediaType = mediaTypes[*m.MediaID]
+			if m.MediaID != nil && mediaInfos != nil {
+				if info, ok := mediaInfos[*m.MediaID]; ok {
+					p.MediaType = info.FileType
+					p.MediaURI = info.FileURI
+				}
 			}
 			if prof, ok := profiles[m.SenderID]; ok {
 				p.SenderName = prof.DisplayName
@@ -306,7 +309,10 @@ func (c *Client) ReadPump() {
 			CreatedAt:        msg.CreatedAt,
 		}
 		if msg.MediaID != nil && *msg.MediaID != "" {
-			newPayload.MediaType = c.messageService.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+			if info, ok := c.messageService.GetMediaInfo(c.ctx, []string{*msg.MediaID})[*msg.MediaID]; ok {
+				newPayload.MediaType = info.FileType
+				newPayload.MediaURI = info.FileURI
+			}
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})
 		if prof, ok := profiles[msg.SenderID]; ok {
@@ -375,7 +381,7 @@ func (c *Client) ReadPump() {
 			}
 
 			out := make([]dto.MessagePayload, 0, len(messages))
-			mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(messages))
+			mediaInfos := c.messageService.GetMediaInfo(c.ctx, collectGroupMediaIDs(messages))
 			for _, m := range messages {
 				p := dto.MessagePayload{
 					ID:            m.ID,
@@ -387,8 +393,11 @@ func (c *Client) ReadPump() {
 					MediaGroupID:  m.MediaGroupID,
 					CreatedAt:     m.CreatedAt,
 				}
-				if m.MediaID != nil && mediaTypes != nil {
-					p.MediaType = mediaTypes[*m.MediaID]
+				if m.MediaID != nil && mediaInfos != nil {
+					if info, ok := mediaInfos[*m.MediaID]; ok {
+						p.MediaType = info.FileType
+						p.MediaURI = info.FileURI
+					}
 				}
 				out = append(out, p)
 			}

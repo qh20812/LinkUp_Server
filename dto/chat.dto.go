@@ -48,6 +48,7 @@ type MessagePayload struct {
 	MediaID          *string             `json:"media_id,omitempty"`
 	MediaGroupID     *string             `json:"media_group_id,omitempty"`
 	MediaType        string              `json:"media_type,omitempty"`
+	MediaURI         string              `json:"media_uri,omitempty"`
 	ReplyToMessageID *string             `json:"reply_to_message_id,omitempty"`
 	ReplyTo          *ReplyPreview       `json:"reply_to,omitempty"`
 	SharedPostID     *string             `json:"shared_post_id,omitempty"`
@@ -203,4 +204,9 @@ type PinnedMessageDTO struct {
 
 type PinnedMessagesResponse struct {
 	PinnedMessages []PinnedMessageDTO `json:"pinned_messages"`
+}
+
+type MediaInfo struct {
+	FileType string
+	FileURI  string
 }
