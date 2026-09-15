@@ -149,3 +149,11 @@ func (h *AuthController) Logout(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "đăng xuất thành công"})
 }
+
+func (h *AuthController) GetPasswordPolicy(c *gin.Context) {
+	minLength, maxLength := h.authService.GetPasswordPolicy(c.Request.Context())
+	c.JSON(http.StatusOK, gin.H{
+		"min_length": minLength,
+		"max_length": maxLength,
+	})
+}
