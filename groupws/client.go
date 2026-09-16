@@ -168,7 +168,7 @@ func (c *Client) ReadPump() {
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, senderIDs)
 		sharedPosts := c.messageService.LoadSharedPosts(c.ctx, history)
-		mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(history))
+		mediaInfos := c.messageService.GetMediaInfo(c.ctx, collectGroupMediaIDs(history))
 		mediaDurations := c.messageService.GetMediaDurations(c.ctx, collectGroupMediaIDs(history))
 
 		msgs := make([]dto.MessagePayload, 0, len(history))
@@ -192,8 +192,11 @@ func (c *Client) ReadPump() {
 				Deleted:          m.DeletedAt != nil,
 				CreatedAt:        m.CreatedAt,
 			}
-			if m.MediaID != nil && mediaTypes != nil {
-				p.MediaType = mediaTypes[*m.MediaID]
+			if m.MediaID != nil && mediaInfos != nil {
+				if info, ok := mediaInfos[*m.MediaID]; ok {
+					p.MediaType = info.FileType
+					p.MediaURI = info.FileURI
+				}
 			}
 			if m.MediaID != nil && mediaDurations != nil {
 				p.DurationSeconds = mediaDurations[*m.MediaID]
@@ -333,7 +336,10 @@ for i := range msgs {
 			CreatedAt:        msg.CreatedAt,
 		}
 		if msg.MediaID != nil && *msg.MediaID != "" {
-			newPayload.MediaType = c.messageService.GetMediaFileTypes(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
+			if info, ok := c.messageService.GetMediaInfo(c.ctx, []string{*msg.MediaID})[*msg.MediaID]; ok {
+				newPayload.MediaType = info.FileType
+				newPayload.MediaURI = info.FileURI
+			}
 			newPayload.DurationSeconds = c.messageService.GetMediaDurations(c.ctx, []string{*msg.MediaID})[*msg.MediaID]
 		}
 		profiles := c.messageService.GetMemberProfiles(c.ctx, payload.ChatID, []string{msg.SenderID})
@@ -403,7 +409,7 @@ for i := range msgs {
 			}
 
 			out := make([]dto.MessagePayload, 0, len(messages))
-			mediaTypes := c.messageService.GetMediaFileTypes(c.ctx, collectGroupMediaIDs(messages))
+			mediaInfos := c.messageService.GetMediaInfo(c.ctx, collectGroupMediaIDs(messages))
 			mediaDurations := c.messageService.GetMediaDurations(c.ctx, collectGroupMediaIDs(messages))
 			for _, m := range messages {
 				p := dto.MessagePayload{
@@ -418,8 +424,11 @@ for i := range msgs {
 					ForwardsCount:    m.ForwardsCount,
 					CreatedAt:        m.CreatedAt,
 				}
-				if m.MediaID != nil && mediaTypes != nil {
-					p.MediaType = mediaTypes[*m.MediaID]
+				if m.MediaID != nil && mediaInfos != nil {
+					if info, ok := mediaInfos[*m.MediaID]; ok {
+						p.MediaType = info.FileType
+						p.MediaURI = info.FileURI
+					}
 				}
 				if m.MediaID != nil && mediaDurations != nil {
 					p.DurationSeconds = mediaDurations[*m.MediaID]

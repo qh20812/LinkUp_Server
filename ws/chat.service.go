@@ -21,6 +21,7 @@ type ChatService interface {
 	GetReplyPreviews(ctx context.Context, messageIDs []string) map[string]*dto.ReplyPreview
 	GetMediaFileTypes(ctx context.Context, mediaIDs []string) map[string]string
 	GetMediaDurations(ctx context.Context, mediaIDs []string) map[string]int
+	GetMediaInfo(ctx context.Context, mediaIDs []string) map[string]dto.MediaInfo
 	PinMessage(ctx context.Context, userID, chatID, messageID string) (*dto.PinnedMessageDTO, error)
 	UnpinMessage(ctx context.Context, userID, chatID, messageID string) error
 	GetPinnedMessages(ctx context.Context, userID, chatID string) ([]dto.PinnedMessageDTO, error)

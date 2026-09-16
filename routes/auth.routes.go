@@ -17,6 +17,7 @@ func RegisterAuthRoutes(router *gin.Engine, authController *controllers.AuthCont
 		auth.POST("/refresh", authController.RefreshToken)
 		auth.POST("/verify-email", emailVerifyController.VerifyEmail)
 		auth.POST("/resend-verification", emailVerifyController.ResendVerification)
+		auth.GET("/password-policy", authController.GetPasswordPolicy)
 		
 		protected := auth.Group("")
 		protected.Use(middlewares.AuthMiddleware(env, db))

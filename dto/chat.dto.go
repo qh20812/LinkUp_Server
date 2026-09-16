@@ -49,6 +49,7 @@ type MessagePayload struct {
 	MediaID          *string             `json:"media_id,omitempty"`
 	MediaGroupID     *string             `json:"media_group_id,omitempty"`
 	MediaType        string              `json:"media_type,omitempty"`
+	MediaURI         string              `json:"media_uri,omitempty"`
 	DurationSeconds  int                 `json:"duration_seconds,omitempty"`
 	ReplyToMessageID *string             `json:"reply_to_message_id,omitempty"`
 	ReplyTo          *ReplyPreview       `json:"reply_to,omitempty"`
@@ -314,4 +315,9 @@ type SharedContentResponse struct {
 	Files []SharedFileItem  `json:"files"`
 	Links []SharedLinkItem  `json:"links"`
 	Posts []SharedPostItem  `json:"posts"`
+}
+
+type MediaInfo struct {
+	FileType string
+	FileURI  string
 }

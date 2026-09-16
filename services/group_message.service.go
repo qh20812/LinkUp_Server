@@ -453,6 +453,29 @@ func (s *GroupMessageService) GetMediaDurations(ctx context.Context, mediaIDs []
 	return result
 }
 
+func (s *GroupMessageService) GetMediaInfo(ctx context.Context, mediaIDs []string) map[string]dto.MediaInfo {
+	ids := make([]string, 0, len(mediaIDs))
+	seen := make(map[string]struct{}, len(mediaIDs))
+	for _, id := range mediaIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	repoResult, err := s.mediaRepo.GetMediaInfoByIDs(ctx, ids)
+	if err != nil {
+		return map[string]dto.MediaInfo{}
+	}
+	result := make(map[string]dto.MediaInfo, len(repoResult))
+	for id, info := range repoResult {
+		result[id] = dto.MediaInfo{FileType: info.FileType, FileURI: info.FileURI}
+	}
+	return result
+}
+
 func (s *GroupMessageService) GetGroupCallsByChatID(ctx context.Context, userID, chatID string) ([]repository.GroupCallDocument, error) {
 	if _, err := s.ensureGroupMember(ctx, userID, chatID); err != nil {
 		return nil, err

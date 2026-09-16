@@ -72,6 +72,10 @@ func (s *AuthService) getMinPasswordLength(ctx context.Context) int {
 	return n
 }
 
+func (s *AuthService) GetPasswordPolicy(ctx context.Context) (minLength, maxLength int) {
+	return s.getMinPasswordLength(ctx), 50
+}
+
 func (s *AuthService) getJWTExpiryMinutes(ctx context.Context) int {
 	cfg, err := s.adminSettingsRepo.GetByKey(ctx, "jwt_expiry_minutes")
 	if err != nil || cfg == nil {
