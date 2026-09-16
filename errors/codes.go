@@ -142,6 +142,7 @@ const (
 	ErrCodeDisplayNameRequired    = "auth.DISPLAY_NAME_REQUIRED"
 	ErrCodeDisplayNameTooShort    = "auth.DISPLAY_NAME_TOO_SHORT"
 	ErrCodeDisplayNameTooLong     = "auth.DISPLAY_NAME_TOO_LONG"
+	ErrCodeDisplayNameInvalid     = "auth.DISPLAY_NAME_INVALID"
 	ErrCodeEmailRequired          = "auth.EMAIL_REQUIRED"
 	ErrCodeEmailInvalid           = "auth.EMAIL_INVALID"
 	ErrCodePasswordRequired       = "auth.PASSWORD_REQUIRED"

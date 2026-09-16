@@ -7,6 +7,7 @@ import (
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/validations"
 	"log"
 	"net/url"
 	"path"
@@ -81,6 +82,9 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
 	}
 
 	if input.DisplayName != nil && *input.DisplayName != "" {
+		if err := validations.ValidateDisplayName(*input.DisplayName); err != nil {
+			return nil, err
+		}
 		existingProfile.DisplayName = *input.DisplayName
 	}
 	if input.PhoneNumber != nil {

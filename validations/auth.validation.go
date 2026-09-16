@@ -8,6 +8,8 @@ import (
 )
 
 var (
+	displayNameRe = regexp.MustCompile(`^[\p{L}\p{M}\d ]+$`)
+
 	ErrUsernameRequired       = errorsapp.New("auth.USERNAME_REQUIRED")
 	ErrUsernameTooShort       = errorsapp.Newf("auth.USERNAME_TOO_SHORT", map[string]any{"min": 3})
 	ErrUsernameTooLong        = errorsapp.Newf("auth.USERNAME_TOO_LONG", map[string]any{"max": 30})
@@ -24,6 +26,7 @@ var (
 	ErrDisplayNameRequired    = errorsapp.New("auth.DISPLAY_NAME_REQUIRED")
 	ErrDisplayNameTooShort    = errorsapp.Newf("auth.DISPLAY_NAME_TOO_SHORT", map[string]any{"min": 3})
 	ErrDisplayNameTooLong     = errorsapp.Newf("auth.DISPLAY_NAME_TOO_LONG", map[string]any{"max": 55})
+	ErrDisplayNameInvalid     = errorsapp.New("auth.DISPLAY_NAME_INVALID")
 	ErrPasswordSameAsOld      = errorsapp.New("auth.PASSWORD_SAME_AS_OLD")
 )
 
@@ -68,7 +71,7 @@ func (v *AuthValidation) ValidateUsername(username string) error {
 	return nil
 }
 
-func (v *AuthValidation) ValidateDisplayName(displayName string) error {
+func ValidateDisplayName(displayName string) error {
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		return ErrDisplayNameRequired
@@ -79,7 +82,14 @@ func (v *AuthValidation) ValidateDisplayName(displayName string) error {
 	if len([]rune(displayName)) < 3 {
 		return ErrDisplayNameTooShort
 	}
+	if !displayNameRe.MatchString(displayName) {
+		return ErrDisplayNameInvalid
+	}
 	return nil
+}
+
+func (v *AuthValidation) ValidateDisplayName(displayName string) error {
+	return ValidateDisplayName(displayName)
 }
 
 func (v *AuthValidation) ValidateEmail(email string) error {
