@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -46,10 +47,13 @@ func (r *SearchRepository) SearchPosts(ctx context.Context, keyword string) ([]d
 
 	err := r.db.WithContext(ctx).
 		Model(&models.Post{}).
-		Select("posts.id, posts.title, posts.user_id, users.username, posts.created_at").
+		Select(`posts.id, posts.title, LEFT(posts.content, 200) AS content, posts.user_id, users.username, posts.created_at,
+			(SELECT m.file_uri FROM media m WHERE m.post_id = posts.id AND m.status <> 'rejected' AND m.file_type LIKE 'image/%' ORDER BY m.created_at LIMIT 1) AS thumbnail_uri,
+			(SELECT m.file_type FROM media m WHERE m.post_id = posts.id AND m.status <> 'rejected' AND m.file_type LIKE 'image/%' ORDER BY m.created_at LIMIT 1) AS thumbnail_type,
+			(SELECT COUNT(*) FROM media m WHERE m.post_id = posts.id AND m.status <> 'rejected' AND m.file_type LIKE 'video/%') AS video_count`).
 		Joins("LEFT JOIN users ON users.id = posts.user_id").
 		Where("posts.status = ?", models.PostStatusPublic).
-		Where("posts.title LIKE ?", like).
+		Where("posts.title LIKE ? OR posts.content LIKE ?", like, like).
 		Limit(10).
 		Scan(&results).Error
 	if err != nil {
@@ -100,6 +104,8 @@ func (r *SearchRepository) GetTrendingHashtags(ctx context.Context) ([]dto.Hasht
 }
 
 func (r *SearchRepository) SearchHashtags(ctx context.Context, keyword string) ([]dto.HashtagSearchResult, error) {
+	keyword = strings.TrimPrefix(keyword, "#")
+
 	var results []dto.HashtagSearchResult
 	like := "%" + keyword + "%"
 
@@ -132,7 +138,7 @@ func (r *SearchRepository) SearchCommunities(ctx context.Context, keyword string
 		Table("communities").
 		Select(`communities.id, communities.name, communities.avatar_uri, communities.privacy,
 			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
-		Where("communities.status = ? AND communities.name ILIKE ?",
+		Where("communities.status = ? AND communities.name LIKE ?",
 			models.CommunityStatusActive, "%"+keyword+"%").
 		Order("member_count DESC").
 		Limit(10).

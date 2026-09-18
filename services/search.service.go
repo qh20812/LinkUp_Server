@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -90,19 +91,19 @@ func (s *SearchService) Search(ctx context.Context, input dto.SearchInput) (dto.
 	default:
 		resp.Users, err = s.searchRepo.SearchUsers(ctx, input.Keyword)
 		if err != nil {
-			return dto.SearchResponse{}, fmt.Errorf("search users: %w", err)
+			log.Printf("[Search] không thể tìm người dùng: %v", err)
 		}
 		resp.Posts, err = s.searchRepo.SearchPosts(ctx, input.Keyword)
 		if err != nil {
-			return dto.SearchResponse{}, fmt.Errorf("search posts: %w", err)
+			log.Printf("[Search] không thể tìm bài viết: %v", err)
 		}
 		resp.Hashtags, err = s.searchRepo.SearchHashtags(ctx, input.Keyword)
 		if err != nil {
-			return dto.SearchResponse{}, fmt.Errorf("search hashtags: %w", err)
+			log.Printf("[Search] không thể tìm hashtag: %v", err)
 		}
 		resp.Communities, err = s.searchRepo.SearchCommunities(ctx, input.Keyword)
 		if err != nil {
-			return dto.SearchResponse{}, fmt.Errorf("search communities: %w", err)
+			log.Printf("[Search] không thể tìm cộng đồng: %v", err)
 		}
 		setSearchMessage(&resp)
 		return resp, nil

@@ -310,9 +310,19 @@ const (
 	ErrCodeModUploadFailed      = "moderation.UPLOAD_FAILED"
 
 	// ── Profile ────────────────────────────────────────────────
-	ErrCodeProfileNotFound = "profile.PROFILE_NOT_FOUND"
-	ErrCodeProfilePrivate  = "profile.PRIVATE_PROFILE"
-	ErrCodePhoneExists     = "profile.PHONE_EXISTS"
+	ErrCodeProfileNotFound     = "profile.PROFILE_NOT_FOUND"
+	ErrCodeProfilePrivate      = "profile.PRIVATE_PROFILE"
+	ErrCodePhoneExists         = "profile.PHONE_EXISTS"
+	ErrCodeWorkInvalid         = "profile.WORK_INVALID"
+	ErrCodeEducationInvalid    = "profile.EDUCATION_INVALID"
+	ErrCodeWorkOtherRequired   = "profile.WORK_OTHER_REQUIRED"
+	ErrCodeWorkOtherTooLong    = "profile.WORK_OTHER_TOO_LONG"
+
+	// ── Location ───────────────────────────────────────────────
+	ErrCodeInvalidCoordinates  = "location.INVALID_COORDINATES"
+	ErrCodeProvinceNotFound    = "location.PROVINCE_NOT_FOUND"
+	ErrCodeWardNotFound        = "location.WARD_NOT_FOUND"
+	ErrCodeGeocodeFailed       = "location.GEOCODE_FAILED"
 
 	// ── Password Reset ─────────────────────────────────────────
 	ErrCodeResetTokenNotFound = "password_reset.TOKEN_NOT_FOUND"

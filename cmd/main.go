@@ -15,6 +15,7 @@ import (
 	"linkup/controllers"
 	"linkup/db"
 	"linkup/groupws"
+	"linkup/internal/locations"
 	"linkup/middlewares"
 	"linkup/repository"
 	"linkup/routes"
@@ -147,6 +148,16 @@ func main() {
 		profileService := services.NewProfileService(profileRepository) // profileRepository đã được khởi tạo ở notification layer
 		profileController := controllers.NewProfileController(profileService)
 		routes.RegisterProfileRoutes(router, profileController, env, gormDB)
+
+		// ===== KHỞI TẠO TẦNG LOCATION (ĐƠN VỊ HÀNH CHÍNH + REVERSE GEOCODING) =====
+		locationStore, err := locations.NewStore()
+		if err != nil {
+			log.Fatalf("failed to load location data: %v", err)
+		}
+		locationGeocoder := locations.NewNominatimGeocoder(nil)
+		locationService := locations.NewService(locationStore, locationGeocoder)
+		locationController := controllers.NewLocationController(locationService)
+		routes.RegisterLocationRoutes(router, locationController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG FOLLOW (THEO DÕI) =====
 		followRepository := repository.NewFollowRepository(gormDB)

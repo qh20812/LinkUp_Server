@@ -15,11 +15,15 @@ type UserSearchResult struct {
 }
 
 type PostSearchResult struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	UserID    string    `json:"user_id"`
-	Username  string    `json:"username"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Content       string    `json:"content,omitempty"`
+	UserID        string    `json:"user_id"`
+	Username      string    `json:"username"`
+	CreatedAt     time.Time `json:"created_at"`
+	ThumbnailURI  string    `json:"thumbnail_uri,omitempty"`
+	ThumbnailType string    `json:"thumbnail_type,omitempty"`
+	VideoCount    int       `json:"video_count,omitempty"`
 }
 
 type HashtagSearchResult struct {

@@ -70,6 +70,16 @@ func (r *ProfileRepository) Update(ctx context.Context, userID string, profile *
 	return profile, nil
 }
 
+// UpdateSelected persists only the given column names, which is required for
+// zero-value fields (e.g. clearing current_ward to "").
+func (r *ProfileRepository) UpdateSelected(ctx context.Context, userID string, profile *models.Profile, columns []string) error {
+	tx := r.db.WithContext(ctx).Model(&models.Profile{}).Where("user_id = ?", userID).Select(columns).Updates(profile)
+	if tx.Error != nil {
+		return fmt.Errorf("update profile selected: %w", tx.Error)
+	}
+	return nil
+}
+
 // ProfileView is an enriched profile that includes data from the users and posts tables.
 type ProfileView struct {
  models.Profile

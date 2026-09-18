@@ -70,6 +70,12 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "profiles", "education", "VARCHAR(255) NOT NULL DEFAULT ''")
 	ensureColumn(db, "profiles", "website", "VARCHAR(255) NOT NULL DEFAULT ''")
 
+	// Thêm cột profile cấu trúc (địa điểm / nghề nghiệp / học vấn)
+	ensureColumn(db, "profiles", "hometown_province", "VARCHAR(10) NOT NULL DEFAULT ''")
+	ensureColumn(db, "profiles", "current_province", "VARCHAR(10) NOT NULL DEFAULT ''")
+	ensureColumn(db, "profiles", "current_ward", "VARCHAR(10) NOT NULL DEFAULT ''")
+	ensureColumn(db, "profiles", "work_other", "VARCHAR(255) NOT NULL DEFAULT ''")
+
 	// Thêm cột likes_count vào comments cho comment reactions
 	ensureColumn(db, "comments", "likes_count", "INT NOT NULL DEFAULT 0")
 

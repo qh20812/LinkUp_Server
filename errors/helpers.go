@@ -169,6 +169,15 @@ func StatusCode(code string) int {
 		default:
 			return http.StatusBadRequest
 		}
+	case strings.HasPrefix(code, "location."):
+		switch {
+		case strings.HasSuffix(code, "NOT_FOUND"):
+			return http.StatusNotFound
+		case strings.HasSuffix(code, "GEOCODE_FAILED"):
+			return http.StatusGatewayTimeout
+		default:
+			return http.StatusBadRequest
+		}
 	case strings.HasPrefix(code, "password_reset."):
 		switch {
 		case strings.HasSuffix(code, "NOT_FOUND"):

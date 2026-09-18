@@ -81,64 +81,123 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
 		}
 	}
 
+	profVal := validations.NewProfileValidation()
+
+	// Track provided columns so zero-value fields can be persisted.
+	cols := []string{"updated_at"}
+
 	if input.DisplayName != nil && *input.DisplayName != "" {
 		if err := validations.ValidateDisplayName(*input.DisplayName); err != nil {
 			return nil, err
 		}
 		existingProfile.DisplayName = *input.DisplayName
+		cols = append(cols, "display_name")
 	}
 	if input.PhoneNumber != nil {
 		existingProfile.PhoneNumber = *input.PhoneNumber
+		cols = append(cols, "phone_number")
 	}
 	if input.DateOfBirth != nil {
 		existingProfile.DateOfBirth = input.DateOfBirth
+		cols = append(cols, "date_of_birth")
 	}
 	if input.AvatarURI != nil {
 		if err := s.validateMediaURI(ctx, *input.AvatarURI); err != nil {
 			return nil, err
 		}
 		existingProfile.AvatarURI = *input.AvatarURI
+		cols = append(cols, "avatar_uri")
 	}
 	if input.CoverURI != nil {
 		if err := s.validateMediaURI(ctx, *input.CoverURI); err != nil {
 			return nil, err
 		}
 		existingProfile.CoverURI = *input.CoverURI
+		cols = append(cols, "cover_uri")
 	}
 	if input.Bio != nil {
 		existingProfile.Bio = *input.Bio
+		cols = append(cols, "bio")
 	}
 	if input.Location != nil {
 		existingProfile.Location = *input.Location
+		cols = append(cols, "location")
 	}
-	if input.Work != nil {
-		existingProfile.Work = *input.Work
+	if input.HometownProvince != nil {
+		existingProfile.HometownProvince = *input.HometownProvince
+		cols = append(cols, "hometown_province")
 	}
-	if input.Education != nil {
-		existingProfile.Education = *input.Education
+	if input.CurrentProvince != nil {
+		existingProfile.CurrentProvince = *input.CurrentProvince
+		cols = append(cols, "current_province")
+	}
+	if input.CurrentWard != nil {
+		existingProfile.CurrentWard = *input.CurrentWard
+		cols = append(cols, "current_ward")
 	}
 	if input.Website != nil {
 		existingProfile.Website = *input.Website
+		cols = append(cols, "website")
 	}
 	if input.IsPrivateProfile != nil {
 		existingProfile.IsPrivateProfile = *input.IsPrivateProfile
+		cols = append(cols, "is_private_profile")
 	}
 	if input.IsPrivatePosts != nil {
 		existingProfile.IsPrivatePosts = *input.IsPrivatePosts
+		cols = append(cols, "is_private_posts")
 	}
 	if input.AllowStrangerFriendRequest != nil {
 		existingProfile.AllowStrangerFriendRequest = *input.AllowStrangerFriendRequest
+		cols = append(cols, "allow_stranger_friend_request")
+	}
+
+	// Work — enum validation + cross-field work_other rule.
+	finalWork := existingProfile.Work
+	if input.Work != nil {
+		finalWork = *input.Work
+		if err := profVal.ValidateWorkCode(finalWork); err != nil {
+			return nil, err
+		}
+		existingProfile.Work = finalWork
+		cols = append(cols, "work")
+	}
+
+	// Education — enum validation.
+	if input.Education != nil {
+		if err := profVal.ValidateEducationCode(*input.Education); err != nil {
+			return nil, err
+		}
+		existingProfile.Education = *input.Education
+		cols = append(cols, "education")
+	}
+
+	// WorkOther — force-clear when work != "other".
+	finalWorkOther := existingProfile.WorkOther
+	if input.WorkOther != nil {
+		finalWorkOther = *input.WorkOther
+	}
+	if finalWork != "other" {
+		finalWorkOther = ""
+	}
+	if input.WorkOther != nil || finalWork != "other" {
+		existingProfile.WorkOther = finalWorkOther
+		cols = append(cols, "work_other")
+		if finalWork == "other" {
+			if err := profVal.ValidateWorkOther(finalWork, finalWorkOther); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	now := time.Now().Truncate(0)
 	existingProfile.UpdatedAt = &now
 
-	result, err := s.profileRepository.Update(ctx, userID, existingProfile)
-	if err != nil {
+	if err := s.profileRepository.UpdateSelected(ctx, userID, existingProfile, cols); err != nil {
 		return nil, fmt.Errorf("edit profile: %w", err)
 	}
 
-	return result, nil
+	return existingProfile, nil
 }
 
 // validateMediaURI kiểm tra media URI có tồn tại và không bị reject.

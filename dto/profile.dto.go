@@ -9,8 +9,12 @@ type ViewProfileResponse struct {
     AvatarURI                  string     `json:"avatar_uri"`
     Bio                        string     `json:"bio"`
     Location                   string     `json:"location"`
+    HometownProvince           string     `json:"hometown_province"`
+    CurrentProvince            string     `json:"current_province"`
+    CurrentWard                string     `json:"current_ward"`
     Work                       string     `json:"work"`
     Education                  string     `json:"education"`
+    WorkOther                  string     `json:"work_other"`
     Website                    string     `json:"website"`
     IsPrivateProfile           bool       `json:"is_private_profile"`
     IsPrivatePosts             bool       `json:"is_private_posts"`
@@ -31,8 +35,12 @@ type EditProfileInput struct {
     CoverURI                   *string    `json:"cover_uri"`
     Bio                        *string    `json:"bio"`
     Location                   *string    `json:"location"`
+    HometownProvince           *string    `json:"hometown_province"`
+    CurrentProvince            *string    `json:"current_province"`
+    CurrentWard                *string    `json:"current_ward"`
     Work                       *string    `json:"work"`
     Education                  *string    `json:"education"`
+    WorkOther                  *string    `json:"work_other"`
     Website                    *string    `json:"website"`
     IsPrivateProfile           *bool      `json:"is_private_profile"`
     IsPrivatePosts             *bool      `json:"is_private_posts"`

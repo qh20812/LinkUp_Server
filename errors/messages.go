@@ -313,9 +313,19 @@ var Messages = map[string]string{
 	"moderation.UPLOAD_FAILED":             "Tải lên + kiểm duyệt thất bại",
 
 	// ── Profile ────────────────────────────────────────────────
-	"profile.PROFILE_NOT_FOUND": "Không tìm thấy hồ sơ",
-	"profile.PRIVATE_PROFILE":   "Hồ sơ này ở chế độ riêng tư",
-	"profile.PHONE_EXISTS":      "Số điện thoại đã tồn tại",
+	"profile.PROFILE_NOT_FOUND":   "Không tìm thấy hồ sơ",
+	"profile.PRIVATE_PROFILE":     "Hồ sơ này ở chế độ riêng tư",
+	"profile.PHONE_EXISTS":        "Số điện thoại đã tồn tại",
+	"profile.WORK_INVALID":        "Nghề nghiệp không hợp lệ",
+	"profile.EDUCATION_INVALID":   "Trình độ học vấn không hợp lệ",
+	"profile.WORK_OTHER_REQUIRED": "Vui lòng nhập mô tả nghề nghiệp",
+	"profile.WORK_OTHER_TOO_LONG": "Mô tả nghề nghiệp không được vượt quá 255 ký tự",
+
+	// ── Location ───────────────────────────────────────────────
+	"location.INVALID_COORDINATES": "Tọa độ không hợp lệ",
+	"location.PROVINCE_NOT_FOUND":  "Không tìm thấy tỉnh/thành phố",
+	"location.WARD_NOT_FOUND":      "Không tìm thấy xã/phường",
+	"location.GEOCODE_FAILED":      "Không thể xác định vị trí",
 
 	// ── Password Reset ─────────────────────────────────────────
 	"password_reset.TOKEN_NOT_FOUND": "Token không hợp lệ",

@@ -40,8 +40,12 @@ func (h *ProfileController) ViewProfile(c *gin.Context) {
 		CoverURI:                   profile.CoverURI,
 		Bio:                        profile.Bio,
 		Location:                   profile.Location,
+		HometownProvince:           profile.HometownProvince,
+		CurrentProvince:            profile.CurrentProvince,
+		CurrentWard:                profile.CurrentWard,
 		Work:                       profile.Work,
 		Education:                  profile.Education,
+		WorkOther:                  profile.WorkOther,
 		Website:                    profile.Website,
 		IsPrivateProfile:           profile.IsPrivateProfile,
 		IsPrivatePosts:             profile.IsPrivatePosts,
@@ -82,8 +86,12 @@ func (h *ProfileController) ViewProfileByID(c *gin.Context) {
 		CoverURI:                   profile.CoverURI,
 		Bio:                        profile.Bio,
 		Location:                   profile.Location,
+		HometownProvince:           profile.HometownProvince,
+		CurrentProvince:            profile.CurrentProvince,
+		CurrentWard:                profile.CurrentWard,
 		Work:                       profile.Work,
 		Education:                  profile.Education,
+		WorkOther:                  profile.WorkOther,
 		Website:                    profile.Website,
 		IsPrivateProfile:           profile.IsPrivateProfile,
 		IsPrivatePosts:             profile.IsPrivatePosts,
@@ -114,8 +122,10 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
 	if input.DisplayName == nil && input.PhoneNumber == nil &&
 		input.DateOfBirth == nil && input.AvatarURI == nil &&
 		input.CoverURI == nil && input.Bio == nil &&
-		input.Location == nil && input.Work == nil &&
-		input.Education == nil && input.Website == nil &&
+		input.Location == nil && input.HometownProvince == nil &&
+		input.CurrentProvince == nil && input.CurrentWard == nil &&
+		input.Work == nil && input.Education == nil && input.WorkOther == nil &&
+		input.Website == nil &&
 		input.IsPrivateProfile == nil && input.IsPrivatePosts == nil &&
 		input.AllowStrangerFriendRequest == nil {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
@@ -127,29 +137,43 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
 		return
 	}
 
-	updatedProfile, err := h.profileService.EditProfile(c.Request.Context(), userID.(string), input)
+	_, err := h.profileService.EditProfile(c.Request.Context(), userID.(string), input)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	enriched, err := h.profileService.ViewProfile(c.Request.Context(), userID.(string))
+	if err != nil {
+		errorsapp.Respond(c, http.StatusNotFound, err)
 		return
 	}
 
 	response := dto.EditProfileResponse{
 		Message: "Cập nhật hồ sơ thành công",
 		Data: dto.ViewProfileResponse{
-			DisplayName:                updatedProfile.DisplayName,
-			PhoneNumber:                updatedProfile.PhoneNumber,
-			DateOfBirth:                updatedProfile.DateOfBirth,
-			AvatarURI:                  updatedProfile.AvatarURI,
-			CoverURI:                   updatedProfile.CoverURI,
-			Bio:                        updatedProfile.Bio,
-			Location:                   updatedProfile.Location,
-			Work:                       updatedProfile.Work,
-			Education:                  updatedProfile.Education,
-			Website:                    updatedProfile.Website,
-			IsPrivateProfile:           updatedProfile.IsPrivateProfile,
-			IsPrivatePosts:             updatedProfile.IsPrivatePosts,
-			AllowStrangerFriendRequest: updatedProfile.AllowStrangerFriendRequest,
-			UpdatedAt:                  updatedProfile.UpdatedAt,
+			DisplayName:                enriched.DisplayName,
+			PhoneNumber:                enriched.PhoneNumber,
+			DateOfBirth:                enriched.DateOfBirth,
+			AvatarURI:                  enriched.AvatarURI,
+			CoverURI:                   enriched.CoverURI,
+			Bio:                        enriched.Bio,
+			Location:                   enriched.Location,
+			HometownProvince:           enriched.HometownProvince,
+			CurrentProvince:            enriched.CurrentProvince,
+			CurrentWard:                enriched.CurrentWard,
+			Work:                       enriched.Work,
+			Education:                  enriched.Education,
+			WorkOther:                  enriched.WorkOther,
+			Website:                    enriched.Website,
+			IsPrivateProfile:           enriched.IsPrivateProfile,
+			IsPrivatePosts:             enriched.IsPrivatePosts,
+			AllowStrangerFriendRequest: enriched.AllowStrangerFriendRequest,
+			Username:                   enriched.Username,
+			PostCount:                  enriched.PostCount,
+			FriendCount:                enriched.FriendCount,
+			CreatedAt:                  enriched.CreatedAt,
+			UpdatedAt:                  enriched.UpdatedAt,
 		},
 	}
 

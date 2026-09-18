@@ -140,6 +140,15 @@ func Run(env config.Env) error {
 			phone_number VARCHAR(20) NOT NULL DEFAULT '',
 			date_of_birth DATE NULL,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
+			cover_uri VARCHAR(500) NOT NULL DEFAULT '',
+			location VARCHAR(255) NOT NULL DEFAULT '',
+			hometown_province VARCHAR(10) NOT NULL DEFAULT '',
+			current_province VARCHAR(10) NOT NULL DEFAULT '',
+			current_ward VARCHAR(10) NOT NULL DEFAULT '',
+			work VARCHAR(255) NOT NULL DEFAULT '',
+			education VARCHAR(255) NOT NULL DEFAULT '',
+			work_other VARCHAR(255) NOT NULL DEFAULT '',
+			website VARCHAR(255) NOT NULL DEFAULT '',
 			bio TEXT,
 			is_private_profile TINYINT(1) NOT NULL DEFAULT 0,
 			is_private_posts TINYINT(1) NOT NULL DEFAULT 0,
@@ -900,6 +909,19 @@ func Run(env config.Env) error {
 	// Add last_read_missed_at to profiles (idempotent — skips if already exists)
 	if err := addColumnIfMissing(database, "profiles", "last_read_missed_at", "DATETIME NULL"); err != nil {
 		return fmt.Errorf("schema: add last_read_missed_at: %w", err)
+	}
+
+	// Structured profile fields (location / work / education) — idempotent for
+	// databases created before these columns existed.
+	for _, col := range []struct{ name, def string }{
+		{"hometown_province", "VARCHAR(10) NOT NULL DEFAULT ''"},
+		{"current_province", "VARCHAR(10) NOT NULL DEFAULT ''"},
+		{"current_ward", "VARCHAR(10) NOT NULL DEFAULT ''"},
+		{"work_other", "VARCHAR(255) NOT NULL DEFAULT ''"},
+	} {
+		if err := addColumnIfMissing(database, "profiles", col.name, col.def); err != nil {
+			return fmt.Errorf("schema: add profiles.%s: %w", col.name, err)
+		}
 	}
 
 	// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE
