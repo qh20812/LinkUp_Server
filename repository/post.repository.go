@@ -801,6 +801,20 @@ func (r *PostRepository) UnpinPost(ctx context.Context, postID string) error {
 	return nil
 }
 
+func (r *PostRepository) SetCommentsEnabled(ctx context.Context, postID string, enabled bool) error {
+	tx := r.db.WithContext(ctx).
+		Model(&models.Post{}).
+		Where("id = ?", postID).
+		Update("comments_enabled", enabled)
+	if tx.Error != nil {
+		return fmt.Errorf("set comments enabled: %w", tx.Error)
+	}
+	if tx.RowsAffected == 0 {
+		return fmt.Errorf("post not found")
+	}
+	return nil
+}
+
 func (r *PostRepository) FetchMediaByUserID(ctx context.Context, userID string, offset, limit int) ([]models.Media, error) {
 	media := make([]models.Media, 0)
 	tx := r.db.WithContext(ctx).

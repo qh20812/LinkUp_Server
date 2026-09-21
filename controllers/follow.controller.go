@@ -115,10 +115,12 @@ func (crtl *FollowController) GetFollowers(c *gin.Context) {
 		return
 	}
 
+	viewerID := c.GetString("userID")
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	response, err := crtl.followService.GetFollowers(c.Request.Context(), targetUserID, page, pageSize)
+	response, err := crtl.followService.GetFollowers(c.Request.Context(), viewerID, targetUserID, page, pageSize)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -134,10 +136,12 @@ func (crtl *FollowController) GetFollowing(c *gin.Context) {
 		return
 	}
 
+	viewerID := c.GetString("userID")
+
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	response, err := crtl.followService.GetFollowing(c.Request.Context(), targetUserID, page, pageSize)
+	response, err := crtl.followService.GetFollowing(c.Request.Context(), viewerID, targetUserID, page, pageSize)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return

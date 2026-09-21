@@ -168,6 +168,7 @@ func Run(env config.Env) error {
 			status VARCHAR(20) NOT NULL DEFAULT 'public',
 			is_pinned TINYINT(1) NOT NULL DEFAULT 0,
 			pinned_at DATETIME NULL,
+			comments_enabled TINYINT(1) NOT NULL DEFAULT 1,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -885,6 +886,19 @@ func Run(env config.Env) error {
 			INDEX idx_chat_e2e_keys_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+		// 50. user_e2e_recovery — backup khóa chat cũ cho thiết bị mới (PIN/recovery key)
+		// "blob" là keyword trong MySQL → phải backtick-quote bằng string thường.
+		`CREATE TABLE IF NOT EXISTS user_e2e_recovery (
+			user_id VARCHAR(36) PRIMARY KEY,
+			salt TEXT NOT NULL, ` + "`blob`" + ` TEXT NOT NULL,
+			pin_check VARCHAR(255) NOT NULL,
+			recovery_check VARCHAR(255) NOT NULL,
+			attempts INT NOT NULL DEFAULT 0,
+			locked_until DATETIME NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		// comment_reactions — depends on users, comments, emojis
 		`CREATE TABLE IF NOT EXISTS comment_reactions (
 			id VARCHAR(36) PRIMARY KEY,
@@ -961,6 +975,10 @@ func Run(env config.Env) error {
 	// 31d. Message category column (user, system, call)
 	if err := addColumnIfMissing(database, "messages", "message_category", "VARCHAR(20) NOT NULL DEFAULT 'user'"); err != nil {
 		return fmt.Errorf("schema: add messages.message_category: %w", err)
+	}
+	// 31e. E2E identity version column (bump on identity/device change → re-key)
+	if err := addColumnIfMissing(database, "user_e2e_keys", "key_version", "INT NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add user_e2e_keys.key_version: %w", err)
 	}
 
 	// Phase 1: Admin Manage Groups/Communities — idempotent column additions

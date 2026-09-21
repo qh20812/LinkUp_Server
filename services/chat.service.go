@@ -837,6 +837,7 @@ func (s *ChatService) PinMessage(ctx context.Context, userID, chatID, messageID 
 		Content:    content,
 		SenderID:   msg.SenderID,
 		SenderName: senderName,
+		E2EVersion: msg.E2EVersion,
 	}, nil
 }
 
@@ -881,6 +882,11 @@ func (s *ChatService) GetPinnedMessages(ctx context.Context, userID, chatID stri
 	// Decrypt content for each pinned message
 	encKey, _ := s.chatRepo.GetEncryptionKey(ctx, chatID)
 	for i := range pins {
+		// Chỉ giải mã tin legacy (e2e_version = 0). Tin E2E (e2e_version = 1)
+		// giữ nguyên ciphertext — client tự giải mã bằng khóa E2E local.
+		if pins[i].E2EVersion != 0 {
+			continue
+		}
 		if encKey != "" {
 			if decrypted, e := utils.DecryptMessage(pins[i].Content, encKey); e == nil {
 				pins[i].Content = decrypted

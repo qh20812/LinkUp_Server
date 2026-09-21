@@ -152,25 +152,28 @@ func (r *FollowRepository) GetSuggestions(ctx context.Context, userID string, pa
 	return items, total, nil
 }
 
-func (r *FollowRepository) ListFollowers(ctx context.Context, userID string, offset, limit int) ([]dto.FollowListItem, error) {
+func (r *FollowRepository) ListFollowers(ctx context.Context, viewerID, userID string, offset, limit int) ([]dto.FollowListItem, error) {
 	type followRow struct {
 		UserID      string
 		Username    string
 		DisplayName string
 		AvatarURI   string
+		IsFollowing bool
 	}
 
 	var rows []followRow
 	tx := r.db.WithContext(ctx).
 		Raw(`SELECT u.id AS user_id, u.username,
 			COALESCE(p.display_name, '') AS display_name,
-			COALESCE(p.avatar_uri, '') AS avatar_uri
+			COALESCE(p.avatar_uri, '') AS avatar_uri,
+			CAST(vf.follower_id IS NOT NULL AS UNSIGNED) AS is_following
 			FROM follows f
 			JOIN users u ON u.id = f.follower_id
 			LEFT JOIN profiles p ON p.user_id = f.follower_id
+			LEFT JOIN follows vf ON vf.follower_id = ? AND vf.following_id = u.id
 			WHERE f.following_id = ?
 			ORDER BY f.created_at DESC
-			LIMIT ? OFFSET ?`, userID, limit, offset).
+			LIMIT ? OFFSET ?`, viewerID, userID, limit, offset).
 		Scan(&rows)
 	if tx.Error != nil {
 		return nil, fmt.Errorf("list followers: %w", tx.Error)
@@ -183,30 +186,34 @@ func (r *FollowRepository) ListFollowers(ctx context.Context, userID string, off
 			Username:    row.Username,
 			DisplayName: row.DisplayName,
 			AvatarURI:   row.AvatarURI,
+			IsFollowing: row.IsFollowing,
 		}
 	}
 	return items, nil
 }
 
-func (r *FollowRepository) ListFollowing(ctx context.Context, userID string, offset, limit int) ([]dto.FollowListItem, error) {
+func (r *FollowRepository) ListFollowing(ctx context.Context, viewerID, userID string, offset, limit int) ([]dto.FollowListItem, error) {
 	type followRow struct {
 		UserID      string
 		Username    string
 		DisplayName string
 		AvatarURI   string
+		IsFollowing bool
 	}
 
 	var rows []followRow
 	tx := r.db.WithContext(ctx).
 		Raw(`SELECT u.id AS user_id, u.username,
 			COALESCE(p.display_name, '') AS display_name,
-			COALESCE(p.avatar_uri, '') AS avatar_uri
+			COALESCE(p.avatar_uri, '') AS avatar_uri,
+			CAST(vf.follower_id IS NOT NULL AS UNSIGNED) AS is_following
 			FROM follows f
 			JOIN users u ON u.id = f.following_id
 			LEFT JOIN profiles p ON p.user_id = f.following_id
+			LEFT JOIN follows vf ON vf.follower_id = ? AND vf.following_id = u.id
 			WHERE f.follower_id = ?
 			ORDER BY f.created_at DESC
-			LIMIT ? OFFSET ?`, userID, limit, offset).
+			LIMIT ? OFFSET ?`, viewerID, userID, limit, offset).
 		Scan(&rows)
 	if tx.Error != nil {
 		return nil, fmt.Errorf("list following: %w", tx.Error)
@@ -219,6 +226,7 @@ func (r *FollowRepository) ListFollowing(ctx context.Context, userID string, off
 			Username:    row.Username,
 			DisplayName: row.DisplayName,
 			AvatarURI:   row.AvatarURI,
+			IsFollowing: row.IsFollowing,
 		}
 	}
 	return items, nil

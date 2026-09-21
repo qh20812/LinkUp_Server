@@ -32,6 +32,7 @@ func Run(db *gorm.DB) {
 		&models.UserSession{},
 		&models.UserE2EKey{},
 		&models.ChatE2EKey{},
+		&models.UserE2ERecovery{},
 		&models.CommentReaction{},
 	)
 	if err != nil {
@@ -60,6 +61,10 @@ func Run(db *gorm.DB) {
 	// Thêm cột pin cho posts (is_pinned/pinned_at)
 	ensureColumn(db, "posts", "is_pinned", "TINYINT(1) NOT NULL DEFAULT 0")
 	ensureColumn(db, "posts", "pinned_at", "DATETIME NULL")
+
+	// Thêm cột comments_enabled cho posts: tắt/bật bình luận trên bài viết.
+	// DEFAULT 1 để các bài cũ vẫn được bình luận như trước.
+	ensureColumn(db, "posts", "comments_enabled", "TINYINT(1) NOT NULL DEFAULT 1")
 
 	// Thêm cột profiles.cover_uri cho tính năng đổi ảnh bìa
 	ensureColumn(db, "profiles", "cover_uri", "VARCHAR(500) NOT NULL DEFAULT ''")

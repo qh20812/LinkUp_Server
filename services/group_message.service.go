@@ -635,6 +635,11 @@ func (s *GroupMessageService) GetPinnedMessages(ctx context.Context, userID, cha
 
 	// Decrypt content for each pinned message
 	for i := range pins {
+		// Chỉ giải mã tin legacy (e2e_version = 0). Tin E2E (e2e_version = 1)
+		// giữ nguyên ciphertext — client tự giải mã.
+		if pins[i].E2EVersion != 0 {
+			continue
+		}
 		tmpMsg := &models.Message{Content: pins[i].Content}
 		if err := s.DecryptMessageContent(ctx, tmpMsg); err == nil {
 			pins[i].Content = tmpMsg.Content

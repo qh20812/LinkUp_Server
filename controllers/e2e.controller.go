@@ -67,9 +67,38 @@ func (h *E2EController) GetUserKey(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"user_id":    key.UserID,
-		"public_key": key.PublicKey,
+		"user_id":     key.UserID,
+		"public_key":  key.PublicKey,
+		"key_version": key.KeyVersion,
 	})
+}
+
+// RekeyChat ghi đè khóa bọc của chính user sau khi đối phương đổi identity.
+func (h *E2EController) RekeyChat(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	chatID := c.Param("chatID")
+	if chatID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	var input dto.RekeyChatKeyRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	if err := h.service.RekeyChat(c.Request.Context(), userID, chatID, input.Nonce, input.WrappedKey); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "khóa chat đã được cập nhật"})
 }
 
 // StoreChatKeys persists the wrapped chat keys for each participant of the
@@ -120,4 +149,85 @@ func (h *E2EController) GetChatKey(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, key)
+}
+
+// PutRecovery lưu backup khóa chat (blob mã hóa + salt + hash check) để khôi
+// phục lịch sử tin nhắn trên thiết bị mới.
+func (h *E2EController) PutRecovery(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	var input dto.PutRecoveryRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	if err := h.service.PutRecovery(c.Request.Context(), userID, input); err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "đã lưu dữ liệu khôi phục"})
+}
+
+// GetRecoveryMeta trả về trạng thái backup khôi phục của user (đã có blob chưa
+// + salt cần để dẫn khóa + thời điểm cập nhật cuối).
+func (h *E2EController) GetRecoveryMeta(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	meta, err := h.service.GetRecoveryMeta(c.Request.Context(), userID)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, meta)
+}
+
+// UnlockRecovery xác thực giá trị check (PIN hoặc recovery key) và trả blob
+// backup cho client tự giải mã. Nhập sai nhiều lần → khóa tạm thời.
+func (h *E2EController) UnlockRecovery(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	var input dto.UnlockRecoveryRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	blob, err := h.service.UnlockRecovery(c.Request.Context(), userID, input.Check)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusForbidden, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"blob": blob})
+}
+
+// DeleteRecovery xóa backup khôi phục (user tắt tính năng khôi phục).
+func (h *E2EController) DeleteRecovery(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	if err := h.service.DeleteRecovery(c.Request.Context(), userID); err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "đã xóa dữ liệu khôi phục"})
 }

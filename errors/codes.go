@@ -38,6 +38,7 @@ const (
 	ErrCodeCommentNotFound        = "post.COMMENT_NOT_FOUND"
 	ErrCodeCommentWrongPost       = "post.COMMENT_WRONG_POST"
 	ErrCodeCommentHiddenPrivate   = "post.CANNOT_COMMENT_HIDDEN_PRIVATE"
+	ErrCodeCommentsDisabled      = "post.COMMENTS_DISABLED"
 
 	// Post - Reaction
 	ErrCodeEmojiRequired = "post.EMOJI_REQUIRED"

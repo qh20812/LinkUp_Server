@@ -17,5 +17,12 @@ func RegisterE2ERoutes(router *gin.Engine, ctrl *controllers.E2EController, env 
 		e2eGroup.GET("/keys/:userID", ctrl.GetUserKey)
 		e2eGroup.POST("/chats/keys", ctrl.StoreChatKeys)
 		e2eGroup.GET("/chats/:chatID/keys", ctrl.GetChatKey)
+		e2eGroup.PATCH("/chats/:chatID/keys", ctrl.RekeyChat)
+
+		// ── Khôi phục khóa chat trên thiết bị mới (PIN + recovery key) ──
+		e2eGroup.PUT("/recovery", ctrl.PutRecovery)
+		e2eGroup.GET("/recovery", ctrl.GetRecoveryMeta)
+		e2eGroup.POST("/recovery/unlock", ctrl.UnlockRecovery)
+		e2eGroup.DELETE("/recovery", ctrl.DeleteRecovery)
 	}
 }

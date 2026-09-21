@@ -605,13 +605,15 @@ func (r *ChatRepository) GetPinnedMessages(ctx context.Context, chatID string) (
 		Content      string `gorm:"column:content"`
 		SenderID     string `gorm:"column:sender_id"`
 		DisplayName  string `gorm:"column:display_name"`
+		E2EVersion   int    `gorm:"column:e2e_version"`
 	}
 	var rows []pinRow
 	err := r.db.WithContext(ctx).
 		Table("pinned_messages AS pm").
 		Select(`pm.id, pm.message_id, pm.pinned_by, pm.pinned_at,
 			m.content, m.sender_id,
-			COALESCE(p.display_name, '') AS display_name`).
+			COALESCE(p.display_name, '') AS display_name,
+			COALESCE(m.e2e_version, 0) AS e2e_version`).
 		Joins("JOIN messages AS m ON m.id = pm.message_id").
 		Joins("LEFT JOIN profiles AS p ON p.user_id = m.sender_id").
 		Where("pm.chat_id = ?", chatID).
@@ -631,6 +633,7 @@ func (r *ChatRepository) GetPinnedMessages(ctx context.Context, chatID string) (
 			Content:    row.Content,
 			SenderID:   row.SenderID,
 			SenderName: row.DisplayName,
+			E2EVersion: row.E2EVersion,
 		})
 	}
 	return result, nil

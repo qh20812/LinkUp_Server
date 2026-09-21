@@ -221,6 +221,8 @@ type PinnedMessageDTO struct {
 	Content    string    `json:"content"`
 	SenderID   string    `json:"sender_id"`
 	SenderName string    `json:"sender_name"`
+	E2EVersion int       `json:"e2e_version,omitempty"`
+	DecryptFailed bool   `json:"decrypt_failed,omitempty"`
 }
 
 type PinnedMessagesResponse struct {

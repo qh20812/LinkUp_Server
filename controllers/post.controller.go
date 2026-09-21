@@ -46,7 +46,7 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL)
+	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL, input.CommentsEnabled == nil || *input.CommentsEnabled)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -402,6 +402,33 @@ func (ctrl *PostController) UnpinPost(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Đã bỏ ghim bài viết"})
+}
+
+func (ctrl *PostController) SetCommentsEnabled(c *gin.Context) {
+	postID := c.Param("id")
+	userID, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+
+	var input dto.UpdateCommentsEnabledInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	post, err := ctrl.service.SetCommentsEnabled(c.Request.Context(), userID.(string), postID, input.Enabled)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if input.Enabled {
+		c.JSON(http.StatusOK, gin.H{"message": "Đã bật bình luận", "data": post})
+	} else {
+		c.JSON(http.StatusOK, gin.H{"message": "Đã tắt bình luận", "data": post})
+	}
 }
 
 func (ctrl *PostController) GetUserMedia(c *gin.Context) {

@@ -17,7 +17,7 @@ import (
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string) (*models.Post, error)
+	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool) (*models.Post, error)
 	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
 	GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error)
@@ -34,6 +34,7 @@ type PostService interface {
 	SetMediaService(mediaService MediaService)
 	PinPost(ctx context.Context, userID, postID string) error
 	UnpinPost(ctx context.Context, userID, postID string) error
+	SetCommentsEnabled(ctx context.Context, userID, postID string, enabled bool) (*models.Post, error)
 	GetUserMedia(ctx context.Context, userID string, page, pageSize int) ([]models.Media, int64, error)
 }
 
@@ -58,7 +59,7 @@ func (s *postService) SetMediaService(mediaService MediaService) {
 	s.mediaService = mediaService
 }
 
-func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string) (*models.Post, error) {
+func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool) (*models.Post, error) {
 	if communityID != nil {
 		if s.contributionService == nil {
 			return nil, errorsapp.New(errorsapp.ErrCodePostContributionNotInit)
@@ -75,6 +76,7 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 	post.CreatedAt = time.Now()
 	post.ViewsCount = 0
 	post.CommunityID = communityID
+	post.CommentsEnabled = commentsEnabled
 
 	if err := s.repo.Create(ctx, &post); err != nil {
 		return nil, err
@@ -567,6 +569,10 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 		return nil, errorsapp.New(errorsapp.ErrCodeCommentHiddenPrivate)
 	}
 
+	if !post.CommentsEnabled {
+		return nil, errorsapp.New(errorsapp.ErrCodeCommentsDisabled)
+	}
+
 	var parentComment *models.Comment
 	if parentID != nil && *parentID != "" {
 		parentComment, err = s.repo.FindCommentByID(ctx, *parentID)
@@ -879,6 +885,30 @@ func (s *postService) UnpinPost(ctx context.Context, userID, postID string) erro
 		return fmt.Errorf("unauthorized")
 	}
 	return s.repo.UnpinPost(ctx, postID)
+}
+
+// SetCommentsEnabled tắt/bật bình luận của bài viết (chỉ chủ sở hữu)
+func (s *postService) SetCommentsEnabled(ctx context.Context, userID, postID string, enabled bool) (*models.Post, error) {
+	post, err := s.repo.FindByID(ctx, postID)
+	if err != nil {
+		return nil, fmt.Errorf("set comments enabled: %w", err)
+	}
+	if post == nil {
+		return nil, errorsapp.New(errorsapp.ErrCodePostNotFound)
+	}
+	if post.UserID != userID {
+		return nil, errorsapp.New(errorsapp.ErrCodeForbidden)
+	}
+
+	if err := s.repo.SetCommentsEnabled(ctx, postID, enabled); err != nil {
+		return nil, fmt.Errorf("set comments enabled: %w", err)
+	}
+
+	post, err = s.repo.FindByID(ctx, postID)
+	if err != nil {
+		return nil, fmt.Errorf("set comments enabled: %w", err)
+	}
+	return post, nil
 }
 
 func (s *postService) GetUserMedia(ctx context.Context, userID string, page, pageSize int) ([]models.Media, int64, error) {

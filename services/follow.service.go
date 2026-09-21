@@ -133,7 +133,7 @@ func (s *FollowService) GetSuggestions(ctx context.Context, userID string, page,
 	}, nil
 }
 
-func (s *FollowService) GetFollowers(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
+func (s *FollowService) GetFollowers(ctx context.Context, viewerID, userID string, page, pageSize int) (dto.FollowListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -148,7 +148,7 @@ func (s *FollowService) GetFollowers(ctx context.Context, userID string, page, p
 		return dto.FollowListResponse{}, fmt.Errorf("count followers: %w", err)
 	}
 
-	items, err := s.followRepository.ListFollowers(ctx, userID, offset, pageSize)
+	items, err := s.followRepository.ListFollowers(ctx, viewerID, userID, offset, pageSize)
 	if err != nil {
 		return dto.FollowListResponse{}, fmt.Errorf("list followers: %w", err)
 	}
@@ -168,7 +168,7 @@ func (s *FollowService) GetMutualFollows(ctx context.Context, viewerID, targetUs
 	}
 	return s.followRepository.GetMutualFollows(ctx, viewerID, targetUserID, 10)
 }
-func (s *FollowService) GetFollowing(ctx context.Context, userID string, page, pageSize int) (dto.FollowListResponse, error) {
+func (s *FollowService) GetFollowing(ctx context.Context, viewerID, userID string, page, pageSize int) (dto.FollowListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -183,7 +183,7 @@ func (s *FollowService) GetFollowing(ctx context.Context, userID string, page, p
 		return dto.FollowListResponse{}, fmt.Errorf("count following: %w", err)
 	}
 
-	items, err := s.followRepository.ListFollowing(ctx, userID, offset, pageSize)
+	items, err := s.followRepository.ListFollowing(ctx, viewerID, userID, offset, pageSize)
 	if err != nil {
 		return dto.FollowListResponse{}, fmt.Errorf("list following: %w", err)
 	}

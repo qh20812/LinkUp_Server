@@ -21,10 +21,11 @@ type Post struct {
 	CommunityID *string    `json:"community_id,omitempty"`
 	Title       string     `json:"title"`
 	Content     string     `json:"content"`
-	ViewsCount  int        `json:"views_count"`
-	Status      PostStatus `json:"status"`
-	IsPinned    bool       `json:"is_pinned"`
-	PinnedAt    *time.Time `json:"pinned_at,omitempty"`
+	ViewsCount      int        `json:"views_count"`
+	Status          PostStatus `json:"status"`
+	IsPinned        bool       `json:"is_pinned"`
+	PinnedAt        *time.Time `json:"pinned_at,omitempty"`
+	CommentsEnabled bool       `json:"comments_enabled"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
 
@@ -58,10 +59,11 @@ func NewPost(userID, title, content string, status PostStatus) Post {
 		status = PostStatusPublic // Mặc định là public nếu client không truyền
 	}
 	return Post{
-		UserID:  userID,
-		Title:   title,
-		Content: content,
-		Status:  status,
+		UserID:          userID,
+		Title:           title,
+		Content:         content,
+		Status:          status,
+		CommentsEnabled: true,
 	}
 }
 

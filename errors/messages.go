@@ -90,6 +90,7 @@ var Messages = map[string]string{
 	"post.COMMENT_NOT_FOUND":        "Bình luận cấp trên không tồn tại hoặc đã bị xóa",
 	"post.COMMENT_WRONG_POST":       "Bình luận gốc không thuộc bài viết này",
 	"post.CANNOT_COMMENT_HIDDEN_PRIVATE": "Không thể bình luận vào bài viết đã bị ẩn hoặc ở chế độ riêng tư",
+	"post.COMMENTS_DISABLED":            "Bài viết này đã tắt bình luận",
 
 	// Post - Reaction
 	"post.EMOJI_REQUIRED": "Emoji_id là bắt buộc",

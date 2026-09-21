@@ -35,6 +35,7 @@ type FollowListItem struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	AvatarURI   string `json:"avatar_uri"`
+	IsFollowing bool   `json:"is_following"`
 }
 
 type FollowListResponse struct {
