@@ -224,22 +224,24 @@ func (c *Client) ReadPump() {
 				replyIDs = append(replyIDs, *m.ReplyToMessageID)
 			}
 		}
-		if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs); previews != nil {
-			if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
-				for _, preview := range previews {
+if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs); previews != nil {
+			encKey, _ := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID)
+			for _, preview := range previews {
+				// Preview E2E (e2e_version=1): client tự giải mã — server không đọc.
+				if preview.E2EVersion == 0 && encKey != "" {
 					if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
 						preview.Content = decrypted
 					}
 				}
 			}
-for i := range msgs {
-					if msgs[i].ReplyToMessageID != nil {
-						if preview, ok := previews[*msgs[i].ReplyToMessageID]; ok {
-							msgs[i].ReplyTo = preview
-						}
+			for i := range msgs {
+				if msgs[i].ReplyToMessageID != nil {
+					if preview, ok := previews[*msgs[i].ReplyToMessageID]; ok {
+						msgs[i].ReplyTo = preview
 					}
 				}
 			}
+		}
 
 			// Read receipts: gắn seen_by cho từng tin nhắn trong lịch sử.
 			if watermarks, err := c.messageService.GetChatReadWatermarks(c.ctx, payload.ChatID); err == nil {
@@ -350,9 +352,12 @@ for i := range msgs {
 		if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
 			if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
 				if preview, ok := previews[*msg.ReplyToMessageID]; ok {
-					if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
-						if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
-							preview.Content = decrypted
+					// Preview E2E (e2e_version=1): client tự giải mã — server không đọc.
+					if preview.E2EVersion == 0 {
+						if encKey, err := c.messageService.GetChatRepo().GetEncryptionKey(c.ctx, payload.ChatID); err == nil {
+							if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+								preview.Content = decrypted
+							}
 						}
 					}
 					newPayload.ReplyTo = preview

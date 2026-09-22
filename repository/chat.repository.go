@@ -183,6 +183,7 @@ func (r *ChatRepository) GetReplyPreviews(ctx context.Context, messageIDs []stri
 		SenderID    string `gorm:"column:sender_id"`
 		DisplayName string `gorm:"column:display_name"`
 		AvatarURI   string `gorm:"column:avatar_uri"`
+		E2EVersion  int    `gorm:"column:e2e_version"`
 	}
 	var rows []row
 	err := r.db.WithContext(ctx).
@@ -191,7 +192,8 @@ func (r *ChatRepository) GetReplyPreviews(ctx context.Context, messageIDs []stri
 			m.content,
 			m.sender_id,
 			COALESCE(p.display_name, '') AS display_name,
-			COALESCE(p.avatar_uri, '') AS avatar_uri`).
+			COALESCE(p.avatar_uri, '') AS avatar_uri,
+			m.e2e_version`).
 		Joins(`LEFT JOIN profiles AS p ON p.user_id = m.sender_id`).
 		Where("m.id IN ?", messageIDs).
 		Scan(&rows).Error
@@ -206,6 +208,7 @@ func (r *ChatRepository) GetReplyPreviews(ctx context.Context, messageIDs []stri
 			SenderID:     r.SenderID,
 			SenderName:   r.DisplayName,
 			SenderAvatar: r.AvatarURI,
+			E2EVersion:   r.E2EVersion,
 		}
 	}
 	return result
@@ -448,10 +451,20 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		return nil, fmt.Errorf("list user chats: %w", err)
 	}
 
+	// Badge E2E dựa trên việc chat CÓ khóa chat_chat_e2e_keys hay không (không
+	// phụ thuộc tin nhắn cuối) — một chat E2E có thể có tin legacy khi đối
+	// phương chưa re-key toàn bộ lịch sử.
+	chatIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		chatIDs = append(chatIDs, row.ChatID)
+	}
+	e2eChatIDs := r.chatIDsWithE2EKeys(ctx, chatIDs)
+
 	items := make([]dto.ChatConversationDTO, 0, len(rows))
 	for _, row := range rows {
 		conv := dto.ChatConversationDTO{
 			ChatID: row.ChatID,
+			IsEncrypted: e2eChatIDs[row.ChatID],
 			Partner: dto.ChatPartnerDTO{
 				UserID:      row.PartnerUserID,
 				DisplayName: row.PartnerDisplayName,
@@ -470,7 +483,6 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			if row.LastE2EVersion != nil {
 				e2eVersion = *row.LastE2EVersion
 			}
-			conv.IsEncrypted = e2eVersion == 1
 			conv.LastMessage = &dto.MessagePayload{
 				ID:            *row.LastMessageID,
 				ChatID:        row.ChatID,
@@ -487,6 +499,26 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		items = append(items, conv)
 	}
 	return items, nil
+}
+
+// chatIDsWithE2EKeys trả về set chat_id có ít nhất một khóa chat_chat_e2e_keys.
+func (r *ChatRepository) chatIDsWithE2EKeys(ctx context.Context, chatIDs []string) map[string]bool {
+	result := make(map[string]bool, len(chatIDs))
+	if len(chatIDs) == 0 {
+		return result
+	}
+	var found []string
+	if err := r.db.WithContext(ctx).
+		Table("chat_e2e_keys").
+		Where("chat_id IN ?", chatIDs).
+		Distinct("chat_id").
+		Pluck("chat_id", &found).Error; err != nil {
+		return result
+	}
+	for _, id := range found {
+		result[id] = true
+	}
+	return result
 }
 
 func derefString(s *string) string {

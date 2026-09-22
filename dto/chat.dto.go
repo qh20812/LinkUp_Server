@@ -77,6 +77,9 @@ type ReplyPreview struct {
 	SenderID     string `json:"sender_id"`
 	SenderName   string `json:"sender_name"`
 	SenderAvatar string `json:"sender_avatar"`
+	// E2EVersion cho client biết content đang là ciphertext (1) hay plaintext
+	// legacy (0) — client tự giải mã; server không đọc nội dung E2E.
+	E2EVersion int `json:"e2e_version"`
 }
 
 type SharedPostPayload struct {

@@ -180,10 +180,14 @@ func (c *Client) ReadPump() {
 			if msg.ReplyToMessageID != nil && *msg.ReplyToMessageID != "" {
 				if previews := c.service.GetReplyPreviews(c.ctx, []string{*msg.ReplyToMessageID}); previews != nil {
 					if preview, ok := previews[*msg.ReplyToMessageID]; ok {
-						encKey, _ := c.service.GetEncryptionKey(c.ctx, msg.ChatID)
-						if encKey != "" {
-							if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
-								preview.Content = decrypted
+						// Preview E2E (e2e_version=1): content là ciphertext, client tự
+						// giải mã — server không đọc. Chỉ legacy-decrypt bản plaintext cũ.
+						if preview.E2EVersion == 0 {
+							encKey, _ := c.service.GetEncryptionKey(c.ctx, msg.ChatID)
+							if encKey != "" {
+								if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
+									preview.Content = decrypted
+								}
 							}
 						}
 						messagePayload.ReplyTo = preview
@@ -754,7 +758,9 @@ func (c *Client) sendChatHistory(eventType, chatID string, cursor *dto.HistoryCu
 	if previews := c.service.GetReplyPreviews(c.ctx, replyIDs); previews != nil {
 		encKey, _ := c.service.GetEncryptionKey(c.ctx, chatID)
 		for _, preview := range previews {
-			if encKey != "" {
+			// Preview E2E (e2e_version=1): content là ciphertext, client tự giải mã —
+			// server không đọc. Chỉ legacy-decrypt bản plaintext cũ.
+			if preview.E2EVersion == 0 && encKey != "" {
 				if decrypted, err := utils.DecryptMessage(preview.Content, encKey); err == nil {
 					preview.Content = decrypted
 				}

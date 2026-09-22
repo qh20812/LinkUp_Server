@@ -14,7 +14,8 @@ type ChatE2EKeyInput struct {
 }
 
 type ChatE2EKeyBatchRequest struct {
-	Keys []ChatE2EKeyInput `json:"keys" binding:"required"`
+	// dive: validate từng ChatE2EKeyInput (chat_id, user_id, wrapped_key required).
+	Keys []ChatE2EKeyInput `json:"keys" binding:"required,dive"`
 }
 
 // RekeyChatKeyRequest — client ghi đè khóa bọc của CHÍNH nó (re-key sau khi
