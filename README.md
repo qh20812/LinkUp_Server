@@ -96,7 +96,8 @@ WS_ALLOWED_ORIGINS=http://localhost:3000
 
 # Server
 PORT=8080
-VERIFY_EMAIL_URL=http://localhost:3000/verify-email
+# Base origin KHÔNG kèm path — code tự append /verify-email và /reset-password
+VERIFY_EMAIL_URL=http://localhost:3000
 FRONTEND_RESET_URL=http://localhost:3000
 ```
 

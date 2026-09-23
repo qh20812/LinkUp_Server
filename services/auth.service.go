@@ -279,6 +279,16 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 		if !user.IsActive() {
 			return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 		}
+
+		// Google verifier đã yêu cầu email_verified=true (googleauth.go:58).
+		// Nếu user password-register trước đó chưa verify, đánh dấu verified.
+		if !user.IsEmailVerified() && claims.EmailVerified {
+			now := time.Now().UTC()
+			if err := s.authRepo.MarkEmailVerified(ctx, user.ID, now); err != nil {
+				return dto.AuthResponse{}, err
+			}
+			user.EmailVerifiedAt = &now
+		}
 	}
 
 	maint, err := s.isMaintenanceMode(ctx)

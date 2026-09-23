@@ -327,6 +327,15 @@ func (r *AuthRepository) UpdateEmailVerifiedAtTx(ctx context.Context, tx *gorm.D
 	return nil
 }
 
+// MarkEmailVerified đánh dấu email đã xác thực (không cần transaction).
+func (r *AuthRepository) MarkEmailVerified(ctx context.Context, userID string, verifiedAt time.Time) error {
+	result := r.db.WithContext(ctx).Model(&models.User{}).Where("id = ? AND email_verified_at IS NULL", userID).Update("email_verified_at", verifiedAt)
+	if result.Error != nil {
+		return fmt.Errorf("mark email verified: %w", result.Error)
+	}
+	return nil
+}
+
 func (r *AuthRepository) FindByGoogleID(ctx context.Context, googleID string) (*models.User, error) {
 	var user models.User
 	err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error
