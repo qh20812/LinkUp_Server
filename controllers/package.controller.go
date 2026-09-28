@@ -1,20 +1,29 @@
 package controllers
 
 import (
+	"context"
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/services"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-type PackageController struct {
-	service services.PackageService
+// TokenIssuer cấp lại JWT khi claim đổi giữa phiên (vd: role sau subscribe).
+// *services.AuthService satisfy interface này.
+type TokenIssuer interface {
+	ReissueTokensForUser(ctx context.Context, userID, sessionID string) (*dto.TokenResponse, error)
 }
 
-func NewPackageController(service services.PackageService) *PackageController {
-	return &PackageController{service: service}
+type PackageController struct {
+	service services.PackageService
+	issuer  TokenIssuer
+}
+
+func NewPackageController(service services.PackageService, issuer TokenIssuer) *PackageController {
+	return &PackageController{service: service, issuer: issuer}
 }
 
 func (ctrl *PackageController) GetPackages(c *gin.Context) {
@@ -44,7 +53,24 @@ func (ctrl *PackageController) Subscribe(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Đăng ký gói quảng cáo thành công", "data": sub})
+	// Role DB vừa nâng lên PARTNER — cấp lại token để JWT claim khớp ngay.
+	// Best-effort: reissue fail không được làm fail subscribe (client còn fallback refresh).
+	var tokens *dto.TokenResponse
+	if ctrl.issuer != nil {
+		sessionID := c.GetString("sessionID")
+		t, terr := ctrl.issuer.ReissueTokensForUser(c.Request.Context(), userID, sessionID)
+		if terr != nil {
+			log.Printf("[Package] reissue tokens after subscribe failed for user %s: %v", userID, terr)
+		} else {
+			tokens = t
+		}
+	}
+
+	body := gin.H{"message": "Đăng ký gói quảng cáo thành công", "data": sub}
+	if tokens != nil {
+		body["tokens"] = tokens
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 func (ctrl *PackageController) GetMySubscription(c *gin.Context) {

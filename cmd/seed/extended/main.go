@@ -94,7 +94,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 			return fmt.Errorf("extended: insert ad %s: %w", a.title, err)
 		}
 
-		actionTypes := []string{"impression", "impression", "click", "conversion"}
+		actionTypes := []string{"impression", "impression", "click", "view"}
 		for j := 0; j < randRange(1, 4); j++ {
 			userID := internal.Ptr(state.UserIDs[randRange(2, len(state.UserIDs)-1)])
 			if err := internal.Exec(database,

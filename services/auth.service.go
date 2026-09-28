@@ -671,6 +671,44 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 	}, nil
 }
 
+// ReissueTokensForUser cấp lại access/refresh với role hiện tại từ DB,
+// giữ nguyên sessionID (jti). Dùng khi role đổi giữa chừng (vd: subscribe
+// nâng USER → PARTNER) mà client vẫn cần JWT claim mới ngay lập tức.
+func (s *AuthService) ReissueTokensForUser(ctx context.Context, userID, sessionID string) (*dto.TokenResponse, error) {
+	user, err := s.authRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return nil, errorsapp.New(errorsapp.ErrCodeUserNotFound)
+		}
+		return nil, err
+	}
+
+	if err := s.ensureBanStatus(ctx, user); err != nil {
+		return nil, err
+	}
+	if !user.IsActive() {
+		return nil, errorsapp.New(errorsapp.ErrCodeAccountInactive)
+	}
+
+	role, err := s.authRepo.GetUserRole(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.TokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(s.accessTTL(ctx).Seconds()),
+		RefreshTTLIn: int64(s.refreshTTL(ctx).Seconds()),
+	}, nil
+}
+
 func (s *AuthService) ensureBanStatus(ctx context.Context, user *models.User) error {
 	if user.Status != models.UserStatusBanned {
 		return nil

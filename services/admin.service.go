@@ -1306,19 +1306,42 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 		return nil
 	}
 
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, adminID, models.RoleSuperAdmin)
-	if err != nil {
-		return fmt.Errorf("kiểm tra quyền thất bại: %w", err)
+	// Moderation logic: chỉ cho phép approve khi ad đang pending
+	if newStatus == string(models.AdStatusActive) && ad.Status != models.AdStatusPending {
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
-
-	if !isSuperAdmin && newStatus == string(models.AdStatusActive) {
-		return errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
+	// Reject chỉ khi ad đang pending
+	if newStatus == string(models.AdStatusRejected) && ad.Status != models.AdStatusPending {
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+	}
+	// Reject phải có lý do
+	if newStatus == string(models.AdStatusRejected) && strings.TrimSpace(input.RejectionReason) == "" {
+		return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
 	}
 
 	ad.Status = models.ParseAdStatus(newStatus)
+	if newStatus == string(models.AdStatusRejected) {
+		ad.RejectionReason = &input.RejectionReason
+	}
 	if err := s.adRepo.Update(ad); err != nil {
 		return fmt.Errorf("cập nhật trạng thái quảng cáo thất bại: %w", err)
 	}
+
+	// Notify partner
+	statusMsg := fmt.Sprintf("Quảng cáo '%s' của bạn đã được %s.", ad.Title, func() string {
+		switch ad.Status {
+		case models.AdStatusActive:
+			return "phê duyệt"
+		case models.AdStatusRejected:
+			return "từ chối"
+		default:
+			return "cập nhật trạng thái"
+		}
+	}())
+	if newStatus == string(models.AdStatusRejected) && input.RejectionReason != "" {
+		statusMsg += " Lý do: " + input.RejectionReason
+	}
+	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
 
 	return nil
 }

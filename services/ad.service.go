@@ -1,7 +1,9 @@
 package services
 
 import (
+	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"time"
@@ -10,6 +12,7 @@ import (
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,9 +22,14 @@ type AdService interface {
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
 	GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error)
 	GetDashboardList() ([]models.Ad, error)
-	GetAdsForUserFeed() ([]models.Ad, error)
+	GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error)
+	GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error)
 	TrackUserAction(adID string, userID *string, actionType, ip string) error
 	GetAdByID(id string) (*models.Ad, error)
+	UpdateAd(id, partnerID string, input dto.UpdateAdInput) (*models.Ad, error)
+	DeleteAd(id, partnerID string) error
+	SetAdStatus(id string, status models.AdStatus) error
+	GetOverview(partnerID string) (*dto.AdOverviewResponse, error)
 }
 
 type adServiceImpl struct {
@@ -67,7 +75,7 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 
 	// 3. Khởi tạo Quảng cáo
 	ad := models.NewAd(input.Title, input.Content, input.TargetURL, input.Budget, adFormat)
-	ad.ID = uuidGenerate()
+	ad.ID = utils.GenerateUUID()
 	ad.PartnerID = partnerID
 	ad.PackageID = &sub.PackageID
 	ad.DailyBudget = input.DailyBudget
@@ -77,6 +85,18 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 	ad.StartedAt = input.StartedAt
 	ad.ExpiresAt = input.ExpiresAt
 	ad.CreatedAt = time.Now()
+
+	// Targeting fields
+	ad.TargetGender = input.TargetGender
+	if ad.TargetGender == "" {
+		ad.TargetGender = "all"
+	}
+	ad.TargetAgeMin = input.TargetAgeMin
+	ad.TargetAgeMax = input.TargetAgeMax
+	if input.TargetLocations != nil {
+		locJSON, _ := json.Marshal(input.TargetLocations)
+		ad.TargetLocations = string(locJSON)
+	}
 
 	if err := s.repo.Create(&ad); err != nil {
 		return nil, err
@@ -161,6 +181,11 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 	clicks := counts[string(models.ActionClick)]
 	videoStarts := counts[string(models.ActionVideoStart)]
 	videoEnds := counts[string(models.ActionVideoEnd)]
+	views := counts[string(models.ActionView)]
+	swipeCount := counts[string(models.ActionSwipe)]
+
+	// Interactions = views + clicks + swipes + video_start (tất cả tương tác có ý nghĩa)
+	interactions := views + clicks + swipeCount + videoStarts
 
 	// Chi phí đã sử dụng
 	totalSpent := ad.TotalSpent
@@ -195,6 +220,7 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 		Impressions:      impressions,
 		UniqueReach:      uniqueReach,
 		Clicks:           clicks,
+		Interactions:     interactions,
 		CTR:              ctr,
 		CPC:              cpc,
 		CPM:              cpm,
@@ -209,8 +235,157 @@ func (s *adServiceImpl) GetDashboardList() ([]models.Ad, error) {
 	return s.repo.GetAll()
 }
 
-func (s *adServiceImpl) GetAdsForUserFeed() ([]models.Ad, error) {
-	return s.repo.FindActiveAds(time.Now())
+// GetPartnerAds trả về ads của riêng partner với metrics, có phân trang (mục 6.4)
+func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error) {
+	total, err := s.repo.CountByPartnerID(partnerID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * pageSize
+	if offset < 0 {
+		offset = 0
+	}
+
+	ads, err := s.repo.ListByPartnerID(partnerID, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ads, total, nil
+}
+
+// UpdateAd cập nhật thông tin ad (chỉ khi status active/paused)
+func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) (*models.Ad, error) {
+	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+	if err != nil || !isOwner {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
+	}
+
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	fields := map[string]interface{}{}
+	if input.Title != "" {
+		fields["title"] = input.Title
+	}
+	if input.Content != "" {
+		fields["content"] = input.Content
+	}
+	if input.TargetURL != "" {
+		fields["target_url"] = input.TargetURL
+	}
+	if input.Budget > 0 {
+		fields["budget"] = input.Budget
+	}
+	if input.DailyBudget >= 0 {
+		fields["daily_budget"] = input.DailyBudget
+	}
+	if input.CPMPrice >= 0 {
+		fields["cpm_price"] = input.CPMPrice
+	}
+	if input.CPCPrice >= 0 {
+		fields["cpc_price"] = input.CPCPrice
+	}
+	if input.MaxImpressions >= 0 {
+		fields["max_impressions"] = input.MaxImpressions
+	}
+	if input.StartedAt != nil {
+		fields["started_at"] = input.StartedAt
+	}
+	if input.ExpiresAt != nil {
+		fields["expires_at"] = input.ExpiresAt
+	}
+	if input.TargetGender != "" {
+		fields["target_gender"] = input.TargetGender
+	}
+	if input.TargetAgeMin > 0 {
+		fields["target_age_min"] = input.TargetAgeMin
+	}
+	if input.TargetAgeMax > 0 && input.TargetAgeMax < 100 {
+		fields["target_age_max"] = input.TargetAgeMax
+	}
+	if input.TargetLocations != nil {
+		locJSON, _ := json.Marshal(input.TargetLocations)
+		fields["target_locations"] = string(locJSON)
+	}
+
+	if len(fields) > 0 {
+		if err := s.repo.UpdateAdFields(ad, fields); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.repo.FindByID(id)
+}
+
+// SetAdStatus cập nhật trạng thái ad trực tiếp (dùng cho moderation khi tạo)
+func (s *adServiceImpl) SetAdStatus(id string, status models.AdStatus) error {
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	ad.Status = status
+	return s.repo.Update(ad)
+}
+
+// DeleteAd xóa ad + giải phóng slot (hard delete)
+func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
+	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+	if err != nil || !isOwner {
+		return errorsapp.New(errorsapp.ErrCodeAdNotOwner)
+	}
+
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+
+	// Chỉ cho phép xóa khi status pending/rejected/paused
+	if ad.Status != models.AdStatusPending && ad.Status != models.AdStatusRejected && ad.Status != models.AdStatusPaused {
+		return errorsapp.New(errorsapp.ErrCodeAdCannotDelete)
+	}
+
+	// Xóa media trước
+	_ = s.repo.DeleteAdMedia(id)
+
+	// Xóa ad
+	if err := s.repo.Delete(context.Background(), id); err != nil {
+		return err
+	}
+
+	// Giải phóng slot trong subscription
+	if ad.PackageID != nil {
+		_ = s.packageRepo.DecrementSlotsUsed(*ad.PackageID)
+	}
+
+	return nil
+}
+
+// GetAdsForUserFeed trả về ads ranked + filtered theo frequency cap (mục 4.2 + 4.3)
+func (s *adServiceImpl) GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error) {
+	if userGender == "" {
+		userGender = "all"
+	}
+
+	// 1. Query ranked ads (lấy nhiều hơn limit để filter)
+	allAds, err := s.repo.FindRankedAdsForUser(time.Now(), userGender, userAge, userLocation, 50)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Filter theo frequency cap
+	filtered, err := s.repo.FilterByFrequencyCap(allAds, userID, 20)
+	if err != nil {
+		return allAds, nil
+	}
+
+	return filtered, nil
 }
 
 func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType, ip string) error {
@@ -219,22 +394,37 @@ func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType,
 		return err
 	}
 
+	// Anti-fraud: skip nếu user đã track cùng action trong 24h (mục 2.2)
+	if userID != nil && *userID != "" {
+		hasRecent, _ := s.repo.HasRecentAction(adID, *userID, actionType, 24*time.Hour)
+		if hasRecent {
+			return nil
+		}
+	}
+
+	// Daily budget check (mục 2.4)
+	if ad.DailyBudget > 0 {
+		dailySpend, _ := s.repo.GetDailySpend(adID, time.Now())
+		if dailySpend >= ad.DailyBudget {
+			return nil
+		}
+	}
+
 	log := models.NewAdAnalytics(adID, userID, actionType, ip)
-	log.ID = uuidGenerate()
+	log.ID = utils.GenerateUUID()
 	log.CreatedAt = time.Now()
 
 	// Ghi nhận tương tác và tính toán khấu trừ ngân sách
 	return s.repo.TrackActionAndDeduct(&log, ad.CPMPrice, ad.CPCPrice)
 }
 
-func uuidGenerate() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return fmt.Sprintf("ad_%x", b)
-}
-
 func generateMediaUUID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return fmt.Sprintf("media_%x", b)
+}
+
+// GetOverview trả về tổng quan quảng cáo của partner (mục 6.1)
+func (s *adServiceImpl) GetOverview(partnerID string) (*dto.AdOverviewResponse, error) {
+	return s.repo.GetOverviewByPartner(partnerID)
 }

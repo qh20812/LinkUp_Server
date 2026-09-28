@@ -20,6 +20,9 @@ type PackageRepository interface {
 	DecrementSlotsUsed(subID string) error
 	UpdateUserRole(userID string, roleName models.RoleName) error
 	SubscribeWithTransaction(activeSub *models.PartnerSubscription, newSub *models.PartnerSubscription) error
+	FindExpiredSubscriptions() ([]models.PartnerSubscription, error)
+	ExpireSubscription(subID string) error
+	DowngradePartnerRole(userID string) error
 }
 
 type packageRepositoryImpl struct {
@@ -159,4 +162,32 @@ func (r *packageRepositoryImpl) SubscribeWithTransaction(activeSub *models.Partn
 
 		return nil
 	})
+}
+
+// FindExpiredSubscriptions tìm các subscription active đã hết hạn (mục 1.3)
+func (r *packageRepositoryImpl) FindExpiredSubscriptions() ([]models.PartnerSubscription, error) {
+	var subs []models.PartnerSubscription
+	err := r.db.Where("status = ? AND expires_at < ?", models.SubscriptionStatusActive, time.Now()).
+		Find(&subs).Error
+	return subs, err
+}
+
+// ExpireSubscription đánh dấu subscription là expired (mục 1.3)
+func (r *packageRepositoryImpl) ExpireSubscription(subID string) error {
+	return r.db.Model(&models.PartnerSubscription{}).
+		Where("id = ?", subID).
+		Update("status", models.SubscriptionStatusExpired).Error
+}
+
+// DowngradePartnerRole hạ role từ PARTNER xuống USER (mục 1.3)
+func (r *packageRepositoryImpl) DowngradePartnerRole(userID string) error {
+	var userRole models.Role
+	if err := r.db.Where("name = ?", models.RoleUser).First(&userRole).Error; err != nil {
+		return fmt.Errorf("không tìm thấy role USER: %w", err)
+	}
+
+	return r.db.Table("user_roles").
+		Where("user_id = ? AND scope_id IS NULL AND role_id = (SELECT id FROM roles WHERE name = ?)",
+			userID, models.RolePartner).
+		Update("role_id", userRole.ID).Error
 }

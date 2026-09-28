@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/gin-gonic/gin"
@@ -277,8 +278,22 @@ func main() {
 		adService := services.NewAdService(adRepository, packageRepository, mediaService)
 		packageService := services.NewPackageService(packageRepository)
 
-		adController := controllers.NewAdController(adService)
-		packageController := controllers.NewPackageController(packageService)
+		// Background worker: downgrade expired partner subscriptions (mục 1.3)
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				count, err := packageService.ProcessExpiredSubscriptions()
+				if err != nil {
+					log.Printf("[AdWorker] expired subscription error: %v", err)
+				} else if count > 0 {
+					log.Printf("[AdWorker] expired %d subscriptions, downgraded roles", count)
+				}
+			}
+		}()
+
+		adController := controllers.NewAdController(adService, profileRepository)
+		packageController := controllers.NewPackageController(packageService, authService)
 
 		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
 		routes.RegisterAdRoutes(router, adController, adService, env, gormDB)

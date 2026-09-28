@@ -24,7 +24,7 @@ func RegisterPackageRoutes(router *gin.Engine, ctrl *controllers.PackageControll
 
 		partnerGroup.GET("/subscription",
 			middlewares.AuthMiddleware(env, db),
-			middlewares.RequireRoles(db, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
+			middlewares.RequireRoles(db, models.RoleUser, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
 			ctrl.GetMySubscription,
 		)
 	}

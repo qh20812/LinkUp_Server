@@ -135,6 +135,14 @@ func (s *ProfileService) EditProfile(ctx context.Context, userID string, input d
 		existingProfile.CurrentWard = *input.CurrentWard
 		cols = append(cols, "current_ward")
 	}
+	if input.Gender != nil {
+		g := *input.Gender
+		if g != "" && g != "all" && g != "male" && g != "female" {
+			return nil, errorsapp.New(errorsapp.ErrCodeInvalidInput)
+		}
+		existingProfile.Gender = g
+		cols = append(cols, "gender")
+	}
 	if input.Website != nil {
 		existingProfile.Website = *input.Website
 		cols = append(cols, "website")

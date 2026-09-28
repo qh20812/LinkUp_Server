@@ -81,6 +81,24 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "profiles", "current_ward", "VARCHAR(10) NOT NULL DEFAULT ''")
 	ensureColumn(db, "profiles", "work_other", "VARCHAR(255) NOT NULL DEFAULT ''")
 
+	// Thêm cột profiles.gender cho targeting ads (mục 1.8)
+	ensureColumn(db, "profiles", "gender", "VARCHAR(10) NULL DEFAULT NULL")
+
+	// Thêm cột targeting vào ads (mục 4.1)
+	ensureColumn(db, "ads", "target_gender", "VARCHAR(10) NOT NULL DEFAULT 'all'")
+	ensureColumn(db, "ads", "target_age_min", "INT NOT NULL DEFAULT 0")
+	ensureColumn(db, "ads", "target_age_max", "INT NOT NULL DEFAULT 100")
+	ensureColumn(db, "ads", "target_locations", "JSON")
+
+	// Thêm cột cost vào ad_analytics (mục 2.4)
+	ensureColumn(db, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0")
+
+	// Index cho daily budget query (mục 3.2)
+	ensureIndex(db, "ad_analytics", "idx_ad_analytics_ad_action_date", "ad_id, action_type, created_at")
+
+	// Index cho expired subscription query (mục 3.2)
+	ensureIndex(db, "partner_subscriptions", "idx_partner_sub_status_expires", "status, expires_at")
+
 	// Thêm cột likes_count vào comments cho comment reactions
 	ensureColumn(db, "comments", "likes_count", "INT NOT NULL DEFAULT 0")
 

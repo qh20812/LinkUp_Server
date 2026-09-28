@@ -43,6 +43,7 @@ func (h *ProfileController) ViewProfile(c *gin.Context) {
 		HometownProvince:           profile.HometownProvince,
 		CurrentProvince:            profile.CurrentProvince,
 		CurrentWard:                profile.CurrentWard,
+		Gender:                     profile.Gender,
 		Work:                       profile.Work,
 		Education:                  profile.Education,
 		WorkOther:                  profile.WorkOther,
@@ -89,6 +90,7 @@ func (h *ProfileController) ViewProfileByID(c *gin.Context) {
 		HometownProvince:           profile.HometownProvince,
 		CurrentProvince:            profile.CurrentProvince,
 		CurrentWard:                profile.CurrentWard,
+		Gender:                     profile.Gender,
 		Work:                       profile.Work,
 		Education:                  profile.Education,
 		WorkOther:                  profile.WorkOther,
@@ -124,6 +126,7 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
 		input.CoverURI == nil && input.Bio == nil &&
 		input.Location == nil && input.HometownProvince == nil &&
 		input.CurrentProvince == nil && input.CurrentWard == nil &&
+		input.Gender == nil &&
 		input.Work == nil && input.Education == nil && input.WorkOther == nil &&
 		input.Website == nil &&
 		input.IsPrivateProfile == nil && input.IsPrivatePosts == nil &&
@@ -162,6 +165,7 @@ func (h *ProfileController) EditProfile(c *gin.Context) {
 			HometownProvince:           enriched.HometownProvince,
 			CurrentProvince:            enriched.CurrentProvince,
 			CurrentWard:                enriched.CurrentWard,
+			Gender:                     enriched.Gender,
 			Work:                       enriched.Work,
 			Education:                  enriched.Education,
 			WorkOther:                  enriched.WorkOther,

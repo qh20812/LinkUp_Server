@@ -11,6 +11,8 @@ const (
 	AdStatusActive    AdStatus = "active"
 	AdStatusPaused    AdStatus = "paused"
 	AdStatusCompleted AdStatus = "completed"
+	AdStatusPending   AdStatus = "pending"
+	AdStatusRejected  AdStatus = "rejected"
 )
 
 type AdFormat string
@@ -33,9 +35,14 @@ type Ad struct {
 	Budget         float64    `json:"budget" gorm:"not null"`
 	DailyBudget    float64    `json:"daily_budget" gorm:"default:0"`
 	TotalSpent     float64    `json:"total_spent" gorm:"default:0"`
-	CPMPrice       float64    `json:"cpm_price" gorm:"default:0"` // Đơn giá CPM tham chiếu từ gói
-	CPCPrice       float64    `json:"cpc_price" gorm:"default:0"` // Đơn giá CPC tham chiếu từ gói
+	CPMPrice       float64    `json:"cpm_price" gorm:"default:0"`
+	CPCPrice       float64    `json:"cpc_price" gorm:"default:0"`
 	MaxImpressions int        `json:"max_impressions" gorm:"default:0"`
+	RejectionReason *string    `json:"rejection_reason,omitempty"`
+	TargetGender   string     `json:"target_gender" gorm:"size:10;default:'all'"`
+	TargetAgeMin   int        `json:"target_age_min" gorm:"default:0"`
+	TargetAgeMax   int        `json:"target_age_max" gorm:"default:100"`
+	TargetLocations string    `json:"target_locations" gorm:"type:JSON"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -64,7 +71,11 @@ func ParseAdStatus(value string) AdStatus {
 		return AdStatusPaused
 	case string(AdStatusCompleted):
 		return AdStatusCompleted
+	case string(AdStatusPending):
+		return AdStatusPending
+	case string(AdStatusRejected):
+		return AdStatusRejected
 	default:
-		return AdStatusActive
+		return AdStatusPaused
 	}
 }

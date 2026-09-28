@@ -31,9 +31,19 @@ type AdRepository interface {
 	GetActionCounts(adID string) (map[string]int64, error)
 	GetUniqueReach(adID string) (int64, error)
 	CheckAdOwnership(adID, partnerID string) (bool, error)
+	UpdateAdFields(ad *models.Ad, fields map[string]interface{}) error
+	DeleteAdMedia(adID string) error
 	TrackActionAndDeduct(analytics *models.AdAnalytics, cpmPrice, cpcPrice float64) error
 	ListAds(ctx context.Context, keyword, status string, limit, offset int) ([]dto.AdminAdListItem, error)
 	CountAds(ctx context.Context, keyword, status string) (int64, error)
+	ListByPartnerID(partnerID string, limit, offset int) ([]dto.PartnerAdListItem, error)
+	CountByPartnerID(partnerID string) (int64, error)
+	FindRankedAdsForUser(now time.Time, gender string, age int, location string, limit int) ([]models.Ad, error)
+	GetUserAdViewCount(adID, userID string, since time.Time) (int, error)
+	FilterByFrequencyCap(ads []models.Ad, userID string, limit int) ([]models.Ad, error)
+	GetDailySpend(adID string, date time.Time) (float64, error)
+	HasRecentAction(adID, userID, actionType string, within time.Duration) (bool, error)
+	GetOverviewByPartner(partnerID string) (*dto.AdOverviewResponse, error)
 }
 
 type adRepositoryImpl struct {
@@ -95,6 +105,37 @@ func (r *adRepositoryImpl) GetAll() ([]models.Ad, error) {
 	var list []models.Ad
 	err := r.db.Preload("MediaList").Find(&list).Error
 	return list, err
+}
+
+// ListByPartnerID trả về danh sách ads của riêng partner với metrics (mục 6.4)
+func (r *adRepositoryImpl) ListByPartnerID(partnerID string, limit, offset int) ([]dto.PartnerAdListItem, error) {
+	var items []dto.PartnerAdListItem
+
+	query := `
+		SELECT a.id, a.title, a.status, a.budget, a.total_spent,
+		       a.started_at, a.expires_at, a.created_at, a.rejection_reason,
+		       COALESCE((SELECT am.url FROM ad_media am WHERE am.ad_id = a.id ORDER BY am.sort_order, am.created_at LIMIT 1), '') AS media_uri,
+		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression') AS impressions,
+		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'click') AS clicks,
+		       ROUND(
+		           IFNULL((SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'click') * 100.0 /
+		           NULLIF((SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression'), 0), 0), 2) AS ctr
+		FROM ads a
+		WHERE a.partner_id = ?
+		ORDER BY a.created_at DESC
+		LIMIT ? OFFSET ?`
+
+	if err := r.db.Raw(query, partnerID, limit, offset).Scan(&items).Error; err != nil {
+		return nil, fmt.Errorf("list partner ads: %w", err)
+	}
+	return items, nil
+}
+
+// CountByPartnerID đếm tổng ads của riêng partner (mục 1.1)
+func (r *adRepositoryImpl) CountByPartnerID(partnerID string) (int64, error) {
+	var total int64
+	err := r.db.Model(&models.Ad{}).Where("partner_id = ?", partnerID).Count(&total).Error
+	return total, err
 }
 
 func (r *adRepositoryImpl) FindActiveAds(now time.Time) ([]models.Ad, error) {
@@ -160,6 +201,16 @@ func (r *adRepositoryImpl) CheckAdOwnership(adID, partnerID string) (bool, error
 	return count > 0, err
 }
 
+// UpdateAdFields cập nhật các field cụ thể của ad (partial update)
+func (r *adRepositoryImpl) UpdateAdFields(ad *models.Ad, fields map[string]interface{}) error {
+	return r.db.Model(ad).Updates(fields).Error
+}
+
+// DeleteAdMedia xóa tất cả media của ad
+func (r *adRepositoryImpl) DeleteAdMedia(adID string) error {
+	return r.db.Where("ad_id = ?", adID).Delete(&models.AdMedia{}).Error
+}
+
 // TrackActionAndDeduct lưu log analytics và tính toán trừ ngân sách thực tế (mục 2.4 & 2.5)
 func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics, cpmPrice, cpcPrice float64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
@@ -188,6 +239,11 @@ func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics, c
 			} else if ad.CPCPrice > 0 {
 				cost = ad.CPCPrice
 			}
+		}
+
+		// Lưu cost vào analytics row (mục 2.4)
+		if cost > 0 {
+			tx.Model(&models.AdAnalytics{}).Where("id = ?", analytics.ID).Update("cost", cost)
 		}
 
 		ad.TotalSpent += cost
@@ -263,4 +319,188 @@ func (r *adRepositoryImpl) CountAds(ctx context.Context, keyword, status string)
 		return 0, fmt.Errorf("count ads: %w", err)
 	}
 	return total, nil
+}
+
+// FindRankedAdsForUser trả về ads active được sắp xếp theo điểm ranking (mục 4.2)
+func (r *adRepositoryImpl) FindRankedAdsForUser(now time.Time, gender string, age int, location string, limit int) ([]models.Ad, error) {
+	query := `
+		SELECT a.*,
+			(
+				CASE
+					WHEN a.target_gender = 'all' OR a.target_gender = ? THEN 0.4
+					ELSE 0.0
+				END
+				+
+				CASE
+					WHEN a.target_age_min = 0 AND a.target_age_max = 100 THEN 0.0
+					WHEN ? BETWEEN a.target_age_min AND a.target_age_max THEN 0.4
+					ELSE 0.0
+				END
+				+
+				(0.2 / (1.0 + DATEDIFF(NOW(), a.created_at)))
+				+
+				(0.15 * (a.budget - a.total_spent) / GREATEST(a.budget, 1))
+				+
+				(0.15 * LEAST(
+					(SELECT IFNULL(COUNT(CASE WHEN aa.action_type='click' THEN 1 END), 0) * 100.0 /
+					 NULLIF(COUNT(CASE WHEN aa.action_type='impression' THEN 1 END), 0)
+					 FROM ad_analytics aa WHERE aa.ad_id = a.id) / 10.0,
+					1.0
+				))
+				+
+				(0.10 * RAND())
+			) AS rank_score
+		FROM ads a
+		WHERE a.status = 'active'
+		  AND a.total_spent < a.budget
+		  AND (a.started_at IS NULL OR a.started_at <= ?)
+		  AND (a.expires_at IS NULL OR a.expires_at >= ?)
+		  AND (a.target_gender = 'all' OR a.target_gender = ?)
+		  AND (a.target_age_min = 0 OR a.target_age_min <= ?)
+		  AND (a.target_age_max = 100 OR a.target_age_max >= ?)
+		  AND (JSON_LENGTH(a.target_locations) = 0
+		       OR JSON_CONTAINS(a.target_locations, JSON_QUOTE(?), '$'))
+		ORDER BY rank_score DESC
+		LIMIT ?`
+
+	var ads []models.Ad
+	err := r.db.Raw(query, gender, age, now, now, gender, age, age, location, limit).Scan(&ads).Error
+	return ads, err
+}
+
+// GetUserAdViewCount đếm số lần user đã thấy ad trong khoảng thời gian (mục 4.3)
+func (r *adRepositoryImpl) GetUserAdViewCount(adID, userID string, since time.Time) (int, error) {
+	var count int64
+	err := r.db.Model(&models.AdAnalytics{}).
+		Where("ad_id = ? AND user_id = ? AND action_type = 'impression' AND created_at > ?",
+			adID, userID, since).
+		Count(&count).Error
+	return int(count), err
+}
+
+// FilterByFrequencyCap lọc ads theo giới hạn hiển thị mỗi user mỗi ngày (mục 4.3)
+const MaxImpressionsPerUserPerDay = 3
+
+func (r *adRepositoryImpl) FilterByFrequencyCap(ads []models.Ad, userID string, limit int) ([]models.Ad, error) {
+	if userID == "" {
+		if len(ads) > limit {
+			return ads[:limit], nil
+		}
+		return ads, nil
+	}
+	startOfDay := time.Now().Truncate(24 * time.Hour)
+	var filtered []models.Ad
+	for _, ad := range ads {
+		if len(filtered) >= limit {
+			break
+		}
+		count, err := r.GetUserAdViewCount(ad.ID, userID, startOfDay)
+		if err != nil {
+			continue
+		}
+		if count < MaxImpressionsPerUserPerDay {
+			filtered = append(filtered, ad)
+		}
+	}
+	return filtered, nil
+}
+
+// GetDailySpend lấy tổng chi phí trong ngày (mục 2.4)
+func (r *adRepositoryImpl) GetDailySpend(adID string, date time.Time) (float64, error) {
+	var total float64
+	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	end := start.Add(24 * time.Hour)
+	err := r.db.Model(&models.AdAnalytics{}).
+		Where("ad_id = ? AND created_at >= ? AND created_at < ?", adID, start, end).
+		Select("COALESCE(SUM(cost), 0)").Scan(&total).Error
+	return total, err
+}
+
+// HasRecentAction kiểm tra user có đã thực hiện action này gần đây không (mục 2.2)
+func (r *adRepositoryImpl) HasRecentAction(adID, userID, actionType string, within time.Duration) (bool, error) {
+	var count int64
+	since := time.Now().Add(-within)
+	err := r.db.Model(&models.AdAnalytics{}).
+		Where("ad_id = ? AND user_id = ? AND action_type = ? AND created_at > ?",
+			adID, userID, actionType, since).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// GetOverviewByPartner lấy tổng quan quảng cáo của partner (mục 6.1)
+func (r *adRepositoryImpl) GetOverviewByPartner(partnerID string) (*dto.AdOverviewResponse, error) {
+	overview := &dto.AdOverviewResponse{}
+
+	// Tổng budget, spent từ ads
+	type budgetSummary struct {
+		TotalBudget float64
+		TotalSpent  float64
+		ActiveAds   int64
+	}
+	var bs budgetSummary
+	err := r.db.Raw(`
+		SELECT
+			COALESCE(SUM(budget), 0) AS total_budget,
+			COALESCE(SUM(total_spent), 0) AS total_spent,
+			SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_ads
+		FROM ads WHERE partner_id = ?`, partnerID).Scan(&bs).Error
+	if err != nil {
+		return nil, err
+	}
+	overview.TotalBudget = bs.TotalBudget
+	overview.TotalSpent = bs.TotalSpent
+	overview.RemainingBudget = bs.TotalBudget - bs.TotalSpent
+	if overview.RemainingBudget < 0 {
+		overview.RemainingBudget = 0
+	}
+	overview.ActiveAds = int(bs.ActiveAds)
+
+	// Impressions + Clicks
+	type metricsSummary struct {
+		Impressions int64
+		Clicks      int64
+	}
+	var ms metricsSummary
+	err = r.db.Raw(`
+		SELECT
+			COALESCE(SUM(CASE WHEN aa.action_type = 'impression' THEN 1 ELSE 0 END), 0) AS impressions,
+			COALESCE(SUM(CASE WHEN aa.action_type = 'click' THEN 1 ELSE 0 END), 0) AS clicks
+		FROM ad_analytics aa
+		JOIN ads a ON a.id = aa.ad_id
+		WHERE a.partner_id = ?`, partnerID).Scan(&ms).Error
+	if err != nil {
+		return nil, err
+	}
+	overview.Impressions = ms.Impressions
+	overview.Clicks = ms.Clicks
+	if overview.Impressions > 0 {
+		overview.CTR = (float64(overview.Clicks) / float64(overview.Impressions)) * 100.0
+	}
+
+	// Subscription info
+	type subInfo struct {
+		SlotsUsed    int
+		MaxSlots     int
+		PackageName  string
+		ExpiresAt    *time.Time
+	}
+	var si subInfo
+	err = r.db.Raw(`
+		SELECT
+			COALESCE(ps.slots_used, 0) AS slots_used,
+			COALESCE(p.max_slots, 0) AS max_slots,
+			COALESCE(p.name, '') AS package_name,
+			ps.expires_at
+		FROM partner_subscriptions ps
+		JOIN ad_packages p ON p.id = ps.package_id
+		WHERE ps.user_id = ? AND ps.status = 'active'
+		ORDER BY ps.expires_at DESC LIMIT 1`, partnerID).Scan(&si).Error
+	if err == nil {
+		overview.SlotsUsed = si.SlotsUsed
+		overview.MaxSlots = si.MaxSlots
+		overview.SubscriptionName = si.PackageName
+		overview.ExpiresAt = si.ExpiresAt
+	}
+
+	return overview, nil
 }

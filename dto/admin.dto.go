@@ -430,7 +430,8 @@ type AdminAdFilterInput struct {
 }
 
 type AdminAdStatusInput struct {
-	Status string `json:"status" binding:"required,oneof=active paused completed"`
+	Status          string `json:"status" binding:"required,oneof=active paused completed rejected"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
 type AdminAdListItem struct {

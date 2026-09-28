@@ -45,6 +45,26 @@ func RegisterAdRoutes(
 			middlewares.CheckAdOwnership(db, adService),
 			ctrl.UpdateStatus,
 		)
+
+		adsManagement.PATCH("/:id",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			middlewares.CheckAdOwnership(db, adService),
+			ctrl.UpdateAd,
+		)
+
+		adsManagement.DELETE("/:id",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			middlewares.CheckAdOwnership(db, adService),
+			ctrl.DeleteAd,
+		)
+
+		adsManagement.GET("/overview",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			ctrl.GetOverview,
+		)
 	}
 
 	customerGroup := router.Group("/api/customer")

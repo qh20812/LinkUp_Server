@@ -372,6 +372,11 @@ var Messages = map[string]string{
 	"ad.NOT_UPDATED":                "Không tìm thấy quảng cáo để cập nhật",
 	"ad.NOT_DELETED":                "Quảng cáo không tồn tại",
 	"ad.NOT_OWNER":                  "Bạn không có quyền thay đổi quảng cáo này",
+	"ad.CANNOT_EDIT":                "Không thể chỉnh sửa quảng cáo ở trạng thái hiện tại",
+	"ad.CANNOT_DELETE":              "Không thể xóa quảng cáo ở trạng thái hiện tại",
+	"ad.BUDGET_EXCEEDED":            "Ngân sách đã hết",
+	"ad.DAILY_LIMIT_REACHED":        "Đã đạt giới hạn ngân sách hôm nay",
+	"ad.PENDING_APPROVAL":           "Quảng cáo đang chờ duyệt",
 
 	// ── Package ────────────────────────────────────────────────
 	"package.SUBSCRIBE_FAILED": "Không thể đăng ký gói",

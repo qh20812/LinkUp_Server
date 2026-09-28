@@ -154,3 +154,30 @@ func (r *ProfileRepository) FindByIDs(ctx context.Context, userIDs []string) ([]
 
 	return allProfiles, nil
 }
+
+type Demographics struct {
+	Gender   string
+	Age      int
+	Location string
+}
+
+// GetUserDemographics trả về gender, age và location của user từ profiles (mục 4.4)
+func (r *ProfileRepository) GetUserDemographics(userID string) (*Demographics, error) {
+	var result Demographics
+	err := r.db.Table("profiles").
+		Select(`
+			COALESCE(gender, 'all') AS gender,
+			CASE
+			 WHEN date_of_birth IS NOT NULL
+			 THEN TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE())
+			 ELSE 0
+			END AS age,
+			COALESCE(NULLIF(current_province, ''), location, '') AS location
+		`).
+		Where("user_id = ?", userID).
+		Scan(&result).Error
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}

@@ -372,6 +372,11 @@ const (
 	ErrCodeAdNotUpdated          = "ad.NOT_UPDATED"
 	ErrCodeAdNotDeleted          = "ad.NOT_DELETED"
 	ErrCodeAdNotOwner            = "ad.NOT_OWNER"
+	ErrCodeAdCannotEdit          = "ad.CANNOT_EDIT"
+	ErrCodeAdCannotDelete        = "ad.CANNOT_DELETE"
+	ErrCodeAdBudgetExceeded      = "ad.BUDGET_EXCEEDED"
+	ErrCodeAdDailyLimitReached   = "ad.DAILY_LIMIT_REACHED"
+	ErrCodeAdPendingApproval     = "ad.PENDING_APPROVAL"
 
 	// ── Package ────────────────────────────────────────────────
 	ErrCodePackageSubscribeFailed = "package.SUBSCRIBE_FAILED"
