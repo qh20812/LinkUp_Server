@@ -375,6 +375,10 @@ func (r *PostRepository) FindByIDs(ctx context.Context, ids []string) ([]models.
 		for i := range posts {
 			if media, ok := mediaMap[posts[i].ID]; ok {
 				posts[i].Media = media
+			} else {
+				// Chuẩn hóa slice rỗng (thay vì nil) để JSON serialize ra []
+				// thay vì null — client đọc media.length sẽ crash với null.
+				posts[i].Media = []models.Media{}
 			}
 		}
 	}
@@ -783,10 +787,15 @@ func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, of
 
 	err := r.db.WithContext(ctx).
 		Table("posts").
-		Select(`posts.*, 
+		Select(`posts.*,
             (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
             (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
-            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`).
+            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count,
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
 		Where("posts.id IN ?", ids).
 		Where("posts.status = ?", models.PostStatusPublic).
 		Order("posts.created_at DESC").
@@ -794,7 +803,24 @@ func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, of
 		Offset(offset).
 		Find(&posts).Error
 
-	return posts, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Nạp media + chuẩn hóa slice rỗng (tránh JSON null làm client crash).
+	if len(posts) > 0 {
+		mediaRepo := NewMediaRepository(r.db)
+		mediaMap, _ := mediaRepo.GetByPostIDs(ctx, ids)
+		for i := range posts {
+			if media, ok := mediaMap[posts[i].ID]; ok {
+				posts[i].Media = media
+			} else {
+				posts[i].Media = []models.Media{}
+			}
+		}
+	}
+
+	return posts, nil
 }
 
 func (r *PostRepository) PinPost(ctx context.Context, postID string) error {

@@ -35,6 +35,7 @@ func connectAndMigrateFeedRank(t *testing.T) *gorm.DB {
 		&models.Follow{},
 		&models.Friend{},
 		&models.Block{},
+		&models.Media{},
 	); err != nil {
 		t.Fatalf("auto-migrate: %v", err)
 	}
@@ -49,6 +50,9 @@ func connectAndMigrateFeedRank(t *testing.T) *gorm.DB {
 		db.Exec("DELETE FROM friends")
 		db.Exec("DELETE FROM follows")
 		db.Exec("DELETE FROM posts")
+		db.Exec("DELETE FROM media")
+		db.Exec("DELETE FROM profiles")
+		db.Exec("DELETE FROM users")
 	})
 	return db
 }
@@ -156,5 +160,69 @@ func TestFetchPersonalized_VisibilityAndExplore(t *testing.T) {
 				t.Errorf("page 2 repeats post %s from page 1", p.ID)
 			}
 		}
+	}
+}
+
+// Regression: bài không có media phải trả Media=[] (serialize ra []),
+// không phải nil (serialize ra null khiến web crash ở media.length).
+func TestFindByIDs_NormalizesEmptyMedia(t *testing.T) {
+	db := connectAndMigrateFeedRank(t)
+	ctx := context.Background()
+	repo := NewPostRepository(db)
+
+	post := seedRankPost(t, db, utils.GenerateUUID(), "public", time.Now())
+
+	posts, err := repo.FindByIDs(ctx, []string{post.ID})
+	if err != nil {
+		t.Fatalf("FindByIDs: %v", err)
+	}
+	if len(posts) != 1 {
+		t.Fatalf("expected 1 post, got %d", len(posts))
+	}
+	if posts[0].Media == nil {
+		t.Fatalf("expected non-nil Media slice (would serialize to null)")
+	}
+	if len(posts[0].Media) != 0 {
+		t.Fatalf("expected empty Media, got %d items", len(posts[0].Media))
+	}
+}
+
+// Regression trang hashtag: FetchByIDs phải trả đủ thông tin tác giả
+// (username/display_name/avatar_uri), không chỉ content + thời gian.
+func TestFetchByIDs_PopulatesAuthor(t *testing.T) {
+	db := connectAndMigrateFeedRank(t)
+	ctx := context.Background()
+	repo := NewPostRepository(db)
+
+	authorID := utils.GenerateUUID()
+	if err := db.Create(&models.User{ID: authorID, Username: "tagauthor"}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	profile := models.NewProfile(authorID, "Tag Author", "", nil, "https://cdn.example.com/a.png", "")
+	profile.ID = utils.GenerateUUID()
+	if err := db.Create(&profile).Error; err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	post := seedRankPost(t, db, authorID, "public", time.Now())
+
+	posts, err := repo.FetchByIDs(ctx, []string{post.ID}, 10, 0)
+	if err != nil {
+		t.Fatalf("FetchByIDs: %v", err)
+	}
+	if len(posts) != 1 {
+		t.Fatalf("expected 1 post, got %d", len(posts))
+	}
+	got := posts[0]
+	if got.Username != "tagauthor" {
+		t.Errorf("expected username tagauthor, got %q", got.Username)
+	}
+	if got.DisplayName != "Tag Author" {
+		t.Errorf("expected display name Tag Author, got %q", got.DisplayName)
+	}
+	if got.AvatarURI != "https://cdn.example.com/a.png" {
+		t.Errorf("expected avatar URI, got %q", got.AvatarURI)
+	}
+	if got.Media == nil {
+		t.Errorf("expected non-nil Media slice")
 	}
 }

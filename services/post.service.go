@@ -829,6 +829,13 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 
 	go s.recordInterest(userID, postID, interestWeightShare)
 
+	// Index hashtag trong lời chia sẻ (share_content) để tìm kiếm/interest bắt được.
+	if content != "" {
+		if err := s.tagService.ProcessPostHashtags(ctx, nil, sharedPost.ID, content); err != nil {
+			log.Printf("[Hashtag Error] không thể lưu tag cho share %s: %v", sharedPost.ID, err)
+		}
+	}
+
 	return nil
 }
 
