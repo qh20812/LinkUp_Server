@@ -4,6 +4,7 @@ import (
 	"fmt"
 	errorsapp "linkup/errors"
 	"linkup/dto"
+	"linkup/models"
 	"linkup/services"
 	"linkup/validations"
 	"mime/multipart"
@@ -161,7 +162,54 @@ func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 		return
 	}
 
+	// Chỉ tính lượt xem khi request có user đăng nhập (khách vãng lai không tính).
+	// Lỗi tracking không fail request đọc bài.
+	if viewerID := c.GetString("userID"); viewerID != "" {
+		if counted, err := ctrl.service.TrackPostView(c.Request.Context(), postID, viewerID, models.PostViewSourceDetail); err == nil && counted {
+			post.ViewsCount++
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": post})
+}
+
+// TrackPostView ghi nhận impression khi bài viết hiển thị trên feed
+// (client báo sau khi bài visible đủ ngưỡng). Yêu cầu đăng nhập.
+func (ctrl *PostController) TrackPostView(c *gin.Context) {
+	postID := c.Param("id")
+	if postID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
+		return
+	}
+
+	var input dto.TrackPostViewInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	source := input.Source
+	if source == "" {
+		source = "feed"
+	}
+
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+	viewerID := fmt.Sprintf("%v", val)
+
+	counted, err := ctrl.service.TrackPostView(c.Request.Context(), postID, viewerID, models.PostViewSource(source))
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"counted": counted})
 }
 
 func (ctrl *PostController) ReactPost(c *gin.Context) {

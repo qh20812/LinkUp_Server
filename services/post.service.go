@@ -22,6 +22,7 @@ type PostService interface {
 	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
 	GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
+	TrackPostView(ctx context.Context, postID, viewerID string, source models.PostViewSource) (bool, error)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
 	GetCommentList(ctx context.Context, postID string, page, pageSize int, sort string, userID *string) ([]models.Comment, int64, error)
@@ -478,8 +479,7 @@ func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models
 		return nil, errorsapp.New(errorsapp.ErrCodePostHiddenOrPrivate)
 	}
 
-	_ = s.repo.IncrementViewsCount(ctx, postID)
-	post.ViewsCount++
+	post.Media = []models.Media{}
 
 	post.Media = []models.Media{}
 	if s.mediaService != nil {
@@ -496,6 +496,51 @@ func (s *postService) GetPostDetail(ctx context.Context, postID string) (*models
 	}
 
 	return post, nil
+}
+
+// TrackPostView ghi nhận một lượt xem đã dedup (1 user/post/ngày).
+// Trả về counted=true khi lượt xem được tính vào views_count.
+// Không tính: bài ẩn/private/deleted, view của chính chủ, user đã được tính hôm nay.
+func (s *postService) TrackPostView(ctx context.Context, postID, viewerID string, source models.PostViewSource) (bool, error) {
+	post, err := s.repo.FindByID(ctx, postID)
+	if err != nil {
+		return false, errorsapp.New(errorsapp.ErrCodePostNotFound)
+	}
+
+	if post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate || post.Status == models.PostStatusDeleted {
+		return false, nil
+	}
+
+	startOfDay := time.Now().Truncate(24 * time.Hour)
+	count, err := s.repo.CountUserPostViewsSince(ctx, postID, viewerID, startOfDay)
+	if err != nil {
+		log.Printf("TrackPostView: count views failed post=%s viewer=%s: %v", postID, viewerID, err)
+		return false, err
+	}
+	if count > 0 {
+		return false, nil
+	}
+
+	view := models.PostView{
+		ID:       utils.GenerateUUID(),
+		PostID:   postID,
+		ViewerID: viewerID,
+		Source:   source,
+	}
+	if err := s.repo.CreatePostView(ctx, &view); err != nil {
+		log.Printf("TrackPostView: insert failed post=%s viewer=%s: %v", postID, viewerID, err)
+		return false, err
+	}
+
+	// View của chính chủ vẫn log để phân tích nhưng không tăng số hiển thị.
+	if post.UserID == viewerID {
+		return false, nil
+	}
+
+	if err := s.repo.IncrementViewsCount(ctx, postID); err != nil {
+		log.Printf("TrackPostView: increment failed post=%s: %v", postID, err)
+	}
+	return true, nil
 }
 
 func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID string) (string, string, error) {

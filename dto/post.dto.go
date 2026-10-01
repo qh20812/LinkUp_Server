@@ -30,3 +30,8 @@ type CreateCommentInput struct {
 	Content  string  `json:"content"`
 	ParentID *string `json:"parent_id,omitempty"`
 }
+
+// DTO ghi nhận lượt xem bài viết (impression từ feed hoặc mở chi tiết)
+type TrackPostViewInput struct {
+	Source string `json:"source" binding:"omitempty,oneof=feed detail"`
+}

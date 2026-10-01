@@ -376,6 +376,21 @@ func (r *PostRepository) IncrementViewsCount(ctx context.Context, id string) err
 		Update("views_count", gorm.Expr("views_count + ?", 1)).Error
 }
 
+// CountUserPostViewsSince đếm số lượt xem đã được tính của user cho bài viết
+// kể từ mốc thời gian (dùng để dedup 1 user/post/ngày).
+func (r *PostRepository) CountUserPostViewsSince(ctx context.Context, postID, userID string, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&models.PostView{}).
+		Where("post_id = ? AND viewer_id = ? AND created_at > ?", postID, userID, since).
+		Count(&count).Error
+	return count, err
+}
+
+// CreatePostView ghi log một lượt xem đã được tính.
+func (r *PostRepository) CreatePostView(ctx context.Context, view *models.PostView) error {
+	return r.db.WithContext(ctx).Create(view).Error
+}
+
 func (r *PostRepository) CreateReaction(ctx context.Context, reaction models.PostReaction) error {
 	return r.db.WithContext(ctx).Create(&reaction).Error
 }
