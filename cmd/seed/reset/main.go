@@ -27,7 +27,7 @@ func Run(env config.Env) error {
 		"emojis", "roles", "users",
 		"call_hidden", "password_histories", "password_reset_tokens", "post_shares",
 		"partner_subscriptions", "ad_packages",
-		"story_interacts", "story_views", "post_views",
+		"story_interacts", "story_views", "post_views", "user_interests",
 	}
 
 	if err := internal.Exec(database, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {

@@ -35,6 +35,7 @@ func Run(db *gorm.DB) {
 		&models.UserE2ERecovery{},
 		&models.CommentReaction{},
 		&models.PostView{},
+		&models.UserInterest{},
 	)
 	if err != nil {
 		log.Printf("Warning: Migration failed: %v", err)

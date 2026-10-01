@@ -40,19 +40,29 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri,
             CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following,
-            (0.4 * EXP(-? * ((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)) +
-             0.35 * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
-             0.25 * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
+            (? * EXP(-? * ((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)) +
+             ? * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
+             ? * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
              0.01 * RAND()) AS feed_score`,
-			w.DecayRate, snapshotTime, w.LikeWeight, w.CommentWeight, w.ShareWeight).
+			w.Recency, w.DecayRate, snapshotTime, w.Engagement, w.LikeWeight, w.CommentWeight, w.ShareWeight, w.Affinity).
 		Joins("LEFT JOIN users ON users.id = posts.user_id").
 		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
 		Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", userID).
 		Joins("LEFT JOIN (?) lr ON lr.post_id = posts.id", likesSubQuery).
 		Joins("LEFT JOIN (?) cr ON cr.post_id = posts.id", commentsSubQuery).
-		Joins("LEFT JOIN (?) sr ON sr.post_id = posts.id", sharesSubQuery).
-		Where("posts.status = ?", models.PostStatusPublic).
-		Limit(limit)
+		Joins("LEFT JOIN (?) sr ON sr.post_id = posts.id", sharesSubQuery)
+
+	if userID != nil && *userID != "" {
+		// Bài public + bài friend-only của bạn bè (kết bạn 2 chiều đã accepted).
+		q = q.Where("(posts.status = ? OR (posts.status = ? AND EXISTS (SELECT 1 FROM friends WHERE ((sender_id = ? AND receiver_id = posts.user_id) OR (sender_id = posts.user_id AND receiver_id = ?)) AND status = ?)))",
+			models.PostStatusPublic, models.PostStatusFriend, *userID, *userID, models.FriendStatusAccepted)
+		// Loại bài của người đã block / bị block (theo chuẩn story + follow-suggestion).
+		q = q.Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = ? AND blocked_user_id = posts.user_id)", *userID).
+			Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = posts.user_id AND blocked_user_id = ?)", *userID)
+	} else {
+		q = q.Where("posts.status = ?", models.PostStatusPublic)
+	}
+	q = q.Limit(limit)
 
 	if filterFollowing {
 		q = q.Where("f.follower_id IS NOT NULL")

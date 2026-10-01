@@ -367,36 +367,36 @@ type StatusCount struct {
 }
 
 type AdminAnalyticsResponse struct {
-	TotalUsers              int64            `json:"total_users"`
-	TotalPosts              int64            `json:"total_posts"`
-	TotalReports            int64            `json:"total_reports"`
-	TotalComments           int64            `json:"total_comments"`
-	TotalMedia              int64            `json:"total_media"`
-	TotalGroups             int64            `json:"total_groups"`
-	TotalCommunities        int64            `json:"total_communities"`
-	TotalActiveBans         int64            `json:"total_active_bans"`
-	PendingReports          int64            `json:"pending_reports"`
-	FlaggedMediaCount       int64            `json:"flagged_media_count"`
-	ActiveUsersToday        int64            `json:"active_users_today"`
-	TotalLikes              int64            `json:"total_likes"`
-	TotalShares             int64            `json:"total_shares"`
-	UsersChangePercent      float64          `json:"users_change_percent"`
-	PostsChangePercent      float64          `json:"posts_change_percent"`
-	ReportsChangePercent    float64          `json:"reports_change_percent"`
-	CommentsChangePercent   float64          `json:"comments_change_percent"`
-	MediaChangePercent      float64          `json:"media_change_percent"`
-	GroupsChangePercent     float64          `json:"groups_change_percent"`
-	CommunitiesChangePercent float64         `json:"communities_change_percent"`
-	ChartData               []ChartDataPoint `json:"chart_data,omitempty"`
-	ChartDataUsers          []ChartDataPoint `json:"chart_data_users,omitempty"`
-	ChartDataPosts          []ChartDataPoint `json:"chart_data_posts,omitempty"`
-	ChartDataReports        []ChartDataPoint `json:"chart_data_reports,omitempty"`
-	ChartDataComments       []ChartDataPoint `json:"chart_data_comments,omitempty"`
-	TopUsers                []TopActiveUser  `json:"top_users,omitempty"`
-	TopPosts                []TopEngagedPost `json:"top_posts,omitempty"`
-	UserStatusDistribution  []StatusCount    `json:"user_status_distribution,omitempty"`
-	ReportStatusDistribution []StatusCount   `json:"report_status_distribution,omitempty"`
-	GeneratedAt             time.Time        `json:"generated_at"`
+	TotalUsers               int64            `json:"total_users"`
+	TotalPosts               int64            `json:"total_posts"`
+	TotalReports             int64            `json:"total_reports"`
+	TotalComments            int64            `json:"total_comments"`
+	TotalMedia               int64            `json:"total_media"`
+	TotalGroups              int64            `json:"total_groups"`
+	TotalCommunities         int64            `json:"total_communities"`
+	TotalActiveBans          int64            `json:"total_active_bans"`
+	PendingReports           int64            `json:"pending_reports"`
+	FlaggedMediaCount        int64            `json:"flagged_media_count"`
+	ActiveUsersToday         int64            `json:"active_users_today"`
+	TotalLikes               int64            `json:"total_likes"`
+	TotalShares              int64            `json:"total_shares"`
+	UsersChangePercent       float64          `json:"users_change_percent"`
+	PostsChangePercent       float64          `json:"posts_change_percent"`
+	ReportsChangePercent     float64          `json:"reports_change_percent"`
+	CommentsChangePercent    float64          `json:"comments_change_percent"`
+	MediaChangePercent       float64          `json:"media_change_percent"`
+	GroupsChangePercent      float64          `json:"groups_change_percent"`
+	CommunitiesChangePercent float64          `json:"communities_change_percent"`
+	ChartData                []ChartDataPoint `json:"chart_data,omitempty"`
+	ChartDataUsers           []ChartDataPoint `json:"chart_data_users,omitempty"`
+	ChartDataPosts           []ChartDataPoint `json:"chart_data_posts,omitempty"`
+	ChartDataReports         []ChartDataPoint `json:"chart_data_reports,omitempty"`
+	ChartDataComments        []ChartDataPoint `json:"chart_data_comments,omitempty"`
+	TopUsers                 []TopActiveUser  `json:"top_users,omitempty"`
+	TopPosts                 []TopEngagedPost `json:"top_posts,omitempty"`
+	UserStatusDistribution   []StatusCount    `json:"user_status_distribution,omitempty"`
+	ReportStatusDistribution []StatusCount    `json:"report_status_distribution,omitempty"`
+	GeneratedAt              time.Time        `json:"generated_at"`
 }
 
 type AdminMediaGroupFilterInput struct {
@@ -414,10 +414,10 @@ type AdminMediaGroupItem struct {
 }
 
 type AdminMediaGroupedResponse struct {
-	Groups    []AdminMediaGroupItem `json:"groups"`
-	Total     int64                 `json:"total"`
-	Page      int                   `json:"page"`
-	PageSize  int                   `json:"page_size"`
+	Groups   []AdminMediaGroupItem `json:"groups"`
+	Total    int64                 `json:"total"`
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"page_size"`
 }
 
 // ── Admin Ad Management ──
@@ -460,4 +460,22 @@ type AdminAdListResponse struct {
 	Page     int               `json:"page"`
 	PageSize int               `json:"page_size"`
 	Message  string            `json:"message,omitempty"`
+}
+
+// DTO metrics feed cho cổng rollout rank v2 (?days=, default 7, max 90)
+type AdminFeedMetricsFilterInput struct {
+	Days int `form:"days"`
+}
+
+type AdminFeedMetricsResponse struct {
+	Days                   int     `json:"days"`
+	TotalViews             int64   `json:"total_views"`
+	FeedViews              int64   `json:"feed_views"`
+	DetailViews            int64   `json:"detail_views"`
+	DetailCTR              float64 `json:"detail_ctr"`
+	SmallAuthorViews       int64   `json:"small_author_views"`
+	SmallAuthorExposurePct float64 `json:"small_author_exposure_pct"`
+	SmallAuthorsSurfaced   int64   `json:"small_authors_surfaced"`
+	PostReports            int64   `json:"post_reports"`
+	SmallAuthorThreshold   int     `json:"small_author_threshold"`
 }

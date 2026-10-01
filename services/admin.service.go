@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"linkup/config"
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/models"
@@ -167,36 +168,36 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 	communitiesChangePct := calcPercentChange(totalCommunities, prevCounts["communities"])
 
 	return dto.AdminAnalyticsResponse{
-		TotalUsers:              totalUsers,
-		TotalPosts:              totalPosts,
-		TotalReports:            totalReports,
-		TotalComments:           totalComments,
-		TotalMedia:              totalMedia,
-		TotalGroups:             totalGroups,
-		TotalCommunities:        totalCommunities,
-		TotalActiveBans:         activeBanCount,
-		PendingReports:          pendingReports,
-		FlaggedMediaCount:       flaggedMediaCount,
-		ActiveUsersToday:        activeUsersToday,
-		TotalLikes:              totalLikes,
-		TotalShares:             totalShares,
-		UsersChangePercent:      usersChangePct,
-		PostsChangePercent:      postsChangePct,
-		ReportsChangePercent:    reportsChangePct,
-		CommentsChangePercent:   commentsChangePct,
-		MediaChangePercent:      mediaChangePct,
-		GroupsChangePercent:     groupsChangePct,
+		TotalUsers:               totalUsers,
+		TotalPosts:               totalPosts,
+		TotalReports:             totalReports,
+		TotalComments:            totalComments,
+		TotalMedia:               totalMedia,
+		TotalGroups:              totalGroups,
+		TotalCommunities:         totalCommunities,
+		TotalActiveBans:          activeBanCount,
+		PendingReports:           pendingReports,
+		FlaggedMediaCount:        flaggedMediaCount,
+		ActiveUsersToday:         activeUsersToday,
+		TotalLikes:               totalLikes,
+		TotalShares:              totalShares,
+		UsersChangePercent:       usersChangePct,
+		PostsChangePercent:       postsChangePct,
+		ReportsChangePercent:     reportsChangePct,
+		CommentsChangePercent:    commentsChangePct,
+		MediaChangePercent:       mediaChangePct,
+		GroupsChangePercent:      groupsChangePct,
 		CommunitiesChangePercent: communitiesChangePct,
-		ChartData:               chartDataUsers,
-		ChartDataUsers:          chartDataUsers,
-		ChartDataPosts:          chartDataPosts,
-		ChartDataReports:        chartDataReports,
-		ChartDataComments:       chartDataComments,
-		TopUsers:                topUsers,
-		TopPosts:                topPosts,
-		UserStatusDistribution:  userDist,
+		ChartData:                chartDataUsers,
+		ChartDataUsers:           chartDataUsers,
+		ChartDataPosts:           chartDataPosts,
+		ChartDataReports:         chartDataReports,
+		ChartDataComments:        chartDataComments,
+		TopUsers:                 topUsers,
+		TopPosts:                 topPosts,
+		UserStatusDistribution:   userDist,
 		ReportStatusDistribution: reportDist,
-		GeneratedAt:             time.Now().UTC(),
+		GeneratedAt:              time.Now().UTC(),
 	}, nil
 }
 
@@ -1096,7 +1097,7 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 	}
 
 	mediaItems := make([]dto.AdminMediaItem, 0, len(items))
-	for _, m := range items {	
+	for _, m := range items {
 		mediaItems = append(mediaItems, dto.AdminMediaItem{
 			ID:           m.ID,
 			UserID:       m.UserID,
@@ -1288,6 +1289,46 @@ func (s *AdminService) ListAds(ctx context.Context, adminID string, input dto.Ad
 		resp.Message = "Không tìm thấy quảng cáo"
 	}
 
+	return resp, nil
+}
+
+// GetFeedMetrics trả số liệu cổng rollout rank v2: v2 chỉ mở rộng khi
+// small_author_exposure tăng và CTR/report-rate không xấu đi.
+func (s *AdminService) GetFeedMetrics(ctx context.Context, adminID string, days int) (dto.AdminFeedMetricsResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminFeedMetricsResponse{}, err
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+	since := time.Now().AddDate(0, 0, -days)
+	threshold := config.DefaultFeedRankV2.SmallAuthorFollowers
+
+	m, err := s.postRepo.GetFeedMetrics(ctx, since, threshold)
+	if err != nil {
+		return dto.AdminFeedMetricsResponse{}, fmt.Errorf("tổng hợp metrics feed thất bại: %w", err)
+	}
+
+	resp := dto.AdminFeedMetricsResponse{
+		Days:                 days,
+		TotalViews:           m.TotalViews,
+		FeedViews:            m.FeedViews,
+		DetailViews:          m.DetailViews,
+		SmallAuthorViews:     m.SmallAuthorViews,
+		SmallAuthorsSurfaced: m.SmallAuthorsSurfaced,
+		PostReports:          m.PostReports,
+		SmallAuthorThreshold: threshold,
+	}
+	if m.FeedViews > 0 {
+		resp.DetailCTR = float64(m.DetailViews) / float64(m.FeedViews)
+	}
+	if m.TotalViews > 0 {
+		resp.SmallAuthorExposurePct = float64(m.SmallAuthorViews) / float64(m.TotalViews) * 100
+	}
 	return resp, nil
 }
 

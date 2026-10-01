@@ -2,8 +2,10 @@ package controllers
 
 import (
 	"fmt"
-	errorsapp "linkup/errors"
+	"hash/crc32"
+	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/services"
 	"linkup/validations"
@@ -68,7 +70,28 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	userIDStr, _ := userID.(string)
 
-	posts, nextCursor, err := ctrl.service.GetPostList(c.Request.Context(), cursor, pageSize, userIDStr, filter)
+	// Rank v2 (cá nhân hóa 2-stage): ?rank=v2 ép dùng, ?rank=v1 ép tắt,
+	// còn lại rollout dần theo % cấu hình (hash user_id, default 0 = tắt).
+	useV2 := false
+	switch rank := c.DefaultQuery("rank", ""); rank {
+	case "v2":
+		useV2 = true
+	case "v1":
+		useV2 = false
+	default:
+		if pct := config.DefaultFeedRankV2.RankV2RolloutPct; pct > 0 && userIDStr != "" {
+			useV2 = int(crc32.ChecksumIEEE([]byte(userIDStr))%100) < pct
+		}
+	}
+
+	var posts []models.Post
+	var nextCursor string
+	var err error
+	if useV2 {
+		posts, nextCursor, err = ctrl.service.GetPostListV2(c.Request.Context(), cursor, pageSize, userIDStr, filter)
+	} else {
+		posts, nextCursor, err = ctrl.service.GetPostList(c.Request.Context(), cursor, pageSize, userIDStr, filter)
+	}
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return

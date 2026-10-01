@@ -142,6 +142,7 @@ func main() {
 		postRepository := repository.NewPostRepository(gormDB)
 		postValidation := validations.NewPostValidation()
 		postService := services.NewPostService(postRepository, notificationService, tagService, postValidation)
+		postService.SetInterestRepository(repository.NewInterestRepository(gormDB))
 		postController := controllers.NewPostController(postService)
 		routes.RegisterPostRoutes(router, postController, env, gormDB)
 

@@ -39,6 +39,28 @@ func (ctrl *AdminController) GetDashboardAnalytics(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (ctrl *AdminController) GetFeedMetrics(c *gin.Context) {
+	adminID := c.GetString("userID")
+	if adminID == "" {
+		errors.RespondError(c, http.StatusUnauthorized, errors.New(errors.ErrCodeAdminNoAccess))
+		return
+	}
+
+	var input dto.AdminFeedMetricsFilterInput
+	if err := c.ShouldBindQuery(&input); err != nil {
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidQueryParams))
+		return
+	}
+
+	result, err := ctrl.adminService.GetFeedMetrics(c.Request.Context(), adminID, input.Days)
+	if err != nil {
+		errors.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 func (ctrl *AdminController) ListUsers(c *gin.Context) {
 	userID := c.GetString("userID")
 	if userID == "" {

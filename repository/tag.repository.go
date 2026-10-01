@@ -40,3 +40,26 @@ func (r *TagRepository) GetPostIDsByHashtag(ctx context.Context, hashtagName str
 		Pluck("post_id", &postIDs).Error
 	return postIDs, err
 }
+
+// GetHashtagNamesByPostIDs lấy hashtag (post-level, comment_id IS NULL)
+// của các bài viết, nhóm theo post_id. Dùng để suy ra interest từ tương tác.
+func (r *TagRepository) GetHashtagNamesByPostIDs(ctx context.Context, postIDs []string) (map[string][]string, error) {
+	type row struct {
+		PostID string
+		Name   string
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Table("tags").
+		Select("post_id, name").
+		Where("post_id IN ? AND tag_type = ? AND comment_id IS NULL", postIDs, models.TagTypeHashtag).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]string, len(postIDs))
+	for _, row := range rows {
+		result[row.PostID] = append(result[row.PostID], row.Name)
+	}
+	return result, nil
+}

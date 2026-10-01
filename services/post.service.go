@@ -19,6 +19,7 @@ import (
 type PostService interface {
 	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool) (*models.Post, error)
 	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
+	GetPostListV2(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
 	GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
@@ -45,6 +46,7 @@ type postService struct {
 	tagService          *TagService
 	contributionService *ContributionService
 	mediaService        MediaService
+	interestRepo        *repository.InterestRepository
 	validation          *validations.PostValidation
 }
 
@@ -58,6 +60,41 @@ func (s *postService) SetContributionService(contributionService *ContributionSe
 
 func (s *postService) SetMediaService(mediaService MediaService) {
 	s.mediaService = mediaService
+}
+
+// SetInterestRepository gắn repo interest profile (Phase 1: ghi nhận tương tác).
+func (s *postService) SetInterestRepository(repo *repository.InterestRepository) {
+	s.interestRepo = repo
+}
+
+// Trọng số interest theo loại tương tác (Phase 1 ghi nhận; Phase 2 dùng để rank).
+const (
+	interestWeightFeedView   = 1.0
+	interestWeightDetailView = 2.0
+	interestWeightReact      = 3.0
+	interestWeightComment    = 4.0
+	interestWeightSave       = 5.0
+	interestWeightShare      = 6.0
+)
+
+// recordInterest cộng điểm interest theo hashtag của bài viết.
+// Chạy nền (goroutine), không block request, lỗi chỉ log.
+func (s *postService) recordInterest(userID, postID string, delta float64) {
+	if s.interestRepo == nil || s.tagService == nil || userID == "" || postID == "" || delta == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tags, err := s.tagService.GetHashtagNamesByPostIDs(ctx, []string{postID})
+	if err != nil || len(tags[postID]) == 0 {
+		return
+	}
+	for _, tag := range tags[postID] {
+		if err := s.interestRepo.AddInterestScore(ctx, userID, tag, delta); err != nil {
+			log.Printf("[Interest Error] không thể ghi interest user=%s post=%s: %v", userID, postID, err)
+			return
+		}
+	}
 }
 
 func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool) (*models.Post, error) {
@@ -196,71 +233,7 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 		return nil, "", err
 	}
 
-	if len(posts) > 0 {
-		postIDs := make([]string, len(posts))
-		for i, p := range posts {
-			postIDs[i] = p.ID
-		}
-
-		likesMap, errL := s.repo.BatchCountLikes(ctx, postIDs)
-		if errL == nil {
-			for i := range posts {
-				posts[i].LikesCount = likesMap[posts[i].ID]
-			}
-		}
-
-		commentsMap, errC := s.repo.BatchCountComments(ctx, postIDs)
-		if errC == nil {
-			for i := range posts {
-				posts[i].CommentsCount = commentsMap[posts[i].ID]
-			}
-		}
-
-		sharesMap, errS := s.repo.BatchCountShares(ctx, postIDs)
-		if errS == nil {
-			for i := range posts {
-				posts[i].SharesCount = sharesMap[posts[i].ID]
-			}
-		}
-
-		if userID != "" {
-			likedMap, errL := s.repo.BatchCheckLiked(ctx, userID, postIDs)
-			if errL == nil {
-				for i := range posts {
-					posts[i].IsLiked = likedMap[posts[i].ID]
-				}
-			}
-
-			savedMap, errS := s.repo.BatchCheckSaved(ctx, userID, postIDs)
-			if errS == nil {
-				for i := range posts {
-					posts[i].IsSaved = savedMap[posts[i].ID]
-				}
-			}
-
-			sharedMap, errSh := s.repo.BatchCheckShared(ctx, userID, postIDs)
-			if errSh == nil {
-				for i := range posts {
-					posts[i].IsShared = sharedMap[posts[i].ID]
-				}
-			}
-		}
-
-		if s.mediaService != nil {
-			mediaMap, errM := s.mediaService.GetByPostIDs(ctx, postIDs)
-			if errM == nil {
-				for i := range posts {
-					if m, ok := mediaMap[posts[i].ID]; ok {
-						posts[i].Media = m
-					} else {
-						posts[i].Media = []models.Media{}
-					}
-				}
-			}
-		}
-
-		s.loadSharedPosts(ctx, posts)
-	}
+	s.enrichFeedPosts(ctx, posts, userID)
 
 	var nextCursor string
 	if len(posts) == pageSize {
@@ -269,6 +242,114 @@ func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize i
 	}
 
 	return posts, nextCursor, nil
+}
+
+// GetPostListV2 là feed ranking cá nhân hóa 2-stage (Phase 2):
+// main stream (heuristic + interest + affinity đa mức + seen-penalty +
+// boost bài mới + bonus tác giả nhỏ) merge với 2 explore stream theo slot,
+// kèm diversity cap mỗi tác giả. Cursor v2 không tương thích v1 (gặp cursor
+// lạ sẽ query mới từ đầu). userID rỗng → fallback về rank v1.
+func (s *postService) GetPostListV2(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error) {
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 10
+	}
+	if userID == "" {
+		return s.GetPostList(ctx, cursor, pageSize, userID, filter)
+	}
+
+	filterFollowing := filter == "following"
+
+	var personalCursor repository.PersonalCursor
+	var snapshotTime time.Time
+	if parsed, snap, ok := repository.ParsePersonalCursor(cursor); ok {
+		personalCursor = parsed
+		snapshotTime = snap
+	} else {
+		snapshotTime = time.Now()
+	}
+
+	posts, nextCursor, hasMore, err := s.repo.FetchPersonalized(ctx, userID, pageSize, personalCursor, snapshotTime, filterFollowing)
+	if err != nil {
+		return nil, "", err
+	}
+
+	s.enrichFeedPosts(ctx, posts, userID)
+
+	if !hasMore || len(posts) == 0 {
+		return posts, "", nil
+	}
+	return posts, nextCursor.Encode(snapshotTime), nil
+}
+
+// enrichFeedPosts nạp counts, trạng thái tương tác, media và shared-post
+// cho danh sách bài feed (dùng chung cho rank v1 và v2).
+func (s *postService) enrichFeedPosts(ctx context.Context, posts []models.Post, userID string) {
+	if len(posts) == 0 {
+		return
+	}
+	postIDs := make([]string, len(posts))
+	for i, p := range posts {
+		postIDs[i] = p.ID
+	}
+
+	likesMap, errL := s.repo.BatchCountLikes(ctx, postIDs)
+	if errL == nil {
+		for i := range posts {
+			posts[i].LikesCount = likesMap[posts[i].ID]
+		}
+	}
+
+	commentsMap, errC := s.repo.BatchCountComments(ctx, postIDs)
+	if errC == nil {
+		for i := range posts {
+			posts[i].CommentsCount = commentsMap[posts[i].ID]
+		}
+	}
+
+	sharesMap, errS := s.repo.BatchCountShares(ctx, postIDs)
+	if errS == nil {
+		for i := range posts {
+			posts[i].SharesCount = sharesMap[posts[i].ID]
+		}
+	}
+
+	if userID != "" {
+		likedMap, errL := s.repo.BatchCheckLiked(ctx, userID, postIDs)
+		if errL == nil {
+			for i := range posts {
+				posts[i].IsLiked = likedMap[posts[i].ID]
+			}
+		}
+
+		savedMap, errS := s.repo.BatchCheckSaved(ctx, userID, postIDs)
+		if errS == nil {
+			for i := range posts {
+				posts[i].IsSaved = savedMap[posts[i].ID]
+			}
+		}
+
+		sharedMap, errSh := s.repo.BatchCheckShared(ctx, userID, postIDs)
+		if errSh == nil {
+			for i := range posts {
+				posts[i].IsShared = sharedMap[posts[i].ID]
+			}
+		}
+	}
+
+	if s.mediaService != nil {
+		mediaMap, errM := s.mediaService.GetByPostIDs(ctx, postIDs)
+		if errM == nil {
+			for i := range posts {
+				if m, ok := mediaMap[posts[i].ID]; ok {
+					posts[i].Media = m
+				} else {
+					posts[i].Media = []models.Media{}
+				}
+			}
+		}
+	}
+
+	s.loadSharedPosts(ctx, posts)
 }
 
 // Lấy danh sách bài viết đã lưu (Bookmark) của người dùng hiện tại theo con trỏ
@@ -537,6 +618,13 @@ func (s *postService) TrackPostView(ctx context.Context, postID, viewerID string
 		return false, nil
 	}
 
+	// Ghi interest từ lượt xem (feed nhẹ hơn mở chi tiết).
+	delta := interestWeightFeedView
+	if source == models.PostViewSourceDetail {
+		delta = interestWeightDetailView
+	}
+	go s.recordInterest(viewerID, postID, delta)
+
 	if err := s.repo.IncrementViewsCount(ctx, postID); err != nil {
 		log.Printf("TrackPostView: increment failed post=%s: %v", postID, err)
 	}
@@ -597,6 +685,8 @@ func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID str
 		}
 	}
 
+	go s.recordInterest(userID, postID, interestWeightReact)
+
 	return "reacted", emoji.Code, nil
 }
 
@@ -642,6 +732,8 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 	if err := s.tagService.ProcessCommentHashtags(ctx, nil, postID, comment.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho comment %s: %v", comment.ID, err)
 	}
+
+	go s.recordInterest(userID, postID, interestWeightComment)
 
 	if s.contributionService != nil && post.CommunityID != nil {
 		go func() {
@@ -734,6 +826,8 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 	if post.UserID != userID {
 		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeShare, "đã chia sẻ bài viết của bạn", &postID, nil, nil)
 	}
+
+	go s.recordInterest(userID, postID, interestWeightShare)
 
 	return nil
 }
@@ -843,6 +937,7 @@ func (s *postService) SavePost(ctx context.Context, userID, postID string) (stri
 	if errCreate := s.repo.CreateSave(ctx, bookmark); errCreate != nil {
 		return "", errCreate
 	}
+	go s.recordInterest(userID, postID, interestWeightSave)
 	return "saved", nil
 }
 
