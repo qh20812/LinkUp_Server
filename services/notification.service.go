@@ -32,7 +32,58 @@ func NewNotificationService(notifRepo *repository.NotificationRepository, prefRe
 	}
 }
 
-func (s *NotificationService) Create(ctx context.Context, receiverID string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string) (*models.Notification, error) {
+// PushOption — tùy chọn bổ sung cho push (không ảnh hưởng notification lưu
+// trong DB). WithPushBody override nội dung body push khi nội dung push chi
+// tiết hơn content hiển thị trong app (vd: text tin nhắn legacy, text comment).
+type PushOption func(*pushConfig)
+
+type pushConfig struct {
+	body string
+}
+
+func WithPushBody(body string) PushOption {
+	return func(c *pushConfig) {
+		c.body = body
+	}
+}
+
+func applyPushOptions(opts []PushOption) pushConfig {
+	var cfg pushConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// pushThreadID — group push theo hội thoại trên iOS (aps.thread-id). Convention:
+// type 'message' mang chat id trong redirect_comment_id (chat.service.go,
+// group_message.service.go).
+func pushThreadID(notifType models.NotificationType, redirectCommentID *string) string {
+	if notifType == models.NotificationTypeMessage && redirectCommentID != nil {
+		return *redirectCommentID
+	}
+	return ""
+}
+
+func senderProfileFields(senderMap map[string]dto.SenderProfile, senderID *string) (name, avatar string) {
+	if senderID == nil {
+		return "", ""
+	}
+	if p, ok := senderMap[*senderID]; ok {
+		return p.DisplayName, p.AvatarURI
+	}
+	return "", ""
+}
+
+func truncateRunes(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
+}
+
+func (s *NotificationService) Create(ctx context.Context, receiverID string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string, opts ...PushOption) (*models.Notification, error) {
 	pref, err := s.prefRepo.GetByUserID(ctx, receiverID)
 	if err != nil {
 		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
@@ -40,6 +91,11 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 
 	if pref != nil && !isNotificationEnabled(pref, notifType) {
 		return nil, nil
+	}
+
+	pushBody := applyPushOptions(opts).body
+	if pushBody == "" {
+		pushBody = content
 	}
 
 	now := time.Now().UTC()
@@ -67,9 +123,9 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 		Data: &resp,
 	})
 
-	// Send push notification
-	s.sendPush(ctx, receiverID, content, map[string]interface{}{
-		"type":           string(notifType),
+	senderName, senderAvatar := senderProfileFields(senderMap, senderID)
+	s.sendPush(ctx, receiverID, senderName, senderAvatar, pushBody, pushThreadID(notifType, redirectCommentID), map[string]interface{}{
+		"type":               string(notifType),
 		"redirect_post_id":    redirectPostID,
 		"redirect_user_id":    redirectUserID,
 		"redirect_comment_id": redirectCommentID,
@@ -78,9 +134,14 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	return notification, nil
 }
 
-func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string) ([]models.Notification, error) {
+func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string, opts ...PushOption) ([]models.Notification, error) {
 	if len(receiverIDs) == 0 {
 		return nil, nil
+	}
+
+	pushBody := applyPushOptions(opts).body
+	if pushBody == "" {
+		pushBody = content
 	}
 
 	now := time.Now().UTC()
@@ -118,6 +179,8 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 	}
 
 	senderMap := s.loadSenderProfiles(ctx, senderID)
+	senderName, senderAvatar := senderProfileFields(senderMap, senderID)
+	threadID := pushThreadID(notifType, redirectCommentID)
 	for i := range notifications {
 		resp := dto.ToNotificationResponseList([]models.Notification{notifications[i]}, senderMap)[0]
 		s.hub.SendToUser(notifications[i].ReceiverID, ws.OutgoingMessage{
@@ -125,9 +188,8 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 			Data: &resp,
 		})
 
-		// Send push notification
-		s.sendPush(ctx, notifications[i].ReceiverID, content, map[string]interface{}{
-			"type":           string(notifType),
+		s.sendPush(ctx, notifications[i].ReceiverID, senderName, senderAvatar, pushBody, threadID, map[string]interface{}{
+			"type":               string(notifType),
 			"redirect_post_id":    redirectPostID,
 			"redirect_user_id":    redirectUserID,
 			"redirect_comment_id": redirectCommentID,
@@ -231,7 +293,11 @@ func (s *NotificationService) loadSenderProfiles(ctx context.Context, senderID *
 	return senderMap
 }
 
-func (s *NotificationService) sendPush(ctx context.Context, receiverID, content string, data map[string]interface{}) {
+// sendPush — push rich: title = tên người gửi (fallback "LinkUp" với sender
+// hệ thống/admin), body = chi tiết, image = avatar (Android), badge = số chưa
+// đọc (iOS), threadId = grouping theo hội thoại (iOS). Token chết
+// (DeviceNotRegistered) được xóa khỏi DB ngay khi Expo trả ticket lỗi.
+func (s *NotificationService) sendPush(ctx context.Context, receiverID, senderName, senderAvatar, body, threadID string, data map[string]interface{}) {
 	if s.pushTokenRepo == nil || s.pushService == nil {
 		return
 	}
@@ -239,8 +305,33 @@ func (s *NotificationService) sendPush(ctx context.Context, receiverID, content 
 	if err != nil || len(tokens) == 0 {
 		return
 	}
+
+	title := senderName
+	if title == "" {
+		title = "LinkUp"
+	}
+
+	opts := PushOptions{
+		Title:    title,
+		Body:     truncateRunes(body, 160),
+		Data:     data,
+		ThreadID: threadID,
+	}
+	if senderAvatar != "" {
+		opts.ImageURL = senderAvatar
+	}
+	if unread, err := s.notifRepo.GetUnreadCount(ctx, receiverID); err == nil {
+		badge := int(unread)
+		opts.Badge = &badge
+	}
+
 	for _, t := range tokens {
-		go s.pushService.SendBatch(t.PushToken, "LinkUp", content, data)
+		token := t.PushToken
+		go func() {
+			if s.pushService.SendBatch(token, opts) {
+				_ = s.pushTokenRepo.DeleteByPushToken(context.Background(), token)
+			}
+		}()
 	}
 }
 

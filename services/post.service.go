@@ -609,13 +609,13 @@ func (s *postService) CreateComment(ctx context.Context, userID, postID string, 
 	if post.UserID != userID {
 		postIDPtr := postID
 		commentIDPtr := comment.ID
-		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeComment, "đã bình luận bài viết của bạn", &postIDPtr, nil, &commentIDPtr)
+		s.notifService.Create(ctx, post.UserID, &userID, models.NotificationTypeComment, "đã bình luận bài viết của bạn", &postIDPtr, nil, &commentIDPtr, WithPushBody("đã bình luận: "+content))
 	}
 
 	if parentComment != nil && parentComment.UserID != userID && parentComment.UserID != post.UserID {
 		postIDPtr := postID
 		commentIDPtr := comment.ID
-		s.notifService.Create(ctx, parentComment.UserID, &userID, models.NotificationTypeComment, "đã trả lời bình luận của bạn", &postIDPtr, nil, &commentIDPtr)
+		s.notifService.Create(ctx, parentComment.UserID, &userID, models.NotificationTypeComment, "đã trả lời bình luận của bạn", &postIDPtr, nil, &commentIDPtr, WithPushBody("đã trả lời: "+content))
 	}
 
 	return s.repo.FindCommentsByPostID(ctx, postID)

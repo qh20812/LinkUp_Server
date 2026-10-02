@@ -63,6 +63,34 @@ func forwardHasContent(content string, emojiID, mediaID, sharedPostID *string) b
 	return strings.TrimSpace(content) != "" || emojiID != nil || mediaID != nil || sharedPostID != nil
 }
 
+// messagePushBody — nội dung push chi tiết cho tin nhắn. Ưu tiên text plaintext
+// (bản legacy / group chat server giải mã được); bản E2E server chỉ có
+// ciphertext → gợi ý loại tin theo metadata. Trả về "" khi không có gợi ý →
+// caller dùng content notification mặc định.
+func messagePushBody(plaintext string, e2eVersion int, emojiID, mediaID, sharedPostID, forwardedFrom *string, mediaFileType string) string {
+	switch {
+	case e2eVersion != 1 && strings.TrimSpace(plaintext) != "":
+		return plaintext
+	case mediaID != nil && *mediaID != "":
+		switch {
+		case strings.HasPrefix(mediaFileType, "image/"):
+			return "đã gửi một ảnh"
+		case strings.HasPrefix(mediaFileType, "video/"):
+			return "đã gửi một video"
+		default:
+			return "đã gửi một tệp"
+		}
+	case emojiID != nil && *emojiID != "":
+		return "đã gửi một nhãn dán"
+	case sharedPostID != nil && *sharedPostID != "":
+		return "đã gửi một bài viết"
+	case forwardedFrom != nil && *forwardedFrom != "":
+		return "đã chuyển tiếp một tin nhắn"
+	default:
+		return ""
+	}
+}
+
 func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content string, e2eVersion int, emojiID, mediaID, gifURL, replyToMessageID, sharedPostID, mediaGroupID, forwardedFrom *string) (*models.Message, error) {
 	mute, err := s.chatRepo.GetUserMute(ctx, chatID, userID)
 	if err != nil {
@@ -142,6 +170,7 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		}
 	}
 
+	var mediaFileType string
 	if mediaID != nil && *mediaID != "" {
 		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
 		if err != nil {
@@ -150,6 +179,7 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 		if media.UserID != userID {
 			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotYours)
 		}
+		mediaFileType = media.FileType
 	}
 
 	if replyToMessageID != nil && *replyToMessageID != "" {
@@ -224,9 +254,10 @@ func (s *ChatService) SendMessage(ctx context.Context, userID, chatID, content s
 
 	participants, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
 	if err == nil {
+		pushBody := messagePushBody(content, e2eVersion, emojiID, mediaID, sharedPostID, forwardedFrom, mediaFileType)
 		for _, participantID := range participants {
 			if participantID != userID {
-				s.notifService.Create(ctx, participantID, &userID, models.NotificationTypeMessage, "đã gửi tin nhắn", nil, &userID, &chatID)
+				s.notifService.Create(ctx, participantID, &userID, models.NotificationTypeMessage, "đã gửi tin nhắn", nil, &userID, &chatID, WithPushBody(pushBody))
 			}
 		}
 	}

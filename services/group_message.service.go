@@ -138,6 +138,7 @@ func (s *GroupMessageService) SendMessage(
 		}
 	}
 
+	var mediaFileType string
 	if mediaID != nil && *mediaID != "" {
 		media, err := s.mediaRepo.GetByID(ctx, *mediaID)
 		if err != nil {
@@ -146,6 +147,7 @@ func (s *GroupMessageService) SendMessage(
 		if media.UserID != userID {
 			return nil, errorsapp.New(errorsapp.ErrCodeGCMediaNotYours)
 		}
+		mediaFileType = media.FileType
 	}
 
 	if replyToMessageID != nil && *replyToMessageID != "" {
@@ -210,6 +212,7 @@ func (s *GroupMessageService) SendMessage(
 
 	participants, err := s.chatRepo.GetParticipantIDs(ctx, chatID)
 	if err == nil && s.notifService != nil {
+		pushBody := messagePushBody(content, 0, emojiID, mediaID, sharedPostID, forwardedFrom, mediaFileType)
 		for _, participantID := range participants {
 			if participantID == userID {
 				continue
@@ -227,6 +230,7 @@ func (s *GroupMessageService) SendMessage(
 				nil,
 				&userID,
 				&chat.ID,
+				WithPushBody(pushBody),
 			)
 		}
 	}
