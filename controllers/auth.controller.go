@@ -71,6 +71,15 @@ func (h *AuthController) GoogleLogin(c *gin.Context) {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
 	}
+	if input.Code != "" {
+		response, err := h.authService.GoogleLoginWithCode(c.Request.Context(), input.Code)
+		if err != nil {
+			errorsapp.Respond(c, http.StatusUnauthorized, err)
+			return
+		}
+		c.JSON(http.StatusOK, response)
+		return
+	}
 	if input.IDToken == "" {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidIDToken))
 		return

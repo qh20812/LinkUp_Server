@@ -246,6 +246,38 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 		return dto.AuthResponse{}, err
 	}
 
+	return s.loginWithGoogleClaims(ctx, claims)
+}
+
+// GoogleLoginWithCode xử lý flow auth-code (web mới): đổi code lấy ID token
+// rồi đi chung logic với GoogleLogin. Giữ GoogleLogin cũ cho client legacy.
+func (s *AuthService) GoogleLoginWithCode(ctx context.Context, code string) (dto.AuthResponse, error) {
+	if s.googleVerifier == nil || strings.TrimSpace(s.env.GoogleClientSecret) == "" {
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeGoogleNotConfigured)
+	}
+
+	clientID := strings.TrimSpace(s.env.GoogleClientID)
+	if clientID == "" && len(s.env.GoogleClientIDs) > 0 {
+		clientID = strings.TrimSpace(s.env.GoogleClientIDs[0])
+	}
+	if clientID == "" {
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeGoogleNotConfigured)
+	}
+
+	idToken, err := ExchangeGoogleAuthCode(ctx, code, clientID, strings.TrimSpace(s.env.GoogleClientSecret))
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	claims, err := s.googleVerifier.Verify(ctx, idToken)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	return s.loginWithGoogleClaims(ctx, claims)
+}
+
+func (s *AuthService) loginWithGoogleClaims(ctx context.Context, claims *GoogleClaims) (dto.AuthResponse, error) {
 	email := normalizeEmail(claims.Email)
 	user, err := s.authRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {

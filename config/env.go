@@ -34,6 +34,8 @@ type Env struct {
 	MongoDBName string
 
 	GoogleClientIDs []string
+	GoogleClientID string
+	GoogleClientSecret string
 }
 
 var (
@@ -99,6 +101,8 @@ func LoadEnv() error {
 		MongoDBName: getString("MONGO_DB_NAME", "linkup"),
 
 		GoogleClientIDs: parseCSV(getString("GOOGLE_CLIENT_IDS", "")),
+		GoogleClientID: getString("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getString("GOOGLE_CLIENT_SECRET", ""),
 	}
 
 	missing := validateRequired(env)
