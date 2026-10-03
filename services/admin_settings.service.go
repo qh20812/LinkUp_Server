@@ -11,6 +11,7 @@ import (
 	"linkup/errors"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 )
 
 var allowedSettings = map[string]string{
@@ -82,6 +83,7 @@ func (s *AdminSettingsService) UpdateSettings(ctx context.Context, adminID strin
 		if err := s.authRepo.IncrementAllTokenVersions(ctx); err != nil {
 			return errors.Wrap(errors.ErrCodeAdminSessionsInvalidFailed, err)
 		}
+		utils.InvalidateAllAuthCache()
 	}
 
 	return nil

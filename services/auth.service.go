@@ -536,7 +536,11 @@ func (s *AuthService) Logout(ctx context.Context, userID string) error {
 	if s.sessionRepo != nil {
 		_ = s.sessionRepo.RevokeAllByUserID(ctx, userID)
 	}
-	return s.authRepo.IncrementTokenVersion(ctx, userID)
+	if err := s.authRepo.IncrementTokenVersion(ctx, userID); err != nil {
+		return err
+	}
+	utils.InvalidateAuthCache(userID)
+	return nil
 }
 
 func (s *AuthService) accessTTL(ctx context.Context) time.Duration {
@@ -634,7 +638,11 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 	if s.sessionRepo != nil {
 		_ = s.sessionRepo.RevokeAllByUserID(ctx, userID)
 	}
-	return s.authRepo.IncrementTokenVersion(ctx, userID)
+	if err := s.authRepo.IncrementTokenVersion(ctx, userID); err != nil {
+		return err
+	}
+	utils.InvalidateAuthCache(userID)
+	return nil
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenInput, deviceName, ipAddress, userAgent string) (dto.TokenResponse, error) {

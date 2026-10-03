@@ -44,12 +44,18 @@ func AuthMiddleware(env config.Env, db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if db != nil {
-			var user models.User
-			if err := db.WithContext(c.Request.Context()).Select("status, token_version").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
-				errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUserNotFound))
-				c.Abort()
-				return
+			status, tokenVersion, hit := utils.GetCachedAuth(claims.UserID)
+			if !hit {
+				var user models.User
+				if err := db.WithContext(c.Request.Context()).Select("status, token_version").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+					errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUserNotFound))
+					c.Abort()
+					return
+				}
+				status, tokenVersion = user.Status, user.TokenVersion
+				utils.SetCachedAuth(claims.UserID, status, tokenVersion)
 			}
+			user := models.User{Status: status, TokenVersion: tokenVersion}
 
 			if !user.IsActive() {
 				if user.IsBanned() {

@@ -293,6 +293,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, status); err != nil {
 		return err
 	}
+	utils.InvalidateAuthCache(targetUserID)
 
 	statusMsg := fmt.Sprintf("Trạng thái tài khoản của bạn đã được cập nhật thành: %s", status)
 	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
@@ -355,6 +356,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned); err != nil {
 		return dto.AdminBanUserResponse{}, err
 	}
+	utils.InvalidateAuthCache(targetUserID)
 
 	banMsg := fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", input.Reason)
 	if expiresAt != nil {
@@ -984,6 +986,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		if err := s.authRepo.UpdateUserStatus(ctx, *report.TargetUserID, models.UserStatusBanned); err != nil {
 			return fmt.Errorf("ban user: %w", err)
 		}
+		utils.InvalidateAuthCache(*report.TargetUserID)
 
 		ban := models.NewBan(*report.TargetUserID, superAdminID, input.Reason, expiresAt)
 		ban.ID = utils.GenerateUUID()

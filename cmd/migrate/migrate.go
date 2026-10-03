@@ -112,6 +112,11 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "user_settings", "activity_status_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
 	ensureColumn(db, "user_settings", "last_seen_visibility", "VARCHAR(20) NOT NULL DEFAULT 'all_friends'")
 
+	// Index composite cho notification polling (unread-count + list):
+	// cover WHERE receiver_id = ? [AND is_read = ?] ORDER BY created_at DESC
+	// và COUNT — bảng này bị poll mỗi 30-60s/user nên full scan là sập DB.
+	ensureIndex(db, "notifications", "idx_notifications_receiver_read_created", "receiver_id, is_read, created_at")
+
 	// Thêm các cột notification_preferences mới cho story react/share/media
 	if db.Migrator().HasTable("notification_preferences") {
 		ensureColumn(db, "notification_preferences", "story_react_enabled", "TINYINT(1) NOT NULL DEFAULT 1")
