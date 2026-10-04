@@ -2,10 +2,12 @@ package migrate
 
 import (
 	"log"
+	"time"
 
 	"gorm.io/gorm"
 
 	"linkup/models"
+	"linkup/utils"
 )
 
 // Run thực hiện toàn bộ schema migration khi server khởi động.
@@ -103,6 +105,33 @@ func Run(db *gorm.DB) {
 
 	// Thêm cột likes_count vào comments cho comment reactions
 	ensureColumn(db, "comments", "likes_count", "INT NOT NULL DEFAULT 0")
+
+	// ===== Violation rules (quy tắc vi phạm dùng cho report) =====
+	// Bảng có từ seed cũ nhưng chỉ có id/title/description — mở rộng thêm
+	// các cột phục vụ CRUD linh hoạt + lọc theo target (idempotent).
+	if !db.Migrator().HasTable("violation_rules") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS violation_rules (
+			id VARCHAR(36) PRIMARY KEY,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			applicable_to VARCHAR(20) NOT NULL DEFAULT 'all',
+			severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+			sort_order INT NOT NULL DEFAULT 0,
+			is_active TINYINT(1) NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create violation_rules table: %v", err)
+		}
+	}
+	ensureColumn(db, "violation_rules", "applicable_to", "VARCHAR(20) NOT NULL DEFAULT 'all'")
+	ensureColumn(db, "violation_rules", "severity", "VARCHAR(20) NOT NULL DEFAULT 'medium'")
+	ensureColumn(db, "violation_rules", "sort_order", "INT NOT NULL DEFAULT 0")
+	ensureColumn(db, "violation_rules", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
+	ensureColumn(db, "violation_rules", "created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+	ensureColumn(db, "violation_rules", "updated_at", "DATETIME NULL")
+	ensureIndex(db, "violation_rules", "idx_violation_rules_active", "is_active")
+	seedViolationRules(db)
 
 	// Thêm cột last_seen vào users cho online/offline presence
 	ensureColumn(db, "users", "last_seen", "DATETIME NULL")
@@ -235,6 +264,35 @@ func Run(db *gorm.DB) {
 
 	// Seed dữ liệu mặc định cho các Gói Quảng Cáo
 	seedAdPackages(db)
+}
+
+// seedViolationRules khởi tạo bộ quy tắc vi phạm mẫu (idempotent theo title).
+// Dùng title cố định để chạy lại không tạo trùng.
+func seedViolationRules(db *gorm.DB) {
+	defaults := []models.ViolationRule{
+		{Title: "Spam / quảng cáo làm phiền", Description: "Đăng nội dung quảng cáo lặp lại, link rác hoặc nội dung không liên quan.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityLow, SortOrder: 1, IsActive: true},
+		{Title: "Quấy rối / bắt nạt", Description: "Tấn công, đe dọa hoặc xúc phạm người khác.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityHigh, SortOrder: 2, IsActive: true},
+		{Title: "Ngôn từ thù ghét / phân biệt đối xử", Description: "Nội dung kỳ thị chủng tộc, giới tính, tôn giáo hoặc nhóm người.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityHigh, SortOrder: 3, IsActive: true},
+		{Title: "Nội dung nhạy cảm / đồi trụy", Description: "Hình ảnh, video hoặc mô tả mang tính khiêu dâm, bạo lực quá mức.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityHigh, SortOrder: 4, IsActive: true},
+		{Title: "Thông tin sai lệch", Description: "Tin giả, thông tin sai sự thật gây hiểu lầm.", ApplicableTo: models.ViolationApplicablePost, Severity: models.ViolationSeverityMedium, SortOrder: 5, IsActive: true},
+		{Title: "Lừa đảo / giả mạo", Description: "Tài khoản giả mạo người khác hoặc hành vi lừa đảo.", ApplicableTo: models.ViolationApplicableUser, Severity: models.ViolationSeverityHigh, SortOrder: 6, IsActive: true},
+		{Title: "Vi phạm bản quyền", Description: "Đăng lại nội dung có bản quyền mà không được phép.", ApplicableTo: models.ViolationApplicablePost, Severity: models.ViolationSeverityMedium, SortOrder: 7, IsActive: true},
+		{Title: "Lý do khác", Description: "Vi phạm không thuộc các nhóm trên (mô tả chi tiết ở lý do).", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityLow, SortOrder: 99, IsActive: true},
+	}
+
+	for _, d := range defaults {
+		var count int64
+		db.Model(&models.ViolationRule{}).Where("title = ?", d.Title).Count(&count)
+		if count > 0 {
+			continue
+		}
+		rule := d
+		rule.ID = utils.GenerateUUID()
+		rule.CreatedAt = time.Now().UTC()
+		if err := db.Create(&rule).Error; err != nil {
+			log.Printf("Warning: seed violation rule %q: %v", d.Title, err)
+		}
+	}
 }
 
 // seedAdPackages hỗ trợ khởi tạo sẵn 3 gói cước mẫu cho hệ thống

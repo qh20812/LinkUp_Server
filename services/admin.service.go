@@ -47,6 +47,7 @@ type AdminService struct {
 	adminRepo           repository.AdminRepository
 	mediaRepo           *repository.MediaRepository
 	adRepo              repository.AdRepository
+	violationRuleRepo   *repository.ViolationRuleRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
 }
@@ -72,6 +73,11 @@ func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.Ba
 // SetCloudinary gán Cloudinary client cho admin service (tránh breaking constructor).
 func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
 	s.cloudinary = cld
+}
+
+// SetViolationRuleRepository gán repo để tra cứu tên rule trong report detail.
+func (s *AdminService) SetViolationRuleRepository(repo *repository.ViolationRuleRepository) {
+	s.violationRuleRepo = repo
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -886,28 +892,108 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 		CreatedAt:        report.CreatedAt,
 	}
 
+	if report.ViolationRuleID != nil && s.violationRuleRepo != nil {
+		if rule, err := s.violationRuleRepo.FindByID(ctx, *report.ViolationRuleID); err == nil {
+			detail.ViolationRuleTitle = &rule.Title
+		}
+	}
+
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
 		if err == nil {
 			detail.TargetType = "post"
 			detail.PostOwnerID = &post.UserID
+			username, displayName, avatarURI, _ := s.resolveReportUserInfo(ctx, post.UserID)
+			mediaURIs := []string{}
+			if mediaMap, merr := s.mediaRepo.GetByPostIDs(ctx, []string{post.ID}); merr == nil {
+				for _, m := range mediaMap[post.ID] {
+					mediaURIs = append(mediaURIs, m.FileURI)
+				}
+			}
+			detail.TargetPost = &dto.AdminReportTargetPost{
+				PostID:           post.ID,
+				OwnerID:          post.UserID,
+				OwnerUsername:    username,
+				OwnerDisplayName: displayName,
+				OwnerAvatarURI:   avatarURI,
+				Title:            post.Title,
+				Excerpt:          excerptRunes(post.Content, 200),
+				MediaURIs:        mediaURIs,
+				Status:           string(post.Status),
+				LikesCount:       post.LikesCount,
+				CommentsCount:    post.CommentsCount,
+				CreatedAt:        post.CreatedAt,
+			}
 		} else {
 			detail.TargetType = "post"
 		}
 	} else if report.TargetUserID != nil {
 		detail.TargetType = "user"
+		if u, err := s.authRepo.FindByID(ctx, *report.TargetUserID); err == nil {
+			username, displayName, avatarURI, status := s.resolveReportUserInfo(ctx, u.ID)
+			detail.TargetUser = &dto.AdminReportTargetUser{
+				UserID:      u.ID,
+				Username:    username,
+				DisplayName: displayName,
+				AvatarURI:   avatarURI,
+				Status:      status,
+			}
+		}
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
 		if err == nil {
 			detail.TargetType = "comment"
 			detail.CommentOwnerID = &comment.UserID
 			detail.CommentContent = &comment.Content
+			username, displayName, avatarURI, _ := s.resolveReportUserInfo(ctx, comment.UserID)
+			postTitle := ""
+			if post, perr := s.postRepo.FindByID(ctx, comment.PostID); perr == nil {
+				postTitle = post.Title
+			}
+			detail.TargetComment = &dto.AdminReportTargetComment{
+				CommentID:        comment.ID,
+				Content:          comment.Content,
+				OwnerID:          comment.UserID,
+				OwnerUsername:    username,
+				OwnerDisplayName: displayName,
+				OwnerAvatarURI:   avatarURI,
+				PostID:           comment.PostID,
+				PostTitle:        postTitle,
+				Status:           string(comment.Status),
+				CreatedAt:        comment.CreatedAt,
+			}
 		} else {
 			detail.TargetType = "comment"
 		}
 	}
 
 	return detail, nil
+}
+
+// resolveReportUserInfo nạp tên/avatar phục vụ snapshot trong report detail.
+// Lỗi từng nguồn được bỏ qua để detail vẫn trả về phần còn lại.
+func (s *AdminService) resolveReportUserInfo(ctx context.Context, userID string) (username, displayName, avatarURI, status string) {
+	if u, err := s.authRepo.FindByID(ctx, userID); err == nil && u != nil {
+		username = u.Username
+		status = string(u.Status)
+		displayName = u.Username
+	}
+	if profiles, err := s.profileRepo.FindByIDs(ctx, []string{userID}); err == nil && len(profiles) > 0 {
+		if profiles[0].DisplayName != "" {
+			displayName = profiles[0].DisplayName
+		}
+		avatarURI = profiles[0].AvatarURI
+	}
+	return username, displayName, avatarURI, status
+}
+
+// excerptRunes cắt chuỗi theo số ký tự (rune) để hiển thị tóm tắt.
+func excerptRunes(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
 }
 
 func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID string, input dto.AdminReportReviewInput) error {
@@ -1011,33 +1097,89 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		return err
 	}
 
-	reporterMessage := fmt.Sprintf("Báo cáo %s đã được xử lý bằng hành động: %s.", report.ID, action)
+	// Mô tả mục tiêu bằng ngôn ngữ tự nhiên (tên/tựa, không phải UUID) để
+	// người nhận thông báo hiểu đang nói về nội dung nào.
+	descriptor := "nội dung bạn đã báo cáo"
+	var postTitle, commentExcerpt, targetUsername string
+	if report.TargetPostID != nil {
+		if post, err := s.postRepo.FindByID(ctx, *report.TargetPostID); err == nil {
+			postTitle = strings.TrimSpace(post.Title)
+			if postTitle == "" {
+				postTitle = excerptRunes(post.Content, 60)
+			}
+			descriptor = fmt.Sprintf("bài viết %q", excerptRunes(postTitle, 60))
+		} else {
+			descriptor = "bài viết bạn đã báo cáo"
+		}
+	} else if report.TargetCommentID != nil {
+		if comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID); err == nil {
+			commentExcerpt = excerptRunes(comment.Content, 60)
+			descriptor = fmt.Sprintf("bình luận %q", commentExcerpt)
+		} else {
+			descriptor = "bình luận bạn đã báo cáo"
+		}
+	} else if report.TargetUserID != nil {
+		username, displayName, _, _ := s.resolveReportUserInfo(ctx, *report.TargetUserID)
+		targetUsername = username
+		if targetUsername == "" {
+			targetUsername = displayName
+		}
+		if targetUsername == "" {
+			descriptor = "người dùng bạn đã báo cáo"
+		} else {
+			descriptor = fmt.Sprintf("người dùng @%s", targetUsername)
+		}
+	}
+
+	var reporterMessage string
+	switch action {
+	case "hide":
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: nội dung đã bị ẩn. Lý do: %s", descriptor, input.Reason)
+	case "ban":
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: tài khoản đã bị cấm. Lý do: %s", descriptor, input.Reason)
+	default:
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xem xét: nội dung không vi phạm.", descriptor)
+	}
 	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
 
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
 		if err == nil {
-			targetMessage := fmt.Sprintf("Bài viết của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+			label := postTitle
+			if label == "" {
+				label = excerptRunes(post.Content, 60)
+			}
+			targetMessage := fmt.Sprintf("Bài viết %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", excerptRunes(label, 60), input.Reason)
 			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
 		}
 	} else if report.TargetUserID != nil {
-		targetMessage := fmt.Sprintf("Tài khoản của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
-		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+		if action != "ban" {
+			// Nhánh ban có thông báo riêng chi tiết hơn bên dưới — tránh gửi trùng.
+			targetMessage := "Tài khoản của bạn đã bị báo cáo và đã được xem xét bởi quản trị viên."
+			_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+		}
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
 		if err == nil {
-			targetMessage := fmt.Sprintf("Bình luận của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+			if commentExcerpt == "" {
+				commentExcerpt = excerptRunes(comment.Content, 60)
+			}
+			targetMessage := fmt.Sprintf("Bình luận %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", commentExcerpt, input.Reason)
 			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
 		}
 	}
 
 	if report.TargetUserID != nil && action == "ban" {
+		reason := strings.TrimSpace(input.Reason)
+		if reason == "" {
+			reason = "vi phạm quy tắc cộng đồng"
+		}
 		_, _ = s.notificationService.Create(
 			ctx,
 			*report.TargetUserID,
 			nil,
 			models.NotificationTypeMessage,
-			"Tài khoản của bạn đã bị cấm vì vi phạm báo cáo.",
+			fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", reason),
 			nil,
 			report.TargetUserID,
 			nil,

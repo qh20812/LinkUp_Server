@@ -198,6 +198,15 @@ func main() {
 		reportController := controllers.NewReportController(reportService)
 		routes.RegisterReportRoutes(router, reportController, env, gormDB)
 
+		// ===== KHỞI TẠO VIOLATION RULES (QUY TẮC VI PHẠM DÙNG CHO REPORT) =====
+		violationRuleRepository := repository.NewViolationRuleRepository(gormDB)
+		violationRuleValidation := validations.NewViolationRuleValidation()
+		violationRuleService := services.NewViolationRuleService(violationRuleRepository, authRepository, violationRuleValidation)
+		violationRuleController := controllers.NewViolationRuleController(violationRuleService)
+		reportService.SetViolationRuleService(violationRuleService)
+		routes.RegisterViolationRuleRoutes(router, violationRuleController, env, gormDB)
+		routes.RegisterAdminViolationRuleRoutes(router, violationRuleController, env, gormDB)
+
 		// ===== KHỞI TẠO TẦNG BLOCK (CHẶN USER) =====
 		blockValidation := validations.NewBlockValidation()
 		blockService := services.NewBlockService(blockRepository, authRepository, blockValidation)
@@ -308,6 +317,7 @@ func main() {
 		adminRepository := repository.NewAdminRepository(gormDB)
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
+		adminService.SetViolationRuleRepository(violationRuleRepository)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 

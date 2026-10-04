@@ -129,7 +129,14 @@ func Run(env config.Env) error {
 		`CREATE TABLE IF NOT EXISTS violation_rules (
 			id VARCHAR(36) PRIMARY KEY,
 			title VARCHAR(255) NOT NULL,
-			description TEXT
+			description TEXT,
+			applicable_to VARCHAR(20) NOT NULL DEFAULT 'all',
+			severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+			sort_order INT NOT NULL DEFAULT 0,
+			is_active TINYINT(1) NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL,
+			INDEX idx_violation_rules_active (is_active)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 2. Depends on users

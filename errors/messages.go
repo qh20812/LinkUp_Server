@@ -177,6 +177,17 @@ var Messages = map[string]string{
 	"community.RULE_CHECK_FAILED":     "Lỗi khi kiểm tra trùng lặp nội quy",
 	"community.RULE_POSITION_FAILED":  "Lỗi khi xác định vị trí nội quy",
 
+	// Violation rules
+	"violation.RULE_TITLE_REQUIRED": "Tiêu đề quy tắc vi phạm không được để trống",
+	"violation.RULE_TITLE_TOO_SHORT": "Tiêu đề quy tắc vi phạm phải có ít nhất 5 ký tự",
+	"violation.RULE_TITLE_TOO_LONG": "Tiêu đề quy tắc vi phạm không được vượt quá 255 ký tự",
+	"violation.RULE_DESC_TOO_LONG": "Mô tả quy tắc vi phạm không được vượt quá 2000 ký tự",
+	"violation.RULE_TITLE_DUPLICATE": "Tiêu đề quy tắc vi phạm đã tồn tại",
+	"violation.RULE_NOT_FOUND":       "Quy tắc vi phạm không tồn tại",
+	"violation.RULE_INACTIVE":        "Quy tắc vi phạm này đã bị vô hiệu hóa",
+	"violation.RULE_TARGET_MISMATCH": "Quy tắc vi phạm không áp dụng cho loại đối tượng này",
+	"violation.RULE_IN_USE":          "Quy tắc đang được dùng bởi các báo cáo, chỉ có thể tắt chứ không thể xóa",
+
 	// ── Group Chat ──────────────────────────────────────────────
 	"group_chat.INVALID_NAME":         "Tên nhóm chat phải từ 3 đến 50 ký tự",
 	"group_chat.ENCRYPTION_KEY_FAILED": "Không thể khởi tạo khóa bảo mật cho nhóm",

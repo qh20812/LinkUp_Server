@@ -155,11 +155,13 @@ func (r *ReportRepository) ListAdminReports(ctx context.Context, keyword, status
                 reports.target_comment_id,
                 reports.report_type,
                 reports.violation_rule_id,
+                violation_rule.title AS violation_rule_title,
                 reports.reason_detail,
                 reports.status,
                 reports.created_at,
                 CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END AS target_type`).
 		Joins("LEFT JOIN users reporter ON reporter.id = reports.reporter_id").
+		Joins("LEFT JOIN violation_rules violation_rule ON violation_rule.id = reports.violation_rule_id").
 		Order(orderBy).
 		Limit(limit).
 		Offset(offset)

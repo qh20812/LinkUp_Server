@@ -134,6 +134,7 @@ type AdminReportListItem struct {
 	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
 	ReportType       string    `json:"report_type"`
 	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
+	ViolationRuleTitle *string `json:"violation_rule_title,omitempty"`
 	ReasonDetail     string    `json:"reason_detail"`
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -157,12 +158,56 @@ type AdminReportDetailResponse struct {
 	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
 	ReportType       string    `json:"report_type"`
 	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
+	ViolationRuleTitle *string `json:"violation_rule_title,omitempty"`
 	ReasonDetail     string    `json:"reason_detail"`
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
 	PostOwnerID      *string   `json:"post_owner_id,omitempty"`
 	CommentOwnerID   *string   `json:"comment_owner_id,omitempty"`
 	CommentContent   *string   `json:"comment_content,omitempty"`
+	// Snapshot nội dung bị báo cáo để admin duyệt không cần tra ID thủ công.
+	TargetPost    *AdminReportTargetPost    `json:"target_post,omitempty"`
+	TargetComment *AdminReportTargetComment `json:"target_comment,omitempty"`
+	TargetUser    *AdminReportTargetUser    `json:"target_user,omitempty"`
+}
+
+// AdminReportTargetPost snapshot bài viết bị báo cáo.
+type AdminReportTargetPost struct {
+	PostID           string    `json:"post_id"`
+	OwnerID          string    `json:"owner_id"`
+	OwnerUsername    string    `json:"owner_username"`
+	OwnerDisplayName string    `json:"owner_display_name"`
+	OwnerAvatarURI   string    `json:"owner_avatar_uri"`
+	Title            string    `json:"title"`
+	Excerpt          string    `json:"excerpt"`
+	MediaURIs        []string  `json:"media_uris"`
+	Status           string    `json:"status"`
+	LikesCount       int       `json:"likes_count"`
+	CommentsCount    int       `json:"comments_count"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// AdminReportTargetComment snapshot bình luận bị báo cáo + bài chứa nó.
+type AdminReportTargetComment struct {
+	CommentID        string    `json:"comment_id"`
+	Content          string    `json:"content"`
+	OwnerID          string    `json:"owner_id"`
+	OwnerUsername    string    `json:"owner_username"`
+	OwnerDisplayName string    `json:"owner_display_name"`
+	OwnerAvatarURI   string    `json:"owner_avatar_uri"`
+	PostID           string    `json:"post_id"`
+	PostTitle        string    `json:"post_title"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// AdminReportTargetUser snapshot người dùng bị báo cáo.
+type AdminReportTargetUser struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+	Status      string `json:"status"`
 }
 
 type AdminReportReviewInput struct {

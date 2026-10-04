@@ -77,26 +77,30 @@ func Run(env config.Env, state *internal.SeedState) error {
 	}
 
 	type violationRule struct {
-		id          string
-		title       string
-		description string
+		id           string
+		title        string
+		description  string
+		applicableTo string
+		severity     string
+		sortOrder    int
 	}
 
 	rules := []violationRule{
-		{internal.UUID(), "Spam", "Posting repetitive or unsolicited content"},
-		{internal.UUID(), "Harassment", "Bullying or threatening others"},
-		{internal.UUID(), "Hate Speech", "Promoting violence or discrimination"},
-		{internal.UUID(), "Nudity", "Posting explicit or adult content"},
-		{internal.UUID(), "Copyright", "Posting copyrighted material without permission"},
-		{internal.UUID(), "Impersonation", "Pretending to be someone else"},
-		{internal.UUID(), "Misinformation", "Sharing false or misleading information"},
-		{internal.UUID(), "Self-harm", "Content promoting self-harm or suicide"},
+		{internal.UUID(), "Spam / quảng cáo làm phiền", "Đăng nội dung quảng cáo lặp lại, link rác hoặc nội dung không liên quan.", "all", "low", 1},
+		{internal.UUID(), "Quấy rối / bắt nạt", "Tấn công, đe dọa hoặc xúc phạm người khác.", "all", "high", 2},
+		{internal.UUID(), "Ngôn từ thù ghét / phân biệt đối xử", "Nội dung kỳ thị chủng tộc, giới tính, tôn giáo hoặc nhóm người.", "all", "high", 3},
+		{internal.UUID(), "Nội dung nhạy cảm / đồi trụy", "Hình ảnh, video hoặc mô tả mang tính khiêu dâm, bạo lực quá mức.", "all", "high", 4},
+		{internal.UUID(), "Thông tin sai lệch", "Tin giả, thông tin sai sự thật gây hiểu lầm.", "post", "medium", 5},
+		{internal.UUID(), "Lừa đảo / giả mạo", "Tài khoản giả mạo người khác hoặc hành vi lừa đảo.", "user", "high", 6},
+		{internal.UUID(), "Vi phạm bản quyền", "Đăng lại nội dung có bản quyền mà không được phép.", "post", "medium", 7},
+		{internal.UUID(), "Lý do khác", "Vi phạm không thuộc các nhóm trên (mô tả chi tiết ở lý do).", "all", "low", 99},
 	}
 
+	now = time.Now().UTC()
 	for _, v := range rules {
 		if err := internal.Exec(database,
-			`INSERT INTO violation_rules (id, title, description) VALUES (?, ?, ?)`,
-			v.id, v.title, v.description,
+			`INSERT INTO violation_rules (id, title, description, applicable_to, severity, sort_order, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+			v.id, v.title, v.description, v.applicableTo, v.severity, v.sortOrder, now,
 		); err != nil {
 			return fmt.Errorf("core: insert violation_rule %s: %w", v.title, err)
 		}
