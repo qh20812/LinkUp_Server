@@ -249,6 +249,7 @@ func main() {
 		// ===== KHỞI TẠO TẦNG E2E (MÃ HÓA ĐẦU CUỐI CHO TIN NHẮN TRỰC TIẾP) =====
 		e2eRepository := repository.NewE2ERepository(gormDB)
 		e2eService := services.NewE2EService(e2eRepository, chatRepository)
+		e2eService.SetChatHub(chatHub)
 		e2eController := controllers.NewE2EController(e2eService)
 		routes.RegisterE2ERoutes(router, e2eController, env, gormDB)
 

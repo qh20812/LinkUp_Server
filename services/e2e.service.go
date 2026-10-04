@@ -2,21 +2,31 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/ws"
 )
 
 type E2EService struct {
 	e2eRepo *repository.E2ERepository
 	chatRepo *repository.ChatRepository
+	// chatHub là Hub của /api/chats/ws (khác hub notification ở /api/ws).
+	// Optional — nil khi chưa wire (test/service-only) thì bỏ qua notify.
+	chatHub *ws.Hub
 }
 
 func NewE2EService(e2eRepo *repository.E2ERepository, chatRepo *repository.ChatRepository) *E2EService {
 	return &E2EService{e2eRepo: e2eRepo, chatRepo: chatRepo}
+}
+
+// SetChatHub gắn Hub chat để phát event key-updated cho participant đang online.
+func (s *E2EService) SetChatHub(h *ws.Hub) {
+	s.chatHub = h
 }
 
 func (s *E2EService) RegisterUserKey(ctx context.Context, userID, publicKey string) error {
@@ -83,7 +93,54 @@ func (s *E2EService) StoreChatKeys(ctx context.Context, callerID string, inputs 
 			CreatedAt:  now,
 		})
 	}
-	return s.e2eRepo.UpsertChatKeys(ctx, keys)
+	if err := s.e2eRepo.UpsertChatKeys(ctx, keys); err != nil {
+		return err
+	}
+	s.notifyKeyUpdated(keys, callerID)
+	return nil
+}
+
+// keyUpdateRecipients gom user cần báo theo từng chat: mọi user trong batch
+// trừ caller, khử trùng lặp. Hàm thuần để unit-test không cần DB/hub.
+func keyUpdateRecipients(keys []models.ChatE2EKey, callerID string) map[string][]string {
+	out := make(map[string][]string)
+	seen := make(map[string]map[string]bool)
+	for _, k := range keys {
+		if k.UserID == callerID {
+			continue
+		}
+		if seen[k.ChatID] == nil {
+			seen[k.ChatID] = make(map[string]bool)
+		}
+		if seen[k.ChatID][k.UserID] {
+			continue
+		}
+		seen[k.ChatID][k.UserID] = true
+		out[k.ChatID] = append(out[k.ChatID], k.UserID)
+	}
+	return out
+}
+
+// notifyKeyUpdated báo cho các participant còn lại (đang online) rằng khóa E2E
+// của chat đã đổi để client tự adopt + giải mã lại tin đang kẹt — thay vì chờ
+// user F5. Bắn trực tiếp WsEvent wire-format của chat client.
+func (s *E2EService) notifyKeyUpdated(keys []models.ChatE2EKey, callerID string) {
+	if s.chatHub == nil {
+		return
+	}
+	for chatID, userIDs := range keyUpdateRecipients(keys, callerID) {
+		payload, err := json.Marshal(map[string]string{"chat_id": chatID})
+		if err != nil {
+			continue
+		}
+		raw, err := json.Marshal(dto.WsEvent{Type: "chat:e2e_key_updated", Payload: payload})
+		if err != nil {
+			continue
+		}
+		for _, uid := range userIDs {
+			s.chatHub.SendRawToUser(uid, raw)
+		}
+	}
 }
 
 func (s *E2EService) GetChatKey(ctx context.Context, userID, chatID string) (*dto.ChatE2EKeyResponse, error) {
