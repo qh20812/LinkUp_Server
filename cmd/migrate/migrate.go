@@ -117,6 +117,20 @@ func Run(db *gorm.DB) {
 	// và COUNT — bảng này bị poll mỗi 30-60s/user nên full scan là sập DB.
 	ensureIndex(db, "notifications", "idx_notifications_receiver_read_created", "receiver_id, is_read, created_at")
 
+	// Bảng idempotency cho POST /posts: client gửi Idempotency-Key header,
+	// server dedupe double-submit (nhấn Đăng 2 lần / retry sau timeout).
+	if !db.Migrator().HasTable("post_idempotency") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS post_idempotency (
+			client_key CHAR(36) PRIMARY KEY,
+			user_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			INDEX idx_post_idempotency_user (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create post_idempotency table: %v", err)
+		}
+	}
+
 	// Thêm các cột notification_preferences mới cho story react/share/media
 	if db.Migrator().HasTable("notification_preferences") {
 		ensureColumn(db, "notification_preferences", "story_react_enabled", "TINYINT(1) NOT NULL DEFAULT 1")

@@ -10,6 +10,9 @@ import (
 )
 
 func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, env config.Env, db *gorm.DB) {
+	// Staging local cho async media pipeline: client thấy media ngay qua URL
+	// tạm, worker đẩy Cloudinary xong thì cập nhật URL thật + bắn WS media:ready.
+	router.Static("/static/staging", "./uploads/staging")
 	apiGroup := router.Group("/api")
 	{
 		apiGroup.GET("/posts", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)

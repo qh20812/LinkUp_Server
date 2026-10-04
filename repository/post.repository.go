@@ -6,6 +6,7 @@ import (
 	"linkup/config"
 	"linkup/models"
 	"linkup/utils"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -21,6 +22,57 @@ func NewPostRepository(db *gorm.DB) *PostRepository {
 
 func (r *PostRepository) Create(ctx context.Context, post *models.Post) error {
 	return r.db.WithContext(ctx).Create(post).Error
+}
+
+// postIdempotencyKey map Idempotency-Key header -> post đã tạo (chống double-submit).
+type postIdempotencyKey struct {
+	ClientKey string    `gorm:"column:client_key;type:char(36);primaryKey"`
+	UserID    string    `gorm:"column:user_id;type:char(36);index"`
+	PostID    string    `gorm:"column:post_id;type:char(36)"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (postIdempotencyKey) TableName() string { return "post_idempotency" }
+
+// FindPostIDByClientKey trả về post_id đã tạo cho key, hoặc "" nếu chưa có.
+func (r *PostRepository) FindPostIDByClientKey(ctx context.Context, userID, clientKey string) (string, error) {
+	var row postIdempotencyKey
+	err := r.db.WithContext(ctx).
+		Where("client_key = ? AND user_id = ?", clientKey, userID).
+		First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", nil
+		}
+		return "", err
+	}
+	return row.PostID, nil
+}
+
+// SaveClientKey lưu mapping key -> post. Trả về true nếu insert mới,
+// false nếu key đã tồn tại (race: request trùng song song).
+func (r *PostRepository) SaveClientKey(ctx context.Context, userID, clientKey, postID string) (bool, error) {
+	row := postIdempotencyKey{
+		ClientKey: clientKey,
+		UserID:    userID,
+		PostID:    postID,
+		CreatedAt: time.Now(),
+	}
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "duplicate key")
 }
 
 func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *string, cursorScore *float64, cursorID *string, snapshotTime time.Time, filterFollowing bool) ([]models.Post, error) {

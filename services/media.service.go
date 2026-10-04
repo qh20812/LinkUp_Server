@@ -9,10 +9,14 @@ import (
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
+	"linkup/ws"
+	"io"
 	"log"
 	"mime/multipart"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +29,13 @@ type MediaService interface {
 	UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader, durationSeconds int) (*models.Media, error)
+	// StageUpload lưu file vào staging local + tạo media row pending, rồi đẩy
+	// Cloudinary ở background (không block request). Trả về warning (lỗi
+	// validate từng file, caller gom hiển thị) và error hạ tầng (disk/DB).
+	StageUpload(ctx context.Context, userID, postID string, file *multipart.FileHeader) (media *models.Media, warning string, err error)
+	// ReconcileStaleStaging đánh fail các media kẹt staging quá hạn (crash
+	// giữa chừng). Gọi 1 lần lúc boot.
+	ReconcileStaleStaging()
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
@@ -40,6 +51,23 @@ type mediaService struct {
 	moderationRepo      *repository.ModerationRepository
 	notificationService *NotificationService
 	storyRepo           repository.StoryRepository
+	hub                 *ws.Hub
+}
+
+// Staging local cho async pipeline: file nằm đây từ lúc request tới khi
+// worker đẩy xong lên Cloudinary. Serve tạm qua /static/staging (xem
+// post.routes.go) nên client thấy media ngay, rồi nhận URL Cloudinary
+// qua WS event media:ready.
+const (
+	stagingDir        = "./uploads/staging"
+	stagingURLPrefix  = "/static/staging/"
+	stagingMaxAge     = time.Hour
+	stagingUploadTTL  = 10 * time.Minute
+)
+
+// SetHub gán realtime hub để bắn event media:ready (tránh breaking constructor).
+func (s *mediaService) SetHub(hub *ws.Hub) {
+	s.hub = hub
 }
 
 func NewMediaService(
@@ -82,6 +110,134 @@ func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *mul
 // Dùng cho post creation, stories, và standalone upload — nội dung vi phạm sẽ được xử lý qua report system.
 func (s *mediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
 	return s.upload(ctx, userID, file, models.MediaStatusApproved, 0)
+}
+
+// StageUpload validate nhanh (loại file/dung lượng/quota — không tốn network)
+// rồi lưu file vào staging local + tạo media row pending, sau đó đẩy
+// Cloudinary ở background. Request trả về trong ~1-2s kể cả video chục MB.
+// Warning (chuỗi rỗng nếu không có) dành cho lỗi validate từng file.
+func (s *mediaService) StageUpload(ctx context.Context, userID, postID string, file *multipart.FileHeader) (*models.Media, string, error) {
+	quota, used, err := s.repo.GetUserStorageInfo(ctx, userID)
+	if err != nil {
+		return nil, "", fmt.Errorf("get storage info: %w", err)
+	}
+	available := quota - used
+	if available < 0 {
+		available = 0
+	}
+
+	contentType := file.Header.Get("Content-Type")
+	if err := s.validation.ValidateFile(file.Filename, file.Size, contentType); err != nil {
+		return nil, err.Error(), nil
+	}
+	if err := s.validation.ValidateStorageQuota(available, file.Size); err != nil {
+		return nil, err.Error(), nil
+	}
+
+	if err := os.MkdirAll(stagingDir, 0755); err != nil {
+		return nil, "", fmt.Errorf("make staging dir: %w", err)
+	}
+
+	mediaID := utils.GenerateUUID()
+	stagingName := mediaID + strings.ToLower(path.Ext(file.Filename))
+	stagingPath := filepath.Join(stagingDir, stagingName)
+
+	src, err := file.Open()
+	if err != nil {
+		return nil, "", fmt.Errorf("open file: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.Create(stagingPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("stage file: %w", err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		os.Remove(stagingPath)
+		return nil, "", fmt.Errorf("stage file: %w", err)
+	}
+	dst.Close()
+
+	media := models.NewMedia(userID, &postID, stagingURLPrefix+stagingName, contentType, float64(file.Size))
+	media.ID = mediaID
+	media.CreatedAt = time.Now()
+	media.Status = models.MediaStatusPending
+	if err := s.repo.Create(ctx, &media); err != nil {
+		os.Remove(stagingPath)
+		return nil, "", fmt.Errorf("save media record: %w", err)
+	}
+	if err := s.repo.UpdateStorageUsage(ctx, userID, float64(file.Size)); err != nil {
+		log.Printf("[Media Async] không thể cập nhật storage cho user %s: %v", userID, err)
+	}
+
+	go s.processStaged(userID, postID, mediaID, stagingName)
+
+	return &media, "", nil
+}
+
+// processStaged đẩy 1 file staging lên Cloudinary (chạy nền, ctx độc lập
+// với request — client timeout/disconnect không giết được upload).
+func (s *mediaService) processStaged(userID, postID, mediaID, stagingName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), stagingUploadTTL)
+	defer cancel()
+
+	stagingPath := filepath.Join(stagingDir, stagingName)
+	f, err := os.Open(stagingPath)
+	if err != nil {
+		log.Printf("[Media Async] không mở được staging %s: %v", mediaID, err)
+		return
+	}
+	defer f.Close()
+
+	uploadResult, err := s.aiModeration.UploadWithoutModeration(ctx, f, mediaID)
+	if err != nil {
+		log.Printf("[Media Async] upload %s lên Cloudinary thất bại: %v", mediaID, err)
+		return
+	}
+
+	if err := s.repo.UpdateFileURIAndStatus(ctx, mediaID, uploadResult.SecureURL, models.MediaStatusApproved); err != nil {
+		log.Printf("[Media Async] không thể cập nhật media %s: %v", mediaID, err)
+		return
+	}
+	os.Remove(stagingPath)
+
+	if s.hub != nil {
+		s.hub.SendToUser(userID, ws.OutgoingMessage{
+			Type: "media:ready",
+			Data: map[string]any{
+				"post_id":  postID,
+				"media_id": mediaID,
+				"file_uri": uploadResult.SecureURL,
+			},
+		})
+	}
+}
+
+// ReconcileStaleStaging đánh fail các media kẹt staging quá stagingMaxAge
+// (crash/deploy giữa chừng). Gọi 1 lần lúc boot.
+func (s *mediaService) ReconcileStaleStaging() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	items, err := s.repo.FindStalePendingStaging(ctx, time.Now().Add(-stagingMaxAge))
+	if err != nil {
+		log.Printf("[Media Async] reconcile staging thất bại: %v", err)
+		return
+	}
+	for _, m := range items {
+		reason := "Tải lên bị gián đoạn, vui lòng đăng lại media này."
+		if err := s.repo.UpdateStatusAndReview(ctx, m.ID, models.MediaStatusRejected, reason); err != nil {
+			log.Printf("[Media Async] không thể fail media kẹt %s: %v", m.ID, err)
+			continue
+		}
+		if strings.HasPrefix(m.FileURI, stagingURLPrefix) {
+			os.Remove(filepath.Join(stagingDir, strings.TrimPrefix(m.FileURI, stagingURLPrefix)))
+		}
+	}
+	if len(items) > 0 {
+		log.Printf("[Media Async] đã đánh fail %d media kẹt staging", len(items))
+	}
 }
 
 // UploadChatMedia upload file cho tin nhắn chat. durationSeconds (giây) chỉ áp

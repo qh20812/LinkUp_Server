@@ -12,12 +12,15 @@ import (
 	"mime/multipart"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 type PostService interface {
-	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool) (*models.Post, error)
+	// CreatePost tạo bài viết. clientKey (Idempotency-Key header, "" nếu không có)
+	// chống double-submit: key đã thấy -> trả về post cũ thay vì tạo trùng.
+	// Media được stage local + đẩy Cloudinary ở background; lỗi validate từng
+	// file trả về trong warnings (không fail cả bài).
+	CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool, clientKey string) (*models.Post, []string, error)
 	GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetPostListV2(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error)
 	GetSavedPosts(ctx context.Context, userID string, cursor string, pageSize int) ([]models.Post, string, error)
@@ -97,13 +100,24 @@ func (s *postService) recordInterest(userID, postID string, delta float64) {
 	}
 }
 
-func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool) (*models.Post, error) {
+func (s *postService) CreatePost(ctx context.Context, userID, title, content, status string, communityID *string, files []*multipart.FileHeader, gifURL string, commentsEnabled bool, clientKey string) (*models.Post, []string, error) {
 	if communityID != nil {
 		if s.contributionService == nil {
-			return nil, errorsapp.New(errorsapp.ErrCodePostContributionNotInit)
+			return nil, nil, errorsapp.New(errorsapp.ErrCodePostContributionNotInit)
 		}
 		if err := s.contributionService.RequireMember(ctx, *communityID, userID); err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+	}
+
+	// Idempotency: key đã thấy -> trả về post cũ (chống double-submit sau
+	// timeout: client retry không đẻ bài trùng).
+	if clientKey != "" {
+		if existingID, err := s.repo.FindPostIDByClientKey(ctx, userID, clientKey); err == nil && existingID != "" {
+			if existing, err := s.repo.FindByID(ctx, existingID); err == nil && existing != nil {
+				s.hydratePostMediaAuthor(ctx, existing)
+				return existing, nil, nil
+			}
 		}
 	}
 
@@ -117,34 +131,48 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 	post.CommentsEnabled = commentsEnabled
 
 	if err := s.repo.Create(ctx, &post); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Xử lý upload danh sách hình ảnh/video đa phần từ form-data lên Cloudinary
-	// Upload song song để tăng tốc (moderation chạy nền, không block)
-	if len(files) > 0 && s.mediaService != nil {
-		var (
-			wg       sync.WaitGroup
-			mu       sync.Mutex
-			mediaIDs []string
-		)
-		for _, file := range files {
-			wg.Add(1)
-			go func(f *multipart.FileHeader) {
-				defer wg.Done()
-				uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx, userID, f)
-				if err == nil && uploadedMedia != nil {
-					mu.Lock()
-					mediaIDs = append(mediaIDs, uploadedMedia.ID)
-					mu.Unlock()
-				} else if err != nil {
-					log.Printf("[Media Upload Error] Lỗi tải file lên: %v", err)
+	if clientKey != "" {
+		if ok, err := s.repo.SaveClientKey(ctx, userID, clientKey, post.ID); err != nil {
+			log.Printf("[Idempotency] không thể lưu key cho post %s: %v", post.ID, err)
+		} else if !ok {
+			// Race thua: request song song cùng key đã thắng — trả về bài của nó.
+			if winnerID, err := s.repo.FindPostIDByClientKey(ctx, userID, clientKey); err == nil && winnerID != "" && winnerID != post.ID {
+				if winner, err := s.repo.FindByID(ctx, winnerID); err == nil && winner != nil {
+					s.hydratePostMediaAuthor(ctx, winner)
+					return winner, nil, nil
 				}
-			}(file)
+			}
 		}
-		wg.Wait()
+	}
+
+	// Media pipeline async: validate + stage local ngay trong request (nhanh,
+	// không network), đẩy Cloudinary ở background. Lỗi validate từng file gom
+	// vào warnings để client hiển thị — không fail cả bài.
+	var warnings []string
+	if len(files) > 0 && s.mediaService != nil {
+		var mediaIDs []string
+		for _, file := range files {
+			staged, warning, err := s.mediaService.StageUpload(ctx, userID, post.ID, file)
+			if err != nil {
+				log.Printf("[Media Upload Error] Lỗi stage file %s: %v", file.Filename, err)
+				warnings = append(warnings, fmt.Sprintf("%s: %s", file.Filename, tMediaStageError()))
+				continue
+			}
+			if warning != "" {
+				warnings = append(warnings, fmt.Sprintf("%s: %s", file.Filename, warning))
+				continue
+			}
+			if staged != nil {
+				mediaIDs = append(mediaIDs, staged.ID)
+			}
+		}
 		if len(mediaIDs) > 0 {
-			_ = s.repo.LinkMediaToPost(ctx, mediaIDs, post.ID)
+			if err := s.repo.LinkMediaToPost(ctx, mediaIDs, post.ID); err != nil {
+				log.Printf("[Media Upload Error] không thể link media cho post %s: %v", post.ID, err)
+			}
 		}
 	}
 
@@ -155,20 +183,7 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		}
 	}
 
-	post.Media = []models.Media{}
-	if s.mediaService != nil {
-		if mediaMap, errM := s.mediaService.GetByPostIDs(ctx, []string{post.ID}); errM == nil {
-			if m, ok := mediaMap[post.ID]; ok {
-				post.Media = m
-			}
-		}
-	}
-
-	if author, err := s.repo.FetchPostAuthor(ctx, userID); err == nil {
-		post.Username = author.Username
-		post.DisplayName = author.DisplayName
-		post.AvatarURI = author.AvatarURI
-	}
+	s.hydratePostMediaAuthor(ctx, &post)
 
 	if err := s.tagService.ProcessPostHashtags(ctx, nil, post.ID, content); err != nil {
 		log.Printf("[Hashtag Error] không thể lưu tag cho post %s: %v", post.ID, err)
@@ -190,7 +205,31 @@ func (s *postService) CreatePost(ctx context.Context, userID, title, content, st
 		}()
 	}
 
-	return &post, nil
+	return &post, warnings, nil
+}
+
+// hydratePostMediaAuthor nạp media + author vào post (dùng chung cho post
+// mới tạo và post trả về từ idempotency hit).
+func (s *postService) hydratePostMediaAuthor(ctx context.Context, post *models.Post) {
+	post.Media = []models.Media{}
+	if s.mediaService != nil {
+		if mediaMap, errM := s.mediaService.GetByPostIDs(ctx, []string{post.ID}); errM == nil {
+			if m, ok := mediaMap[post.ID]; ok {
+				post.Media = m
+			}
+		}
+	}
+
+	if author, err := s.repo.FetchPostAuthor(ctx, post.UserID); err == nil {
+		post.Username = author.Username
+		post.DisplayName = author.DisplayName
+		post.AvatarURI = author.AvatarURI
+	}
+}
+
+// tMediaStageError là message fallback khi stage file lỗi hạ tầng (disk/DB).
+func tMediaStageError() string {
+	return "không thể lưu tạm file, vui lòng thử lại"
 }
 
 func (s *postService) GetPostList(ctx context.Context, cursor string, pageSize int, userID string, filter string) ([]models.Post, string, error) {

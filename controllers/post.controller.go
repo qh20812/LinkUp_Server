@@ -49,13 +49,16 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL, input.CommentsEnabled == nil || *input.CommentsEnabled)
+	post, warnings, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL, input.CommentsEnabled == nil || *input.CommentsEnabled, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
+	if warnings == nil {
+		warnings = []string{}
+	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": post})
+	c.JSON(http.StatusCreated, gin.H{"data": post, "warnings": warnings})
 }
 
 func (ctrl *PostController) GetPosts(c *gin.Context) {

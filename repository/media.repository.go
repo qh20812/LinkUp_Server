@@ -166,6 +166,32 @@ func (r *MediaRepository) UpdateStatusAndReview(ctx context.Context, id string, 
 		Error
 }
 
+// UpdateFileURIAndStatus dùng cho async pipeline: worker upload xong thì
+// trỏ FileURI từ staging local sang Cloudinary URL + duyệt status.
+func (r *MediaRepository) UpdateFileURIAndStatus(ctx context.Context, id, fileURI string, status models.MediaStatus) error {
+	return r.db.WithContext(ctx).
+		Model(&models.Media{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"file_uri": fileURI,
+			"status":   status,
+		}).
+		Error
+}
+
+// FindStalePendingStaging tìm media kẹt ở staging local (crash giữa chừng):
+// status pending + FileURI staging + quá hạn. Boot reconcile đánh fail chúng.
+func (r *MediaRepository) FindStalePendingStaging(ctx context.Context, before time.Time) ([]models.Media, error) {
+	var items []models.Media
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND file_uri LIKE ? AND created_at < ?", models.MediaStatusPending, "/static/staging/%", before).
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (r *MediaRepository) GetByStatus(ctx context.Context, status models.MediaStatus, keyword string, page, pageSize int) ([]models.Media, int64, error) {
 	if page < 1 {
 		page = 1

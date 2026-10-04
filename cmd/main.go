@@ -186,6 +186,9 @@ func main() {
 
 		// Wire sau khi cả media + story repo đã khởi tạo
 		mediaService.SetStoryRepo(storyRepository)
+		mediaService.SetHub(hub)
+		// Đánh fail media kẹt staging từ lần chạy trước (crash/deploy giữa upload).
+		mediaService.ReconcileStaleStaging()
 		profileService.SetMediaRepo(mediaRepository)
 
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
