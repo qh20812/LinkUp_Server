@@ -18,6 +18,10 @@ type Env struct {
 	DBPassword   string
 	DBSSL        bool
 	DBName       string
+	// Optional path to a PEM-encoded CA certificate for verifying the
+	// MySQL server (required by managed providers like Aiven). Empty =
+	// legacy behavior (no TLS in DSN).
+	DBCACertPath string
 	JWTSecret    string
 	JWTExpiresIn int
 
@@ -83,7 +87,7 @@ func LoadEnv() error {
 		DBUser:     getRequiredString("DB_USER"),
 		DBPassword: getRequiredString("DB_PASSWORD"),
 		DBSSL:      dbSSL,
-		// DBCACertPath: getString("DB_CA_CERT_PATH", ""),
+		DBCACertPath: getString("DB_CA_CERT_PATH", ""),
 		DBName:       getRequiredString("DB_NAME"),
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
