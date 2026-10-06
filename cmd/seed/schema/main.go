@@ -122,8 +122,14 @@ func Run(env config.Env) error {
 
 		`CREATE TABLE IF NOT EXISTS emojis (
 			id VARCHAR(36) PRIMARY KEY,
-			code VARCHAR(50) NOT NULL UNIQUE,
-			image_uri VARCHAR(512) NOT NULL DEFAULT ''
+			code VARCHAR(100) NOT NULL UNIQUE,
+			image_uri VARCHAR(512) NOT NULL DEFAULT '', ` + "`character`" + ` VARCHAR(16) NOT NULL DEFAULT '', ` + "`name`" + ` VARCHAR(255) NOT NULL DEFAULT '',
+			keywords TEXT NULL,
+			category VARCHAR(50) NOT NULL DEFAULT 'smileys',
+			sort_order INT NOT NULL DEFAULT 0,
+			is_reaction TINYINT(1) NOT NULL DEFAULT 0,
+			INDEX idx_emojis_category (category, sort_order),
+			INDEX idx_emojis_reaction (is_reaction, sort_order)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		`CREATE TABLE IF NOT EXISTS violation_rules (
@@ -1153,6 +1159,35 @@ func Run(env config.Env) error {
 	if err := addForeignKeyIfMissing(database, "posts", "fk_posts_shared_from",
 		"CONSTRAINT fk_posts_shared_from FOREIGN KEY (shared_from_post_id) REFERENCES posts(id) ON DELETE CASCADE"); err != nil {
 		return fmt.Errorf("schema: add fk_posts_shared_from: %w", err)
+	}
+
+	// Phase 5: cột native-emoji cho bảng emojis (seed full Unicode, render không CDN).
+	// DB cũ chỉ có id/code/image_uri — thêm dần, giữ dữ liệu và FK reaction.
+	if err := addColumnIfMissing(database, "emojis", "character", "VARCHAR(16) NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("schema: add emojis.character: %w", err)
+	}
+	if err := addColumnIfMissing(database, "emojis", "name", "VARCHAR(255) NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("schema: add emojis.name: %w", err)
+	}
+	if err := addColumnIfMissing(database, "emojis", "keywords", "TEXT NULL"); err != nil {
+		return fmt.Errorf("schema: add emojis.keywords: %w", err)
+	}
+	if err := addColumnIfMissing(database, "emojis", "category", "VARCHAR(50) NOT NULL DEFAULT 'smileys'"); err != nil {
+		return fmt.Errorf("schema: add emojis.category: %w", err)
+	}
+	if err := addColumnIfMissing(database, "emojis", "sort_order", "INT NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add emojis.sort_order: %w", err)
+	}
+	if err := addColumnIfMissing(database, "emojis", "is_reaction", "TINYINT(1) NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add emojis.is_reaction: %w", err)
+	}
+	if err := addIndexIfMissing(database, "emojis", "idx_emojis_category",
+		"INDEX idx_emojis_category (category, sort_order)"); err != nil {
+		return fmt.Errorf("schema: add idx_emojis_category: %w", err)
+	}
+	if err := addIndexIfMissing(database, "emojis", "idx_emojis_reaction",
+		"INDEX idx_emojis_reaction (is_reaction, sort_order)"); err != nil {
+		return fmt.Errorf("schema: add idx_emojis_reaction: %w", err)
 	}
 
 	// ===== PUSH TOKENS TABLE =====

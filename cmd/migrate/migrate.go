@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"linkup/models"
+	"linkup/seeddata"
 	"linkup/utils"
 )
 
@@ -132,6 +133,23 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "violation_rules", "updated_at", "DATETIME NULL")
 	ensureIndex(db, "violation_rules", "idx_violation_rules_active", "is_active")
 	seedViolationRules(db)
+
+	// ===== Native emoji (thay CDN bên thứ ba) =====
+	// Bảng emojis có từ seed cũ (id/code/image_uri) — mở rộng cột + seed full
+	// Unicode set, idempotent. Chạy lúc boot nên prod nhận được mà không cần seed lại.
+	if db.Migrator().HasTable("emojis") {
+		ensureColumn(db, "emojis", "character", "VARCHAR(16) NOT NULL DEFAULT ''")
+		ensureColumn(db, "emojis", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
+		ensureColumn(db, "emojis", "keywords", "TEXT NULL")
+		ensureColumn(db, "emojis", "category", "VARCHAR(50) NOT NULL DEFAULT 'smileys'")
+		ensureColumn(db, "emojis", "sort_order", "INT NOT NULL DEFAULT 0")
+		ensureColumn(db, "emojis", "is_reaction", "TINYINT(1) NOT NULL DEFAULT 0")
+		ensureIndex(db, "emojis", "idx_emojis_category", "category, sort_order")
+		ensureIndex(db, "emojis", "idx_emojis_reaction", "is_reaction, sort_order")
+		// code cũ VARCHAR(50) không chứa nổi code full Unicode (dài nhất 76 ký tự).
+		ensureVarcharWidth(db, "emojis", "code", 100, "VARCHAR(100) NOT NULL")
+		seedEmojis(db)
+	}
 
 	// Thêm cột last_seen vào users cho online/offline presence
 	ensureColumn(db, "users", "last_seen", "DATETIME NULL")
@@ -295,6 +313,55 @@ func seedViolationRules(db *gorm.DB) {
 	}
 }
 
+// ensureVarcharWidth nới cột VARCHAR khi độ rộng hiện tại nhỏ hơn yêu cầu
+// (idempotent). Dùng khi seed full mở rộng miền giá trị của cột cũ.
+func ensureVarcharWidth(db *gorm.DB, table, column string, width int, definition string) {
+	if !db.Migrator().HasTable(table) || !db.Migrator().HasColumn(table, column) {
+		return
+	}
+	var current *int
+	err := db.Raw(`SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+		table, column).Scan(&current).Error
+	if err != nil || current == nil || *current >= width {
+		return
+	}
+	if err := db.Exec("ALTER TABLE " + table + " MODIFY COLUMN `" + column + "` " + definition).Error; err != nil {
+		log.Printf("Warning: ensure width %s.%s: %v", table, column, err)
+	}
+}
+
+// seedEmojis nạp full Unicode emoji set vào bảng emojis (idempotent theo code).
+// - DB đã đủ full set (>= len(seeddata.Emojis)): bỏ qua.
+// - DB có ít dòng (prod cũ 10 reaction): upsert toàn bộ (chạy 1 lần duy nhất).
+// Render native bằng character nên image_uri để trống, không phụ thuộc CDN ngoài.
+func seedEmojis(db *gorm.DB) {
+	var count int64
+	if err := db.Model(&models.Emoji{}).Count(&count).Error; err != nil {
+		log.Printf("Warning: seed emojis count: %v", err)
+		return
+	}
+	if count >= int64(len(seeddata.Emojis)) {
+		return
+	}
+	for _, e := range seeddata.Emojis {
+		isReaction := 0
+		if e.IsReaction {
+			isReaction = 1
+		}
+		if err := db.Exec(`INSERT INTO emojis (id, code, image_uri, `+"`character`"+`, `+"`name`"+`, keywords, category, sort_order, is_reaction)
+			VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE `+"`character`"+` = VALUES(`+"`character`"+`), `+"`name`"+` = VALUES(`+"`name`"+`), keywords = VALUES(keywords),
+			category = VALUES(category), sort_order = VALUES(sort_order), is_reaction = VALUES(is_reaction)`,
+			utils.GenerateUUID(), e.Code, e.Character, e.Name, e.Keywords, e.Category, e.SortOrder, isReaction,
+		).Error; err != nil {
+			log.Printf("Warning: seed emoji %q: %v", e.Code, err)
+			return
+		}
+	}
+	log.Printf("[Seed] Đã nạp %d emoji native vào bảng emojis.", len(seeddata.Emojis))
+}
+
 // seedAdPackages hỗ trợ khởi tạo sẵn 3 gói cước mẫu cho hệ thống
 func seedAdPackages(db *gorm.DB) {
 	var count int64
@@ -376,7 +443,7 @@ func ensureColumn(db *gorm.DB, table, column, definition string) {
 	if db.Migrator().HasColumn(table, column) {
 		return
 	}
-	if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition).Error; err != nil {
+	if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN `" + column + "` " + definition).Error; err != nil {
 		log.Printf("Warning: ensure column %s.%s: %v", table, column, err)
 	}
 }

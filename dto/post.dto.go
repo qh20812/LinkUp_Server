@@ -25,6 +25,17 @@ type ReactPostInput struct {
 	EmojiID string `json:"emoji_id" binding:"required"`
 }
 
+// EmojiQuery query cho GET /emojis (picker native, thay emojifyi bên thứ ba).
+// scope=reactions -> 10 quick-react (không phân trang); thiếu scope -> full set
+// kèm q (tìm theo name/keywords/code), category, limit/offset.
+type EmojiQuery struct {
+	Scope    string `form:"scope"`
+	Q        string `form:"q"`
+	Category string `form:"category"`
+	Limit    int    `form:"limit"`
+	Offset   int    `form:"offset"`
+}
+
 // DTO tạo bình luận/phản hồi
 type CreateCommentInput struct {
 	Content  string  `json:"content"`

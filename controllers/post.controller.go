@@ -7,6 +7,7 @@ import (
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/models"
+	"linkup/repository"
 	"linkup/services"
 	"linkup/validations"
 	"mime/multipart"
@@ -436,12 +437,30 @@ func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 }
 
 func (ctrl *PostController) GetEmojis(c *gin.Context) {
-	emojis, err := ctrl.service.ListEmojis(c.Request.Context())
+	var q dto.EmojiQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostInvalidFormat))
+		return
+	}
+	filter := repository.EmojiFilter{
+		ReactionsOnly: q.Scope == "reactions",
+		Category:      q.Category,
+		Query:         q.Q,
+		Limit:         q.Limit,
+		Offset:        q.Offset,
+	}
+	emojis, total, err := ctrl.service.ListEmojis(c.Request.Context(), filter)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": emojis})
+	// Giữ field "data" như cũ để client hiện tại không vỡ; thêm total/has_more
+	// cho picker phân trang full set.
+	c.JSON(http.StatusOK, gin.H{
+		"data":     emojis,
+		"total":    total,
+		"has_more": q.Scope != "reactions" && int64(q.Offset+len(emojis)) < total,
+	})
 }
 
 func (ctrl *PostController) PinPost(c *gin.Context) {

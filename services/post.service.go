@@ -35,7 +35,7 @@ type PostService interface {
 	DeletePost(ctx context.Context, userID, postID string) error
 	ToggleCommentReaction(ctx context.Context, userID, commentID, emojiID string) (action string, err error)
 	GetPostsByHashtag(ctx context.Context, hashtag string, page, pageSize int) ([]models.Post, error)
-	ListEmojis(ctx context.Context) ([]models.Emoji, error)
+	ListEmojis(ctx context.Context, filter repository.EmojiFilter) ([]models.Emoji, int64, error)
 	SetMediaService(mediaService MediaService)
 	PinPost(ctx context.Context, userID, postID string) error
 	UnpinPost(ctx context.Context, userID, postID string) error
@@ -1041,8 +1041,28 @@ func (s *postService) GetPostsByHashtag(ctx context.Context, hashtag string, pag
 	return posts, err
 }
 
-func (s *postService) ListEmojis(ctx context.Context) ([]models.Emoji, error) {
-	return s.repo.ListEmojis(ctx)
+func (s *postService) ListEmojis(ctx context.Context, filter repository.EmojiFilter) ([]models.Emoji, int64, error) {
+	// scope=reactions luôn trả trọn 10 dòng, không phân trang.
+	if filter.ReactionsOnly {
+		filter.Limit = 0
+		filter.Offset = 0
+	} else {
+		if filter.Limit < 1 || filter.Limit > 100 {
+			filter.Limit = 50
+		}
+		if filter.Offset < 0 {
+			filter.Offset = 0
+		}
+	}
+	emojis, err := s.repo.ListEmojis(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.repo.CountEmojis(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	return emojis, total, nil
 }
 
 func (s *postService) PinPost(ctx context.Context, userID, postID string) error {

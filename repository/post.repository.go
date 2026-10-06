@@ -483,13 +483,49 @@ func (r *PostRepository) FindEmojiByID(ctx context.Context, id string) (*models.
 	return &emoji, nil
 }
 
-func (r *PostRepository) ListEmojis(ctx context.Context) ([]models.Emoji, error) {
+// EmojiFilter lọc emoji cho picker: Scope=reactions (10 quick-react) hoặc tất cả
+// kèm tìm kiếm q (theo name/keywords/code), lọc category, phân trang limit/offset.
+type EmojiFilter struct {
+	ReactionsOnly bool
+	Category      string
+	Query         string
+	Limit         int
+	Offset        int
+}
+
+func (r *PostRepository) applyEmojiFilter(db *gorm.DB, f EmojiFilter) *gorm.DB {
+	if f.ReactionsOnly {
+		db = db.Where("is_reaction = ?", true)
+	}
+	if f.Category != "" {
+		db = db.Where("category = ?", f.Category)
+	}
+	if q := strings.TrimSpace(f.Query); q != "" {
+		like := "%" + q + "%"
+		db = db.Where("name LIKE ? OR keywords LIKE ? OR code LIKE ?", like, like, like)
+	}
+	return db.Order("sort_order ASC")
+}
+
+func (r *PostRepository) ListEmojis(ctx context.Context, f EmojiFilter) ([]models.Emoji, error) {
 	var emojis []models.Emoji
-	err := r.db.WithContext(ctx).Find(&emojis).Error
-	if err != nil {
+	db := r.applyEmojiFilter(r.db.WithContext(ctx).Model(&models.Emoji{}), f)
+	if f.Limit > 0 {
+		db = db.Limit(f.Limit).Offset(f.Offset)
+	}
+	if err := db.Find(&emojis).Error; err != nil {
 		return nil, err
 	}
 	return emojis, nil
+}
+
+func (r *PostRepository) CountEmojis(ctx context.Context, f EmojiFilter) (int64, error) {
+	var total int64
+	db := r.applyEmojiFilter(r.db.WithContext(ctx).Model(&models.Emoji{}), f)
+	if err := db.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func (r *PostRepository) CreateShare(ctx context.Context, share models.PostShare) error {

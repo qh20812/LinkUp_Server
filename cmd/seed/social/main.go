@@ -181,7 +181,9 @@ func Run(env config.Env, state *internal.SeedState) error {
 	for i := 0; i < 80; i++ {
 		userID := state.UserIDs[randRange(2, len(state.UserIDs)-1)]
 		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
-		emojiID := state.EmojiIDs[randRange(0, len(state.EmojiIDs)-1)]
+		// Chỉ random trong 10 reaction legacy — random cả 3.6k emoji sẽ ra
+		// reaction lạ, không giống hành vi người dùng thật.
+		emojiID := state.ReactionEmojiIDs[randRange(0, len(state.ReactionEmojiIDs)-1)]
 		key := userID + "|" + postID + "|" + emojiID
 		if reactionSeen[key] {
 			continue
