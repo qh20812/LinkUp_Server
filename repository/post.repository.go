@@ -79,6 +79,32 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
 	var posts []models.Post
 
 	w := config.DefaultFeedWeights
+	v2 := config.DefaultFeedRankV2
+
+	viewer := ""
+	if userID != nil {
+		viewer = *userID
+	}
+
+	ageH := "((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)"
+
+	// Trừ điểm bài đã xem trong SeenWindowDays ngày (port từ rank v2):
+	// không có dòng này, bài top-1 đứng yên dù user đã xem (F5 mấy lần cũng vậy).
+	seenSub := fmt.Sprintf(`(SELECT COUNT(*) FROM post_views pv WHERE pv.post_id = posts.id AND pv.viewer_id = ? AND pv.created_at > DATE_SUB(?, INTERVAL %d DAY))`,
+		v2.SeenWindowDays)
+
+	// Cộng điểm bài do chính viewer đăng trong NewPostBoostHours giờ để sau
+	// share/F5 vẫn thấy bài mình ở đầu với chính mình (người khác không ảnh hưởng).
+	ownBoost := fmt.Sprintf(`CASE WHEN posts.user_id = ? AND (%s) < %f THEN %f * (1 - (%s) / %f) ELSE 0 END`,
+		ageH, v2.NewPostBoostHours, v2.NewPostBoost, ageH, v2.NewPostBoostHours)
+
+	scoreExpr := fmt.Sprintf(`(? * EXP(-? * %s) +
+		 ? * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
+		 ? * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
+		 %s -
+		 %f * LEAST(%s, %d) +
+		 0.01 * RAND()) AS feed_score`,
+		ageH, ownBoost, v2.SeenPenalty, seenSub, v2.SeenCap)
 
 	// Subqueries cho engagement counts
 	likesSubQuery := r.db.Table("post_reactions").Select("post_id, COUNT(*) AS likes").Group("post_id")
@@ -92,11 +118,12 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri,
             CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following,
-            (? * EXP(-? * ((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)) +
-             ? * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
-             ? * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
-             0.01 * RAND()) AS feed_score`,
-			w.Recency, w.DecayRate, snapshotTime, w.Engagement, w.LikeWeight, w.CommentWeight, w.ShareWeight, w.Affinity).
+            `+scoreExpr,
+			w.Recency, w.DecayRate, snapshotTime,
+			w.Engagement, w.LikeWeight, w.CommentWeight, w.ShareWeight,
+			w.Affinity,
+			viewer, snapshotTime, snapshotTime,
+			viewer, snapshotTime).
 		Joins("LEFT JOIN users ON users.id = posts.user_id").
 		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
 		Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", userID).

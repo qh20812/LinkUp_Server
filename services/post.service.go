@@ -30,7 +30,7 @@ type PostService interface {
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
 	GetCommentList(ctx context.Context, postID string, page, pageSize int, sort string, userID *string) ([]models.Comment, int64, error)
-	SharePost(ctx context.Context, userID, postID, content string) error
+	SharePost(ctx context.Context, userID, postID, content string) (*models.Post, error)
 	SavePost(ctx context.Context, userID, postID string) (action string, err error)
 	DeletePost(ctx context.Context, userID, postID string) error
 	ToggleCommentReaction(ctx context.Context, userID, commentID, emojiID string) (action string, err error)
@@ -823,19 +823,19 @@ func (s *postService) GetCommentList(ctx context.Context, postID string, page, p
 	return comments, total, nil
 }
 
-func (s *postService) SharePost(ctx context.Context, userID, postID, content string) error {
+func (s *postService) SharePost(ctx context.Context, userID, postID, content string) (*models.Post, error) {
 	post, err := s.repo.FindByID(ctx, postID)
 	if err != nil || post.Status == models.PostStatusHidden || post.Status == models.PostStatusPrivate {
-		return errorsapp.New(errorsapp.ErrCodePostNotShareable)
+		return nil, errorsapp.New(errorsapp.ErrCodePostNotShareable)
 	}
 
 	if post.UserID == userID {
-		return errorsapp.New(errorsapp.ErrCodePostCannotShareOwn)
+		return nil, errorsapp.New(errorsapp.ErrCodePostCannotShareOwn)
 	}
 
 	existing, err := s.repo.FindShareByUser(ctx, userID, postID)
 	if err == nil && existing != nil {
-		return errorsapp.New(errorsapp.ErrCodePostAlreadyShared)
+		return nil, errorsapp.New(errorsapp.ErrCodePostAlreadyShared)
 	}
 
 	// Tạo post mới trên timeline (repost)
@@ -850,7 +850,7 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 	sharedPost.Title = ""
 
 	if err := s.repo.Create(ctx, &sharedPost); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Vẫn tạo PostShare record để đếm share count + check is_shared
@@ -859,7 +859,7 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 	share.CreatedAt = time.Now()
 
 	if err := s.repo.CreateShare(ctx, share); err != nil {
-		return err
+		return nil, err
 	}
 
 	if post.UserID != userID {
@@ -875,7 +875,14 @@ func (s *postService) SharePost(ctx context.Context, userID, postID, content str
 		}
 	}
 
-	return nil
+	// Hydrate bài repost vừa tạo để client prepend ngay ở đầu feed mà
+	// không cần reload (tránh snapshot rank mới đẩy bài xuống).
+	s.hydratePostMediaAuthor(ctx, &sharedPost)
+	list := []models.Post{sharedPost}
+	s.enrichFeedPosts(ctx, list, userID)
+	sharedPost = list[0]
+
+	return &sharedPost, nil
 }
 
 func (s *postService) ToggleCommentReaction(ctx context.Context, userID, commentID, emojiID string) (string, error) {

@@ -377,13 +377,15 @@ func (ctrl *PostController) SharePost(c *gin.Context) {
 		input.Content = ""
 	}
 
-	err := ctrl.service.SharePost(c.Request.Context(), userID, postID, input.Content)
+	shared, err := ctrl.service.SharePost(c.Request.Context(), userID, postID, input.Content)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Chia sẻ bài viết thành công!"})
+	// Giữ "message" cho client cũ (mobile), thêm "data" để web prepend
+	// bài repost ngay ở đầu feed mà không cần reload.
+	c.JSON(http.StatusOK, gin.H{"message": "Chia sẻ bài viết thành công!", "data": shared})
 }
 
 func (ctrl *PostController) SavePost(c *gin.Context) {
