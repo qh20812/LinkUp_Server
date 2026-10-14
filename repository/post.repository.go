@@ -6,6 +6,7 @@ import (
 	"linkup/config"
 	"linkup/models"
 	"linkup/utils"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -23,10 +24,87 @@ func (r *PostRepository) Create(ctx context.Context, post *models.Post) error {
 	return r.db.WithContext(ctx).Create(post).Error
 }
 
+// postIdempotencyKey map Idempotency-Key header -> post đã tạo (chống double-submit).
+type postIdempotencyKey struct {
+	ClientKey string    `gorm:"column:client_key;type:char(36);primaryKey"`
+	UserID    string    `gorm:"column:user_id;type:char(36);index"`
+	PostID    string    `gorm:"column:post_id;type:char(36)"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func (postIdempotencyKey) TableName() string { return "post_idempotency" }
+
+// FindPostIDByClientKey trả về post_id đã tạo cho key, hoặc "" nếu chưa có.
+func (r *PostRepository) FindPostIDByClientKey(ctx context.Context, userID, clientKey string) (string, error) {
+	var row postIdempotencyKey
+	err := r.db.WithContext(ctx).
+		Where("client_key = ? AND user_id = ?", clientKey, userID).
+		First(&row).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", nil
+		}
+		return "", err
+	}
+	return row.PostID, nil
+}
+
+// SaveClientKey lưu mapping key -> post. Trả về true nếu insert mới,
+// false nếu key đã tồn tại (race: request trùng song song).
+func (r *PostRepository) SaveClientKey(ctx context.Context, userID, clientKey, postID string) (bool, error) {
+	row := postIdempotencyKey{
+		ClientKey: clientKey,
+		UserID:    userID,
+		PostID:    postID,
+		CreatedAt: time.Now(),
+	}
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "duplicate key")
+}
+
 func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *string, cursorScore *float64, cursorID *string, snapshotTime time.Time, filterFollowing bool) ([]models.Post, error) {
 	var posts []models.Post
 
 	w := config.DefaultFeedWeights
+	v2 := config.DefaultFeedRankV2
+
+	viewer := ""
+	if userID != nil {
+		viewer = *userID
+	}
+
+	ageH := "((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)"
+
+	// Trừ điểm bài đã xem trong SeenWindowDays ngày (port từ rank v2):
+	// không có dòng này, bài top-1 đứng yên dù user đã xem (F5 mấy lần cũng vậy).
+	seenSub := fmt.Sprintf(`(SELECT COUNT(*) FROM post_views pv WHERE pv.post_id = posts.id AND pv.viewer_id = ? AND pv.created_at > DATE_SUB(?, INTERVAL %d DAY))`,
+		v2.SeenWindowDays)
+
+	// Cộng điểm bài do chính viewer đăng trong NewPostBoostHours giờ để sau
+	// share/F5 vẫn thấy bài mình ở đầu với chính mình (người khác không ảnh hưởng).
+	ownBoost := fmt.Sprintf(`CASE WHEN posts.user_id = ? AND (%s) < %f THEN %f * (1 - (%s) / %f) ELSE 0 END`,
+		ageH, v2.NewPostBoostHours, v2.NewPostBoost, ageH, v2.NewPostBoostHours)
+
+	scoreExpr := fmt.Sprintf(`(? * EXP(-? * %s) +
+		 ? * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
+		 ? * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
+		 %s -
+		 %f * LEAST(%s, %d) +
+		 0.01 * RAND()) AS feed_score`,
+		ageH, ownBoost, v2.SeenPenalty, seenSub, v2.SeenCap)
 
 	// Subqueries cho engagement counts
 	likesSubQuery := r.db.Table("post_reactions").Select("post_id, COUNT(*) AS likes").Group("post_id")
@@ -40,19 +118,30 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
             COALESCE(profiles.display_name, users.username) AS display_name,
             COALESCE(profiles.avatar_uri, '') AS avatar_uri,
             CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS is_following,
-            (0.4 * EXP(-? * ((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)) +
-             0.35 * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
-             0.25 * CASE WHEN f.follower_id IS NOT NULL THEN 1.0 ELSE 0.0 END +
-             0.01 * RAND()) AS feed_score`,
-			w.DecayRate, snapshotTime, w.LikeWeight, w.CommentWeight, w.ShareWeight).
+            `+scoreExpr,
+			w.Recency, w.DecayRate, snapshotTime,
+			w.Engagement, w.LikeWeight, w.CommentWeight, w.ShareWeight,
+			w.Affinity,
+			viewer, snapshotTime, snapshotTime,
+			viewer, snapshotTime).
 		Joins("LEFT JOIN users ON users.id = posts.user_id").
 		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
 		Joins("LEFT JOIN follows f ON f.following_id = posts.user_id AND f.follower_id = ?", userID).
 		Joins("LEFT JOIN (?) lr ON lr.post_id = posts.id", likesSubQuery).
 		Joins("LEFT JOIN (?) cr ON cr.post_id = posts.id", commentsSubQuery).
-		Joins("LEFT JOIN (?) sr ON sr.post_id = posts.id", sharesSubQuery).
-		Where("posts.status = ?", models.PostStatusPublic).
-		Limit(limit)
+		Joins("LEFT JOIN (?) sr ON sr.post_id = posts.id", sharesSubQuery)
+
+	if userID != nil && *userID != "" {
+		// Bài public + bài friend-only của bạn bè (kết bạn 2 chiều đã accepted).
+		q = q.Where("(posts.status = ? OR (posts.status = ? AND EXISTS (SELECT 1 FROM friends WHERE ((sender_id = ? AND receiver_id = posts.user_id) OR (sender_id = posts.user_id AND receiver_id = ?)) AND status = ?)))",
+			models.PostStatusPublic, models.PostStatusFriend, *userID, *userID, models.FriendStatusAccepted)
+		// Loại bài của người đã block / bị block (theo chuẩn story + follow-suggestion).
+		q = q.Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = ? AND blocked_user_id = posts.user_id)", *userID).
+			Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = posts.user_id AND blocked_user_id = ?)", *userID)
+	} else {
+		q = q.Where("posts.status = ?", models.PostStatusPublic)
+	}
+	q = q.Limit(limit)
 
 	if filterFollowing {
 		q = q.Where("f.follower_id IS NOT NULL")
@@ -365,6 +454,10 @@ func (r *PostRepository) FindByIDs(ctx context.Context, ids []string) ([]models.
 		for i := range posts {
 			if media, ok := mediaMap[posts[i].ID]; ok {
 				posts[i].Media = media
+			} else {
+				// Chuẩn hóa slice rỗng (thay vì nil) để JSON serialize ra []
+				// thay vì null — client đọc media.length sẽ crash với null.
+				posts[i].Media = []models.Media{}
 			}
 		}
 	}
@@ -374,6 +467,21 @@ func (r *PostRepository) FindByIDs(ctx context.Context, ids []string) ([]models.
 func (r *PostRepository) IncrementViewsCount(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&models.Post{}).Where("id = ?", id).
 		Update("views_count", gorm.Expr("views_count + ?", 1)).Error
+}
+
+// CountUserPostViewsSince đếm số lượt xem đã được tính của user cho bài viết
+// kể từ mốc thời gian (dùng để dedup 1 user/post/ngày).
+func (r *PostRepository) CountUserPostViewsSince(ctx context.Context, postID, userID string, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&models.PostView{}).
+		Where("post_id = ? AND viewer_id = ? AND created_at > ?", postID, userID, since).
+		Count(&count).Error
+	return count, err
+}
+
+// CreatePostView ghi log một lượt xem đã được tính.
+func (r *PostRepository) CreatePostView(ctx context.Context, view *models.PostView) error {
+	return r.db.WithContext(ctx).Create(view).Error
 }
 
 func (r *PostRepository) CreateReaction(ctx context.Context, reaction models.PostReaction) error {
@@ -402,13 +510,49 @@ func (r *PostRepository) FindEmojiByID(ctx context.Context, id string) (*models.
 	return &emoji, nil
 }
 
-func (r *PostRepository) ListEmojis(ctx context.Context) ([]models.Emoji, error) {
+// EmojiFilter lọc emoji cho picker: Scope=reactions (10 quick-react) hoặc tất cả
+// kèm tìm kiếm q (theo name/keywords/code), lọc category, phân trang limit/offset.
+type EmojiFilter struct {
+	ReactionsOnly bool
+	Category      string
+	Query         string
+	Limit         int
+	Offset        int
+}
+
+func (r *PostRepository) applyEmojiFilter(db *gorm.DB, f EmojiFilter) *gorm.DB {
+	if f.ReactionsOnly {
+		db = db.Where("is_reaction = ?", true)
+	}
+	if f.Category != "" {
+		db = db.Where("category = ?", f.Category)
+	}
+	if q := strings.TrimSpace(f.Query); q != "" {
+		like := "%" + q + "%"
+		db = db.Where("name LIKE ? OR keywords LIKE ? OR code LIKE ?", like, like, like)
+	}
+	return db.Order("sort_order ASC")
+}
+
+func (r *PostRepository) ListEmojis(ctx context.Context, f EmojiFilter) ([]models.Emoji, error) {
 	var emojis []models.Emoji
-	err := r.db.WithContext(ctx).Find(&emojis).Error
-	if err != nil {
+	db := r.applyEmojiFilter(r.db.WithContext(ctx).Model(&models.Emoji{}), f)
+	if f.Limit > 0 {
+		db = db.Limit(f.Limit).Offset(f.Offset)
+	}
+	if err := db.Find(&emojis).Error; err != nil {
 		return nil, err
 	}
 	return emojis, nil
+}
+
+func (r *PostRepository) CountEmojis(ctx context.Context, f EmojiFilter) (int64, error) {
+	var total int64
+	db := r.applyEmojiFilter(r.db.WithContext(ctx).Model(&models.Emoji{}), f)
+	if err := db.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func (r *PostRepository) CreateShare(ctx context.Context, share models.PostShare) error {
@@ -758,10 +902,15 @@ func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, of
 
 	err := r.db.WithContext(ctx).
 		Table("posts").
-		Select(`posts.*, 
+		Select(`posts.*,
             (SELECT COUNT(*) FROM post_reactions WHERE post_reactions.post_id = posts.id) AS likes_count,
             (SELECT COUNT(*) FROM comments WHERE comments.post_id = posts.id) AS comments_count,
-            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count`).
+            (SELECT COUNT(*) FROM post_shares WHERE post_shares.post_id = posts.id) AS shares_count,
+            users.username,
+            COALESCE(profiles.display_name, users.username) AS display_name,
+            COALESCE(profiles.avatar_uri, '') AS avatar_uri`).
+		Joins("LEFT JOIN users ON users.id = posts.user_id").
+		Joins("LEFT JOIN profiles ON profiles.user_id = posts.user_id").
 		Where("posts.id IN ?", ids).
 		Where("posts.status = ?", models.PostStatusPublic).
 		Order("posts.created_at DESC").
@@ -769,7 +918,24 @@ func (r *PostRepository) FetchByIDs(ctx context.Context, ids []string, limit, of
 		Offset(offset).
 		Find(&posts).Error
 
-	return posts, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Nạp media + chuẩn hóa slice rỗng (tránh JSON null làm client crash).
+	if len(posts) > 0 {
+		mediaRepo := NewMediaRepository(r.db)
+		mediaMap, _ := mediaRepo.GetByPostIDs(ctx, ids)
+		for i := range posts {
+			if media, ok := mediaMap[posts[i].ID]; ok {
+				posts[i].Media = media
+			} else {
+				posts[i].Media = []models.Media{}
+			}
+		}
+	}
+
+	return posts, nil
 }
 
 func (r *PostRepository) PinPost(ctx context.Context, postID string) error {

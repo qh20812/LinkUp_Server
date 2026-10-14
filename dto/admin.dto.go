@@ -134,6 +134,7 @@ type AdminReportListItem struct {
 	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
 	ReportType       string    `json:"report_type"`
 	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
+	ViolationRuleTitle *string `json:"violation_rule_title,omitempty"`
 	ReasonDetail     string    `json:"reason_detail"`
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -157,12 +158,56 @@ type AdminReportDetailResponse struct {
 	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
 	ReportType       string    `json:"report_type"`
 	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
+	ViolationRuleTitle *string `json:"violation_rule_title,omitempty"`
 	ReasonDetail     string    `json:"reason_detail"`
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
 	PostOwnerID      *string   `json:"post_owner_id,omitempty"`
 	CommentOwnerID   *string   `json:"comment_owner_id,omitempty"`
 	CommentContent   *string   `json:"comment_content,omitempty"`
+	// Snapshot nội dung bị báo cáo để admin duyệt không cần tra ID thủ công.
+	TargetPost    *AdminReportTargetPost    `json:"target_post,omitempty"`
+	TargetComment *AdminReportTargetComment `json:"target_comment,omitempty"`
+	TargetUser    *AdminReportTargetUser    `json:"target_user,omitempty"`
+}
+
+// AdminReportTargetPost snapshot bài viết bị báo cáo.
+type AdminReportTargetPost struct {
+	PostID           string    `json:"post_id"`
+	OwnerID          string    `json:"owner_id"`
+	OwnerUsername    string    `json:"owner_username"`
+	OwnerDisplayName string    `json:"owner_display_name"`
+	OwnerAvatarURI   string    `json:"owner_avatar_uri"`
+	Title            string    `json:"title"`
+	Excerpt          string    `json:"excerpt"`
+	MediaURIs        []string  `json:"media_uris"`
+	Status           string    `json:"status"`
+	LikesCount       int       `json:"likes_count"`
+	CommentsCount    int       `json:"comments_count"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// AdminReportTargetComment snapshot bình luận bị báo cáo + bài chứa nó.
+type AdminReportTargetComment struct {
+	CommentID        string    `json:"comment_id"`
+	Content          string    `json:"content"`
+	OwnerID          string    `json:"owner_id"`
+	OwnerUsername    string    `json:"owner_username"`
+	OwnerDisplayName string    `json:"owner_display_name"`
+	OwnerAvatarURI   string    `json:"owner_avatar_uri"`
+	PostID           string    `json:"post_id"`
+	PostTitle        string    `json:"post_title"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// AdminReportTargetUser snapshot người dùng bị báo cáo.
+type AdminReportTargetUser struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
+	Status      string `json:"status"`
 }
 
 type AdminReportReviewInput struct {
@@ -367,36 +412,36 @@ type StatusCount struct {
 }
 
 type AdminAnalyticsResponse struct {
-	TotalUsers              int64            `json:"total_users"`
-	TotalPosts              int64            `json:"total_posts"`
-	TotalReports            int64            `json:"total_reports"`
-	TotalComments           int64            `json:"total_comments"`
-	TotalMedia              int64            `json:"total_media"`
-	TotalGroups             int64            `json:"total_groups"`
-	TotalCommunities        int64            `json:"total_communities"`
-	TotalActiveBans         int64            `json:"total_active_bans"`
-	PendingReports          int64            `json:"pending_reports"`
-	FlaggedMediaCount       int64            `json:"flagged_media_count"`
-	ActiveUsersToday        int64            `json:"active_users_today"`
-	TotalLikes              int64            `json:"total_likes"`
-	TotalShares             int64            `json:"total_shares"`
-	UsersChangePercent      float64          `json:"users_change_percent"`
-	PostsChangePercent      float64          `json:"posts_change_percent"`
-	ReportsChangePercent    float64          `json:"reports_change_percent"`
-	CommentsChangePercent   float64          `json:"comments_change_percent"`
-	MediaChangePercent      float64          `json:"media_change_percent"`
-	GroupsChangePercent     float64          `json:"groups_change_percent"`
-	CommunitiesChangePercent float64         `json:"communities_change_percent"`
-	ChartData               []ChartDataPoint `json:"chart_data,omitempty"`
-	ChartDataUsers          []ChartDataPoint `json:"chart_data_users,omitempty"`
-	ChartDataPosts          []ChartDataPoint `json:"chart_data_posts,omitempty"`
-	ChartDataReports        []ChartDataPoint `json:"chart_data_reports,omitempty"`
-	ChartDataComments       []ChartDataPoint `json:"chart_data_comments,omitempty"`
-	TopUsers                []TopActiveUser  `json:"top_users,omitempty"`
-	TopPosts                []TopEngagedPost `json:"top_posts,omitempty"`
-	UserStatusDistribution  []StatusCount    `json:"user_status_distribution,omitempty"`
-	ReportStatusDistribution []StatusCount   `json:"report_status_distribution,omitempty"`
-	GeneratedAt             time.Time        `json:"generated_at"`
+	TotalUsers               int64            `json:"total_users"`
+	TotalPosts               int64            `json:"total_posts"`
+	TotalReports             int64            `json:"total_reports"`
+	TotalComments            int64            `json:"total_comments"`
+	TotalMedia               int64            `json:"total_media"`
+	TotalGroups              int64            `json:"total_groups"`
+	TotalCommunities         int64            `json:"total_communities"`
+	TotalActiveBans          int64            `json:"total_active_bans"`
+	PendingReports           int64            `json:"pending_reports"`
+	FlaggedMediaCount        int64            `json:"flagged_media_count"`
+	ActiveUsersToday         int64            `json:"active_users_today"`
+	TotalLikes               int64            `json:"total_likes"`
+	TotalShares              int64            `json:"total_shares"`
+	UsersChangePercent       float64          `json:"users_change_percent"`
+	PostsChangePercent       float64          `json:"posts_change_percent"`
+	ReportsChangePercent     float64          `json:"reports_change_percent"`
+	CommentsChangePercent    float64          `json:"comments_change_percent"`
+	MediaChangePercent       float64          `json:"media_change_percent"`
+	GroupsChangePercent      float64          `json:"groups_change_percent"`
+	CommunitiesChangePercent float64          `json:"communities_change_percent"`
+	ChartData                []ChartDataPoint `json:"chart_data,omitempty"`
+	ChartDataUsers           []ChartDataPoint `json:"chart_data_users,omitempty"`
+	ChartDataPosts           []ChartDataPoint `json:"chart_data_posts,omitempty"`
+	ChartDataReports         []ChartDataPoint `json:"chart_data_reports,omitempty"`
+	ChartDataComments        []ChartDataPoint `json:"chart_data_comments,omitempty"`
+	TopUsers                 []TopActiveUser  `json:"top_users,omitempty"`
+	TopPosts                 []TopEngagedPost `json:"top_posts,omitempty"`
+	UserStatusDistribution   []StatusCount    `json:"user_status_distribution,omitempty"`
+	ReportStatusDistribution []StatusCount    `json:"report_status_distribution,omitempty"`
+	GeneratedAt              time.Time        `json:"generated_at"`
 }
 
 type AdminMediaGroupFilterInput struct {
@@ -414,10 +459,10 @@ type AdminMediaGroupItem struct {
 }
 
 type AdminMediaGroupedResponse struct {
-	Groups    []AdminMediaGroupItem `json:"groups"`
-	Total     int64                 `json:"total"`
-	Page      int                   `json:"page"`
-	PageSize  int                   `json:"page_size"`
+	Groups   []AdminMediaGroupItem `json:"groups"`
+	Total    int64                 `json:"total"`
+	Page     int                   `json:"page"`
+	PageSize int                   `json:"page_size"`
 }
 
 // ── Admin Ad Management ──
@@ -430,7 +475,8 @@ type AdminAdFilterInput struct {
 }
 
 type AdminAdStatusInput struct {
-	Status string `json:"status" binding:"required,oneof=active paused completed"`
+	Status          string `json:"status" binding:"required,oneof=active paused completed rejected"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
 type AdminAdListItem struct {
@@ -459,4 +505,22 @@ type AdminAdListResponse struct {
 	Page     int               `json:"page"`
 	PageSize int               `json:"page_size"`
 	Message  string            `json:"message,omitempty"`
+}
+
+// DTO metrics feed cho cổng rollout rank v2 (?days=, default 7, max 90)
+type AdminFeedMetricsFilterInput struct {
+	Days int `form:"days"`
+}
+
+type AdminFeedMetricsResponse struct {
+	Days                   int     `json:"days"`
+	TotalViews             int64   `json:"total_views"`
+	FeedViews              int64   `json:"feed_views"`
+	DetailViews            int64   `json:"detail_views"`
+	DetailCTR              float64 `json:"detail_ctr"`
+	SmallAuthorViews       int64   `json:"small_author_views"`
+	SmallAuthorExposurePct float64 `json:"small_author_exposure_pct"`
+	SmallAuthorsSurfaced   int64   `json:"small_authors_surfaced"`
+	PostReports            int64   `json:"post_reports"`
+	SmallAuthorThreshold   int     `json:"small_author_threshold"`
 }

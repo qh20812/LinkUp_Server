@@ -2,8 +2,12 @@ package controllers
 
 import (
 	"fmt"
-	errorsapp "linkup/errors"
+	"hash/crc32"
+	"linkup/config"
 	"linkup/dto"
+	errorsapp "linkup/errors"
+	"linkup/models"
+	"linkup/repository"
 	"linkup/services"
 	"linkup/validations"
 	"mime/multipart"
@@ -46,13 +50,16 @@ func (ctrl *PostController) CreatePost(c *gin.Context) {
 	}
 	userID := fmt.Sprintf("%v", val)
 
-	post, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL, input.CommentsEnabled == nil || *input.CommentsEnabled)
+	post, warnings, err := ctrl.service.CreatePost(c.Request.Context(), userID, input.Title, input.Content, input.Status, input.CommunityID, files, input.GifURL, input.CommentsEnabled == nil || *input.CommentsEnabled, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
+	if warnings == nil {
+		warnings = []string{}
+	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": post})
+	c.JSON(http.StatusCreated, gin.H{"data": post, "warnings": warnings})
 }
 
 func (ctrl *PostController) GetPosts(c *gin.Context) {
@@ -67,7 +74,28 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 	userID, _ := c.Get("userID")
 	userIDStr, _ := userID.(string)
 
-	posts, nextCursor, err := ctrl.service.GetPostList(c.Request.Context(), cursor, pageSize, userIDStr, filter)
+	// Rank v2 (cá nhân hóa 2-stage): ?rank=v2 ép dùng, ?rank=v1 ép tắt,
+	// còn lại rollout dần theo % cấu hình (hash user_id, default 0 = tắt).
+	useV2 := false
+	switch rank := c.DefaultQuery("rank", ""); rank {
+	case "v2":
+		useV2 = true
+	case "v1":
+		useV2 = false
+	default:
+		if pct := config.DefaultFeedRankV2.RankV2RolloutPct; pct > 0 && userIDStr != "" {
+			useV2 = int(crc32.ChecksumIEEE([]byte(userIDStr))%100) < pct
+		}
+	}
+
+	var posts []models.Post
+	var nextCursor string
+	var err error
+	if useV2 {
+		posts, nextCursor, err = ctrl.service.GetPostListV2(c.Request.Context(), cursor, pageSize, userIDStr, filter)
+	} else {
+		posts, nextCursor, err = ctrl.service.GetPostList(c.Request.Context(), cursor, pageSize, userIDStr, filter)
+	}
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -161,7 +189,54 @@ func (ctrl *PostController) ViewPostDetail(c *gin.Context) {
 		return
 	}
 
+	// Chỉ tính lượt xem khi request có user đăng nhập (khách vãng lai không tính).
+	// Lỗi tracking không fail request đọc bài.
+	if viewerID := c.GetString("userID"); viewerID != "" {
+		if counted, err := ctrl.service.TrackPostView(c.Request.Context(), postID, viewerID, models.PostViewSourceDetail); err == nil && counted {
+			post.ViewsCount++
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": post})
+}
+
+// TrackPostView ghi nhận impression khi bài viết hiển thị trên feed
+// (client báo sau khi bài visible đủ ngưỡng). Yêu cầu đăng nhập.
+func (ctrl *PostController) TrackPostView(c *gin.Context) {
+	postID := c.Param("id")
+	if postID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
+		return
+	}
+
+	var input dto.TrackPostViewInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	source := input.Source
+	if source == "" {
+		source = "feed"
+	}
+
+	val, exists := c.Get("userID")
+	if !exists {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeMissingAuthorization))
+		return
+	}
+	viewerID := fmt.Sprintf("%v", val)
+
+	counted, err := ctrl.service.TrackPostView(c.Request.Context(), postID, viewerID, models.PostViewSource(source))
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"counted": counted})
 }
 
 func (ctrl *PostController) ReactPost(c *gin.Context) {
@@ -302,13 +377,15 @@ func (ctrl *PostController) SharePost(c *gin.Context) {
 		input.Content = ""
 	}
 
-	err := ctrl.service.SharePost(c.Request.Context(), userID, postID, input.Content)
+	shared, err := ctrl.service.SharePost(c.Request.Context(), userID, postID, input.Content)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Chia sẻ bài viết thành công!"})
+	// Giữ "message" cho client cũ (mobile), thêm "data" để web prepend
+	// bài repost ngay ở đầu feed mà không cần reload.
+	c.JSON(http.StatusOK, gin.H{"message": "Chia sẻ bài viết thành công!", "data": shared})
 }
 
 func (ctrl *PostController) SavePost(c *gin.Context) {
@@ -362,12 +439,30 @@ func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 }
 
 func (ctrl *PostController) GetEmojis(c *gin.Context) {
-	emojis, err := ctrl.service.ListEmojis(c.Request.Context())
+	var q dto.EmojiQuery
+	if err := c.ShouldBindQuery(&q); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostInvalidFormat))
+		return
+	}
+	filter := repository.EmojiFilter{
+		ReactionsOnly: q.Scope == "reactions",
+		Category:      q.Category,
+		Query:         q.Q,
+		Limit:         q.Limit,
+		Offset:        q.Offset,
+	}
+	emojis, total, err := ctrl.service.ListEmojis(c.Request.Context(), filter)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": emojis})
+	// Giữ field "data" như cũ để client hiện tại không vỡ; thêm total/has_more
+	// cho picker phân trang full set.
+	c.JSON(http.StatusOK, gin.H{
+		"data":     emojis,
+		"total":    total,
+		"has_more": q.Scope != "reactions" && int64(q.Offset+len(emojis)) < total,
+	})
 }
 
 func (ctrl *PostController) PinPost(c *gin.Context) {

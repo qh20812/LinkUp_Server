@@ -112,15 +112,16 @@ type UpdateCommunityInput struct {
 // ── User-facing Community List/Detail ──
 
 type CommunityListItem struct {
-	ID          string    `json:"id"`
-	CreatorID   string    `json:"-"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	AvatarURI   string    `json:"avatar_uri"`
-	Privacy     string    `json:"privacy"`
-	MemberCount int       `json:"member_count"`
-	IsCreator   bool      `json:"is_creator"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	CreatorID     string    `json:"-"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	AvatarURI     string    `json:"avatar_uri"`
+	BackgroundURI string    `json:"background_uri"`
+	Privacy       string    `json:"privacy"`
+	MemberCount   int       `json:"member_count"`
+	IsCreator     bool      `json:"is_creator"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type CommunityListResponse struct {

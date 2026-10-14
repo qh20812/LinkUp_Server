@@ -24,6 +24,11 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	now := time.Now().UTC()
 
+	// Dùng rule đã seed ở step core (state.ViolationRuleIDs), thứ tự:
+	// 0 spam(all), 1 harassment(all), 2 hate(all), 3 nudity(all),
+	// 4 misinfo(post), 5 scam(user), 6 copyright(post), 7 other(all).
+	ruleIDs := state.ViolationRuleIDs
+
 	reportTypes := []string{"spam", "harassment", "hate_speech", "nudity", "copyright"}
 	reportDetails := []string{
 		"User keeps posting the same link in every thread",
@@ -58,9 +63,24 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 		status := pick([]string{"pending", "reviewed", "resolved"})
 
+		// Gán ngẫu nhiên rule phù hợp target (70% có rule, 30% NULL để test optional).
+		var violationRuleID *string
+		if rng.Intn(10) < 7 && len(ruleIDs) > 0 {
+			target := []string{"user", "post", "comment"}[i%3]
+			candidates := ruleIDs
+			if target == "post" {
+				candidates = []string{ruleIDs[0], ruleIDs[1], ruleIDs[2], ruleIDs[3], ruleIDs[4], ruleIDs[6], ruleIDs[7]}
+			} else if target == "user" {
+				candidates = []string{ruleIDs[0], ruleIDs[1], ruleIDs[2], ruleIDs[3], ruleIDs[5], ruleIDs[7]}
+			} else {
+				candidates = []string{ruleIDs[0], ruleIDs[1], ruleIDs[2], ruleIDs[3], ruleIDs[7]}
+			}
+			violationRuleID = &candidates[rng.Intn(len(candidates))]
+		}
+
 		if err := internal.Exec(database,
-			`INSERT INTO reports (id, reporter_id, report_type, target_user_id, target_post_id, target_comment_id, violation_rule_id, reason_detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
-			internal.UUID(), reporterID, pick(reportTypes), targetUserID, targetPostID, targetCommentID, pick(reportDetails), status, now.Add(-time.Duration(rng.Intn(168))*time.Hour),
+			`INSERT INTO reports (id, reporter_id, report_type, target_user_id, target_post_id, target_comment_id, violation_rule_id, reason_detail, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			internal.UUID(), reporterID, pick(reportTypes), targetUserID, targetPostID, targetCommentID, violationRuleID, pick(reportDetails), status, now.Add(-time.Duration(rng.Intn(168))*time.Hour),
 		); err != nil {
 			return fmt.Errorf("moderation: insert report %d: %w", i, err)
 		}

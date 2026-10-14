@@ -16,6 +16,7 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.Use(middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin))
 
 	adminGroup.GET("/analytics", adminController.GetDashboardAnalytics)
+	adminGroup.GET("/feed-metrics", adminController.GetFeedMetrics)
 
 	adminGroup.GET("/users", adminController.ListUsers)
 	adminGroup.PUT("/users/:userID/status", adminController.UpdateUserStatus)

@@ -15,6 +15,7 @@ type Profile struct {
 	HometownProvince           string     `json:"hometown_province"`
 	CurrentProvince            string     `json:"current_province"`
 	CurrentWard                string     `json:"current_ward"`
+	Gender                     string     `json:"gender"`
 	Work                       string     `json:"work"`
 	Education                  string     `json:"education"`
 	WorkOther                  string     `json:"work_other"`

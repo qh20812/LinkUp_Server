@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	errorsapp "linkup/errors"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/services"
 	"linkup/utils"
@@ -87,6 +88,30 @@ func (ctrl *NotificationController) GetUnreadCount(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"count": count})
+}
+
+// GetSummary gộp unread-count + 5 thông báo mới nhất cho dropdown poll:
+// 1 round-trip thay vì 2, chung 1 lần auth middleware.
+func (ctrl *NotificationController) GetSummary(c *gin.Context) {
+	userID, _ := c.Get("userID")
+	ctx := c.Request.Context()
+
+	count, err := ctrl.service.GetUnreadCount(ctx, userID.(string))
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	preview, _, err := ctrl.service.GetList(ctx, userID.(string), 1, 5, false)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+	if preview == nil {
+		preview = []dto.NotificationResponse{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"count": count, "preview": preview})
 }
 
 func (ctrl *NotificationController) GetPreferences(c *gin.Context) {

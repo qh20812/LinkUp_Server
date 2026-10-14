@@ -1,12 +1,11 @@
 package services
 
 import (
-	"crypto/rand"
-	"fmt"
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
+	"linkup/utils"
 	"time"
 )
 
@@ -14,6 +13,7 @@ type PackageService interface {
 	GetPackages() ([]models.AdPackage, error)
 	SubscribePackage(userID string, packageID string) (*models.PartnerSubscription, error)
 	GetUserSubscription(userID string) (*dto.SubscriptionResponse, error)
+	ProcessExpiredSubscriptions() (int, error)
 }
 
 type packageServiceImpl struct {
@@ -40,10 +40,10 @@ func (s *packageServiceImpl) SubscribePackage(userID string, packageID string) (
 	}
 
 	now := time.Now()
-	expiresAt := now.AddDate(0, 1, 0) // Hạn 1 tháng
+	expiresAt := now.AddDate(0, 0, pkg.MaxDurationDays)
 
 	newSub := &models.PartnerSubscription{
-		ID:        generateUUID("sub_"),
+		ID:        utils.GenerateUUID(),
 		UserID:    userID,
 		PackageID: pkg.ID,
 		SlotsUsed: 0,
@@ -90,8 +90,22 @@ func (s *packageServiceImpl) GetUserSubscription(userID string) (*dto.Subscripti
 	}, nil
 }
 
-func generateUUID(prefix string) string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return fmt.Sprintf("%s%x", prefix, b)
+// ProcessExpiredSubscriptions tìm và xử lý các subscription đã hết hạn (mục 1.3)
+// Trả về số lượng subscription đã xử lý.
+func (s *packageServiceImpl) ProcessExpiredSubscriptions() (int, error) {
+	subs, err := s.repo.FindExpiredSubscriptions()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, sub := range subs {
+		if err := s.repo.ExpireSubscription(sub.ID); err != nil {
+			continue
+		}
+		if err := s.repo.DowngradePartnerRole(sub.UserID); err != nil {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }

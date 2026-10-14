@@ -2,10 +2,13 @@ package migrate
 
 import (
 	"log"
+	"time"
 
 	"gorm.io/gorm"
 
 	"linkup/models"
+	"linkup/seeddata"
+	"linkup/utils"
 )
 
 // Run thực hiện toàn bộ schema migration khi server khởi động.
@@ -34,6 +37,8 @@ func Run(db *gorm.DB) {
 		&models.ChatE2EKey{},
 		&models.UserE2ERecovery{},
 		&models.CommentReaction{},
+		&models.PostView{},
+		&models.UserInterest{},
 	)
 	if err != nil {
 		log.Printf("Warning: Migration failed: %v", err)
@@ -81,8 +86,70 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "profiles", "current_ward", "VARCHAR(10) NOT NULL DEFAULT ''")
 	ensureColumn(db, "profiles", "work_other", "VARCHAR(255) NOT NULL DEFAULT ''")
 
+	// Thêm cột profiles.gender cho targeting ads (mục 1.8)
+	ensureColumn(db, "profiles", "gender", "VARCHAR(10) NULL DEFAULT NULL")
+
+	// Thêm cột targeting vào ads (mục 4.1)
+	ensureColumn(db, "ads", "target_gender", "VARCHAR(10) NOT NULL DEFAULT 'all'")
+	ensureColumn(db, "ads", "target_age_min", "INT NOT NULL DEFAULT 0")
+	ensureColumn(db, "ads", "target_age_max", "INT NOT NULL DEFAULT 100")
+	ensureColumn(db, "ads", "target_locations", "JSON")
+
+	// Thêm cột cost vào ad_analytics (mục 2.4)
+	ensureColumn(db, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0")
+
+	// Index cho daily budget query (mục 3.2)
+	ensureIndex(db, "ad_analytics", "idx_ad_analytics_ad_action_date", "ad_id, action_type, created_at")
+
+	// Index cho expired subscription query (mục 3.2)
+	ensureIndex(db, "partner_subscriptions", "idx_partner_sub_status_expires", "status, expires_at")
+
 	// Thêm cột likes_count vào comments cho comment reactions
 	ensureColumn(db, "comments", "likes_count", "INT NOT NULL DEFAULT 0")
+
+	// ===== Violation rules (quy tắc vi phạm dùng cho report) =====
+	// Bảng có từ seed cũ nhưng chỉ có id/title/description — mở rộng thêm
+	// các cột phục vụ CRUD linh hoạt + lọc theo target (idempotent).
+	if !db.Migrator().HasTable("violation_rules") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS violation_rules (
+			id VARCHAR(36) PRIMARY KEY,
+			title VARCHAR(255) NOT NULL,
+			description TEXT,
+			applicable_to VARCHAR(20) NOT NULL DEFAULT 'all',
+			severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+			sort_order INT NOT NULL DEFAULT 0,
+			is_active TINYINT(1) NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create violation_rules table: %v", err)
+		}
+	}
+	ensureColumn(db, "violation_rules", "applicable_to", "VARCHAR(20) NOT NULL DEFAULT 'all'")
+	ensureColumn(db, "violation_rules", "severity", "VARCHAR(20) NOT NULL DEFAULT 'medium'")
+	ensureColumn(db, "violation_rules", "sort_order", "INT NOT NULL DEFAULT 0")
+	ensureColumn(db, "violation_rules", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
+	ensureColumn(db, "violation_rules", "created_at", "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+	ensureColumn(db, "violation_rules", "updated_at", "DATETIME NULL")
+	ensureIndex(db, "violation_rules", "idx_violation_rules_active", "is_active")
+	seedViolationRules(db)
+
+	// ===== Native emoji (thay CDN bên thứ ba) =====
+	// Bảng emojis có từ seed cũ (id/code/image_uri) — mở rộng cột + seed full
+	// Unicode set, idempotent. Chạy lúc boot nên prod nhận được mà không cần seed lại.
+	if db.Migrator().HasTable("emojis") {
+		ensureColumn(db, "emojis", "character", "VARCHAR(16) NOT NULL DEFAULT ''")
+		ensureColumn(db, "emojis", "name", "VARCHAR(255) NOT NULL DEFAULT ''")
+		ensureColumn(db, "emojis", "keywords", "TEXT NULL")
+		ensureColumn(db, "emojis", "category", "VARCHAR(50) NOT NULL DEFAULT 'smileys'")
+		ensureColumn(db, "emojis", "sort_order", "INT NOT NULL DEFAULT 0")
+		ensureColumn(db, "emojis", "is_reaction", "TINYINT(1) NOT NULL DEFAULT 0")
+		ensureIndex(db, "emojis", "idx_emojis_category", "category, sort_order")
+		ensureIndex(db, "emojis", "idx_emojis_reaction", "is_reaction, sort_order")
+		// code cũ VARCHAR(50) không chứa nổi code full Unicode (dài nhất 76 ký tự).
+		ensureVarcharWidth(db, "emojis", "code", 100, "VARCHAR(100) NOT NULL")
+		seedEmojis(db)
+	}
 
 	// Thêm cột last_seen vào users cho online/offline presence
 	ensureColumn(db, "users", "last_seen", "DATETIME NULL")
@@ -91,6 +158,25 @@ func Run(db *gorm.DB) {
 	// Thêm các cột presence vào user_settings
 	ensureColumn(db, "user_settings", "activity_status_enabled", "BOOLEAN NOT NULL DEFAULT TRUE")
 	ensureColumn(db, "user_settings", "last_seen_visibility", "VARCHAR(20) NOT NULL DEFAULT 'all_friends'")
+
+	// Index composite cho notification polling (unread-count + list):
+	// cover WHERE receiver_id = ? [AND is_read = ?] ORDER BY created_at DESC
+	// và COUNT — bảng này bị poll mỗi 30-60s/user nên full scan là sập DB.
+	ensureIndex(db, "notifications", "idx_notifications_receiver_read_created", "receiver_id, is_read, created_at")
+
+	// Bảng idempotency cho POST /posts: client gửi Idempotency-Key header,
+	// server dedupe double-submit (nhấn Đăng 2 lần / retry sau timeout).
+	if !db.Migrator().HasTable("post_idempotency") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS post_idempotency (
+			client_key CHAR(36) PRIMARY KEY,
+			user_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			created_at DATETIME NOT NULL,
+			INDEX idx_post_idempotency_user (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create post_idempotency table: %v", err)
+		}
+	}
 
 	// Thêm các cột notification_preferences mới cho story react/share/media
 	if db.Migrator().HasTable("notification_preferences") {
@@ -198,6 +284,84 @@ func Run(db *gorm.DB) {
 	seedAdPackages(db)
 }
 
+// seedViolationRules khởi tạo bộ quy tắc vi phạm mẫu (idempotent theo title).
+// Dùng title cố định để chạy lại không tạo trùng.
+func seedViolationRules(db *gorm.DB) {
+	defaults := []models.ViolationRule{
+		{Title: "Spam / quảng cáo làm phiền", Description: "Đăng nội dung quảng cáo lặp lại, link rác hoặc nội dung không liên quan.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityLow, SortOrder: 1, IsActive: true},
+		{Title: "Quấy rối / bắt nạt", Description: "Tấn công, đe dọa hoặc xúc phạm người khác.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityHigh, SortOrder: 2, IsActive: true},
+		{Title: "Ngôn từ thù ghét / phân biệt đối xử", Description: "Nội dung kỳ thị chủng tộc, giới tính, tôn giáo hoặc nhóm người.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityHigh, SortOrder: 3, IsActive: true},
+		{Title: "Nội dung nhạy cảm / đồi trụy", Description: "Hình ảnh, video hoặc mô tả mang tính khiêu dâm, bạo lực quá mức.", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityHigh, SortOrder: 4, IsActive: true},
+		{Title: "Thông tin sai lệch", Description: "Tin giả, thông tin sai sự thật gây hiểu lầm.", ApplicableTo: models.ViolationApplicablePost, Severity: models.ViolationSeverityMedium, SortOrder: 5, IsActive: true},
+		{Title: "Lừa đảo / giả mạo", Description: "Tài khoản giả mạo người khác hoặc hành vi lừa đảo.", ApplicableTo: models.ViolationApplicableUser, Severity: models.ViolationSeverityHigh, SortOrder: 6, IsActive: true},
+		{Title: "Vi phạm bản quyền", Description: "Đăng lại nội dung có bản quyền mà không được phép.", ApplicableTo: models.ViolationApplicablePost, Severity: models.ViolationSeverityMedium, SortOrder: 7, IsActive: true},
+		{Title: "Lý do khác", Description: "Vi phạm không thuộc các nhóm trên (mô tả chi tiết ở lý do).", ApplicableTo: models.ViolationApplicableAll, Severity: models.ViolationSeverityLow, SortOrder: 99, IsActive: true},
+	}
+
+	for _, d := range defaults {
+		var count int64
+		db.Model(&models.ViolationRule{}).Where("title = ?", d.Title).Count(&count)
+		if count > 0 {
+			continue
+		}
+		rule := d
+		rule.ID = utils.GenerateUUID()
+		rule.CreatedAt = time.Now().UTC()
+		if err := db.Create(&rule).Error; err != nil {
+			log.Printf("Warning: seed violation rule %q: %v", d.Title, err)
+		}
+	}
+}
+
+// ensureVarcharWidth nới cột VARCHAR khi độ rộng hiện tại nhỏ hơn yêu cầu
+// (idempotent). Dùng khi seed full mở rộng miền giá trị của cột cũ.
+func ensureVarcharWidth(db *gorm.DB, table, column string, width int, definition string) {
+	if !db.Migrator().HasTable(table) || !db.Migrator().HasColumn(table, column) {
+		return
+	}
+	var current *int
+	err := db.Raw(`SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+		table, column).Scan(&current).Error
+	if err != nil || current == nil || *current >= width {
+		return
+	}
+	if err := db.Exec("ALTER TABLE " + table + " MODIFY COLUMN `" + column + "` " + definition).Error; err != nil {
+		log.Printf("Warning: ensure width %s.%s: %v", table, column, err)
+	}
+}
+
+// seedEmojis nạp full Unicode emoji set vào bảng emojis (idempotent theo code).
+// - DB đã đủ full set (>= len(seeddata.Emojis)): bỏ qua.
+// - DB có ít dòng (prod cũ 10 reaction): upsert toàn bộ (chạy 1 lần duy nhất).
+// Render native bằng character nên image_uri để trống, không phụ thuộc CDN ngoài.
+func seedEmojis(db *gorm.DB) {
+	var count int64
+	if err := db.Model(&models.Emoji{}).Count(&count).Error; err != nil {
+		log.Printf("Warning: seed emojis count: %v", err)
+		return
+	}
+	if count >= int64(len(seeddata.Emojis)) {
+		return
+	}
+	for _, e := range seeddata.Emojis {
+		isReaction := 0
+		if e.IsReaction {
+			isReaction = 1
+		}
+		if err := db.Exec(`INSERT INTO emojis (id, code, image_uri, `+"`character`"+`, `+"`name`"+`, keywords, category, sort_order, is_reaction)
+			VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE `+"`character`"+` = VALUES(`+"`character`"+`), `+"`name`"+` = VALUES(`+"`name`"+`), keywords = VALUES(keywords),
+			category = VALUES(category), sort_order = VALUES(sort_order), is_reaction = VALUES(is_reaction)`,
+			utils.GenerateUUID(), e.Code, e.Character, e.Name, e.Keywords, e.Category, e.SortOrder, isReaction,
+		).Error; err != nil {
+			log.Printf("Warning: seed emoji %q: %v", e.Code, err)
+			return
+		}
+	}
+	log.Printf("[Seed] Đã nạp %d emoji native vào bảng emojis.", len(seeddata.Emojis))
+}
+
 // seedAdPackages hỗ trợ khởi tạo sẵn 3 gói cước mẫu cho hệ thống
 func seedAdPackages(db *gorm.DB) {
 	var count int64
@@ -279,7 +443,7 @@ func ensureColumn(db *gorm.DB, table, column, definition string) {
 	if db.Migrator().HasColumn(table, column) {
 		return
 	}
-	if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition).Error; err != nil {
+	if err := db.Exec("ALTER TABLE " + table + " ADD COLUMN `" + column + "` " + definition).Error; err != nil {
 		log.Printf("Warning: ensure column %s.%s: %v", table, column, err)
 	}
 }

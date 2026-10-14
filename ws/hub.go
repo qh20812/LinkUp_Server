@@ -241,6 +241,47 @@ func (h *Hub) SendToUsers(userIDs []string, msg OutgoingMessage) {
 	}
 }
 
+// SendRawToUser gửi bytes đã marshal sẵn tới mọi kết nối của user. Dùng khi
+// payload phải theo wire-format WsEvent ({"type","payload"}) mà OutgoingMessage
+// ({"type","data"}) không đáp ứng được — vd event cho chat client.
+func (h *Hub) SendRawToUser(userID string, data []byte) {
+	h.mu.RLock()
+	clients, ok := h.clients[userID]
+	if !ok {
+		h.mu.RUnlock()
+		return
+	}
+	snapshot := make([]*Client, 0, len(clients))
+	for c := range clients {
+		snapshot = append(snapshot, c)
+	}
+	h.mu.RUnlock()
+
+	var toRemove []*Client
+	for _, c := range snapshot {
+		select {
+		case c.send <- data:
+		default:
+			toRemove = append(toRemove, c)
+		}
+	}
+
+	if len(toRemove) > 0 {
+		h.mu.Lock()
+		for _, c := range toRemove {
+			if clients[c] {
+				delete(clients, c)
+			}
+			h.removeFromClientsMap(c)
+			close(c.send)
+		}
+		if len(clients) == 0 {
+			delete(h.clients, userID)
+		}
+		h.mu.Unlock()
+	}
+}
+
 // broadcastPresenceUpdate broadcasts a presence update to all connected clients.
 func (h *Hub) broadcastPresenceUpdate(userID string, status string) {
 	msg := OutgoingMessage{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
 	"github.com/gin-gonic/gin"
@@ -141,6 +142,7 @@ func main() {
 		postRepository := repository.NewPostRepository(gormDB)
 		postValidation := validations.NewPostValidation()
 		postService := services.NewPostService(postRepository, notificationService, tagService, postValidation)
+		postService.SetInterestRepository(repository.NewInterestRepository(gormDB))
 		postController := controllers.NewPostController(postService)
 		routes.RegisterPostRoutes(router, postController, env, gormDB)
 
@@ -184,6 +186,9 @@ func main() {
 
 		// Wire sau khi cả media + story repo đã khởi tạo
 		mediaService.SetStoryRepo(storyRepository)
+		mediaService.SetHub(hub)
+		// Đánh fail media kẹt staging từ lần chạy trước (crash/deploy giữa upload).
+		mediaService.ReconcileStaleStaging()
 		profileService.SetMediaRepo(mediaRepository)
 
 		// ===== KHỞI TẠO TẦNG REPORT (BÁO CÁO VI PHẠM) =====
@@ -192,6 +197,15 @@ func main() {
 		reportService := services.NewReportService(reportRepository, authRepository, postRepository, reportValidation)
 		reportController := controllers.NewReportController(reportService)
 		routes.RegisterReportRoutes(router, reportController, env, gormDB)
+
+		// ===== KHỞI TẠO VIOLATION RULES (QUY TẮC VI PHẠM DÙNG CHO REPORT) =====
+		violationRuleRepository := repository.NewViolationRuleRepository(gormDB)
+		violationRuleValidation := validations.NewViolationRuleValidation()
+		violationRuleService := services.NewViolationRuleService(violationRuleRepository, authRepository, violationRuleValidation)
+		violationRuleController := controllers.NewViolationRuleController(violationRuleService)
+		reportService.SetViolationRuleService(violationRuleService)
+		routes.RegisterViolationRuleRoutes(router, violationRuleController, env, gormDB)
+		routes.RegisterAdminViolationRuleRoutes(router, violationRuleController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG BLOCK (CHẶN USER) =====
 		blockValidation := validations.NewBlockValidation()
@@ -235,6 +249,7 @@ func main() {
 		// ===== KHỞI TẠO TẦNG E2E (MÃ HÓA ĐẦU CUỐI CHO TIN NHẮN TRỰC TIẾP) =====
 		e2eRepository := repository.NewE2ERepository(gormDB)
 		e2eService := services.NewE2EService(e2eRepository, chatRepository)
+		e2eService.SetChatHub(chatHub)
 		e2eController := controllers.NewE2EController(e2eService)
 		routes.RegisterE2ERoutes(router, e2eController, env, gormDB)
 
@@ -277,8 +292,22 @@ func main() {
 		adService := services.NewAdService(adRepository, packageRepository, mediaService)
 		packageService := services.NewPackageService(packageRepository)
 
-		adController := controllers.NewAdController(adService)
-		packageController := controllers.NewPackageController(packageService)
+		// Background worker: downgrade expired partner subscriptions (mục 1.3)
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				count, err := packageService.ProcessExpiredSubscriptions()
+				if err != nil {
+					log.Printf("[AdWorker] expired subscription error: %v", err)
+				} else if count > 0 {
+					log.Printf("[AdWorker] expired %d subscriptions, downgraded roles", count)
+				}
+			}
+		}()
+
+		adController := controllers.NewAdController(adService, profileRepository)
+		packageController := controllers.NewPackageController(packageService, authService)
 
 		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
 		routes.RegisterAdRoutes(router, adController, adService, env, gormDB)
@@ -289,6 +318,7 @@ func main() {
 		adminRepository := repository.NewAdminRepository(gormDB)
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
+		adminService.SetViolationRuleRepository(violationRuleRepository)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 

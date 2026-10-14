@@ -18,6 +18,10 @@ type Env struct {
 	DBPassword   string
 	DBSSL        bool
 	DBName       string
+	// Optional path to a PEM-encoded CA certificate for verifying the
+	// MySQL server (required by managed providers like Aiven). Empty =
+	// legacy behavior (no TLS in DSN).
+	DBCACertPath string
 	JWTSecret    string
 	JWTExpiresIn int
 
@@ -34,6 +38,8 @@ type Env struct {
 	MongoDBName string
 
 	GoogleClientIDs []string
+	GoogleClientID string
+	GoogleClientSecret string
 }
 
 var (
@@ -81,7 +87,7 @@ func LoadEnv() error {
 		DBUser:     getRequiredString("DB_USER"),
 		DBPassword: getRequiredString("DB_PASSWORD"),
 		DBSSL:      dbSSL,
-		// DBCACertPath: getString("DB_CA_CERT_PATH", ""),
+		DBCACertPath: getString("DB_CA_CERT_PATH", ""),
 		DBName:       getRequiredString("DB_NAME"),
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
@@ -99,6 +105,8 @@ func LoadEnv() error {
 		MongoDBName: getString("MONGO_DB_NAME", "linkup"),
 
 		GoogleClientIDs: parseCSV(getString("GOOGLE_CLIENT_IDS", "")),
+		GoogleClientID: getString("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getString("GOOGLE_CLIENT_SECRET", ""),
 	}
 
 	missing := validateRequired(env)

@@ -80,6 +80,10 @@ jobs:
             # Deploy new version
             docker compose up -d --no-build server
 
+            # Re-resolve upstream IPs: container may have been recreated with a new IP
+            docker exec linkup-nginx nginx -s reload
+            sleep 2
+
             # Health check (up to 60s)
             echo "Waiting for server (up to 60s)..."
             for i in $(seq 1 20); do

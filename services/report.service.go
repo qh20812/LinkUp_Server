@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -16,10 +17,11 @@ import (
 )
 
 type ReportService struct {
-	reportRepo *repository.ReportRepository
-	authRepo   *repository.AuthRepository
-	postRepo   *repository.PostRepository
-	validation *validations.ReportValidation
+	reportRepo        *repository.ReportRepository
+	authRepo          *repository.AuthRepository
+	postRepo          *repository.PostRepository
+	violationRuleSvc  *ViolationRuleService
+	validation        *validations.ReportValidation
 }
 
 func NewReportService(reportRepo *repository.ReportRepository, authRepo *repository.AuthRepository, postRepo *repository.PostRepository, validation *validations.ReportValidation) *ReportService {
@@ -31,9 +33,22 @@ func NewReportService(reportRepo *repository.ReportRepository, authRepo *reposit
 	}
 }
 
+// SetViolationRuleService gán service kiểm tra violation rule (tránh breaking constructor).
+func (s *ReportService) SetViolationRuleService(svc *ViolationRuleService) {
+	s.violationRuleSvc = svc
+}
+
 func (s *ReportService) CreateReport(ctx context.Context, reporterID string, input dto.CreateReportInput) (dto.CreateReportResponse, error) {
-	if err := s.validation.ValidateCreateReport(input.TargetType, input.TargetID, input.ReportType, input.ReasonDetail); err != nil {
+	hasRule := input.ViolationRuleID != nil && strings.TrimSpace(*input.ViolationRuleID) != ""
+	if err := s.validation.ValidateCreateReport(input.TargetType, input.TargetID, input.ReportType, input.ReasonDetail, hasRule); err != nil {
 		return dto.CreateReportResponse{}, err
+	}
+
+	// Kiểm tra violation rule (nếu client chọn): tồn tại + đang bật + khớp target.
+	if s.violationRuleSvc != nil {
+		if err := s.violationRuleSvc.ValidateForReport(ctx, input.ViolationRuleID, input.TargetType); err != nil {
+			return dto.CreateReportResponse{}, err
+		}
 	}
 
 	existing, err := s.reportRepo.FindPendingByReporterAndTarget(ctx, reporterID, input.TargetType, input.TargetID)
@@ -125,7 +140,8 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 }
 
 func (s *ReportService) UpdateReport(ctx context.Context, reporterID, reportID string, input dto.UpdateReportInput) (dto.UpdateReportResponse, error) {
-	if err := s.validation.ValidateUpdateReport(input.ReportType, input.ReasonDetail); err != nil {
+	hasRule := input.ViolationRuleID != nil && strings.TrimSpace(*input.ViolationRuleID) != ""
+	if err := s.validation.ValidateUpdateReport(input.ReportType, input.ReasonDetail, hasRule); err != nil {
 		return dto.UpdateReportResponse{}, err
 	}
 
@@ -140,6 +156,22 @@ func (s *ReportService) UpdateReport(ctx context.Context, reporterID, reportID s
 
 	if report.Status != models.ReportStatusPending {
 		return dto.UpdateReportResponse{}, errors.New("chỉ có thể chỉnh sửa báo cáo đang chờ xử lý")
+	}
+
+	// Xác định target_type từ report hiện tại để kiểm tra rule khớp phạm vi.
+	targetType := ""
+	switch {
+	case report.TargetPostID != nil:
+		targetType = "post"
+	case report.TargetUserID != nil:
+		targetType = "user"
+	case report.TargetCommentID != nil:
+		targetType = "comment"
+	}
+	if s.violationRuleSvc != nil {
+		if err := s.violationRuleSvc.ValidateForReport(ctx, input.ViolationRuleID, targetType); err != nil {
+			return dto.UpdateReportResponse{}, err
+		}
 	}
 
 	if err := s.reportRepo.Update(ctx, reportID, input.ReportType, input.ReasonDetail, input.ViolationRuleID); err != nil {

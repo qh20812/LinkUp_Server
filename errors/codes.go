@@ -127,6 +127,17 @@ const (
 	ErrCodeRuleNotFound         = "community.RULE_NOT_FOUND"
 	ErrCodeRuleCheckFailed      = "community.RULE_CHECK_FAILED"
 	ErrCodeRulePositionFailed   = "community.RULE_POSITION_FAILED"
+
+	// Violation rules (quy tắc vi phạm toàn hệ thống — dùng cho report)
+	ErrCodeViolationRuleTitleRequired = "violation.RULE_TITLE_REQUIRED"
+	ErrCodeViolationRuleTitleTooShort = "violation.RULE_TITLE_TOO_SHORT"
+	ErrCodeViolationRuleTitleTooLong  = "violation.RULE_TITLE_TOO_LONG"
+	ErrCodeViolationRuleDescTooLong   = "violation.RULE_DESC_TOO_LONG"
+	ErrCodeViolationRuleTitleDup      = "violation.RULE_TITLE_DUPLICATE"
+	ErrCodeViolationRuleNotFound      = "violation.RULE_NOT_FOUND"
+	ErrCodeViolationRuleInactive      = "violation.RULE_INACTIVE"
+	ErrCodeViolationRuleTargetMismatch = "violation.RULE_TARGET_MISMATCH"
+	ErrCodeViolationRuleInUse         = "violation.RULE_IN_USE"
 )
 
 // Auth error codes
@@ -372,6 +383,11 @@ const (
 	ErrCodeAdNotUpdated          = "ad.NOT_UPDATED"
 	ErrCodeAdNotDeleted          = "ad.NOT_DELETED"
 	ErrCodeAdNotOwner            = "ad.NOT_OWNER"
+	ErrCodeAdCannotEdit          = "ad.CANNOT_EDIT"
+	ErrCodeAdCannotDelete        = "ad.CANNOT_DELETE"
+	ErrCodeAdBudgetExceeded      = "ad.BUDGET_EXCEEDED"
+	ErrCodeAdDailyLimitReached   = "ad.DAILY_LIMIT_REACHED"
+	ErrCodeAdPendingApproval     = "ad.PENDING_APPROVAL"
 
 	// ── Package ────────────────────────────────────────────────
 	ErrCodePackageSubscribeFailed = "package.SUBSCRIBE_FAILED"

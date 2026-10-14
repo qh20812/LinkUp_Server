@@ -177,6 +177,17 @@ var Messages = map[string]string{
 	"community.RULE_CHECK_FAILED":     "Lỗi khi kiểm tra trùng lặp nội quy",
 	"community.RULE_POSITION_FAILED":  "Lỗi khi xác định vị trí nội quy",
 
+	// Violation rules
+	"violation.RULE_TITLE_REQUIRED": "Tiêu đề quy tắc vi phạm không được để trống",
+	"violation.RULE_TITLE_TOO_SHORT": "Tiêu đề quy tắc vi phạm phải có ít nhất 5 ký tự",
+	"violation.RULE_TITLE_TOO_LONG": "Tiêu đề quy tắc vi phạm không được vượt quá 255 ký tự",
+	"violation.RULE_DESC_TOO_LONG": "Mô tả quy tắc vi phạm không được vượt quá 2000 ký tự",
+	"violation.RULE_TITLE_DUPLICATE": "Tiêu đề quy tắc vi phạm đã tồn tại",
+	"violation.RULE_NOT_FOUND":       "Quy tắc vi phạm không tồn tại",
+	"violation.RULE_INACTIVE":        "Quy tắc vi phạm này đã bị vô hiệu hóa",
+	"violation.RULE_TARGET_MISMATCH": "Quy tắc vi phạm không áp dụng cho loại đối tượng này",
+	"violation.RULE_IN_USE":          "Quy tắc đang được dùng bởi các báo cáo, chỉ có thể tắt chứ không thể xóa",
+
 	// ── Group Chat ──────────────────────────────────────────────
 	"group_chat.INVALID_NAME":         "Tên nhóm chat phải từ 3 đến 50 ký tự",
 	"group_chat.ENCRYPTION_KEY_FAILED": "Không thể khởi tạo khóa bảo mật cho nhóm",
@@ -372,6 +383,11 @@ var Messages = map[string]string{
 	"ad.NOT_UPDATED":                "Không tìm thấy quảng cáo để cập nhật",
 	"ad.NOT_DELETED":                "Quảng cáo không tồn tại",
 	"ad.NOT_OWNER":                  "Bạn không có quyền thay đổi quảng cáo này",
+	"ad.CANNOT_EDIT":                "Không thể chỉnh sửa quảng cáo ở trạng thái hiện tại",
+	"ad.CANNOT_DELETE":              "Không thể xóa quảng cáo ở trạng thái hiện tại",
+	"ad.BUDGET_EXCEEDED":            "Ngân sách đã hết",
+	"ad.DAILY_LIMIT_REACHED":        "Đã đạt giới hạn ngân sách hôm nay",
+	"ad.PENDING_APPROVAL":           "Quảng cáo đang chờ duyệt",
 
 	// ── Package ────────────────────────────────────────────────
 	"package.SUBSCRIBE_FAILED": "Không thể đăng ký gói",

@@ -14,7 +14,11 @@ type LoginInput struct {
 }
 
 type GoogleLoginInput struct {
-	IDToken string `json:"id_token" binding:"required"`
+	IDToken string `json:"id_token"`
+	// Code là authorization code của flow auth-code (web mới).
+	// Một trong hai trường IDToken/Code phải có. Giữ IDToken để
+	// tương thích ngược với client cũ (mobile).
+	Code string `json:"code"`
 }
 
 type AuthUserResponse struct {

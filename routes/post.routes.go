@@ -10,12 +10,16 @@ import (
 )
 
 func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, env config.Env, db *gorm.DB) {
+	// Staging local cho async media pipeline: client thấy media ngay qua URL
+	// tạm, worker đẩy Cloudinary xong thì cập nhật URL thật + bắn WS media:ready.
+	router.Static("/static/staging", "./uploads/staging")
 	apiGroup := router.Group("/api")
 	{
 		apiGroup.GET("/posts", middlewares.AuthMiddleware(env, db), ctrl.GetPosts)
 		apiGroup.GET("/posts/saved", middlewares.AuthMiddleware(env, db), ctrl.GetSavedPosts)
 		apiGroup.GET("/posts/user/:userID", middlewares.AuthMiddleware(env, db), ctrl.GetUserPosts)
-		apiGroup.GET("/posts/:id", ctrl.ViewPostDetail)
+		apiGroup.GET("/posts/:id", middlewares.OptionalAuth(env, db), ctrl.ViewPostDetail)
+		apiGroup.POST("/posts/:id/view", middlewares.AuthMiddleware(env, db), ctrl.TrackPostView)
 		apiGroup.POST("/posts", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
 		apiGroup.DELETE("/posts/:id", middlewares.AuthMiddleware(env, db), ctrl.DeletePost)
 		apiGroup.POST("/posts/:id/react", middlewares.AuthMiddleware(env, db), ctrl.ReactPost)

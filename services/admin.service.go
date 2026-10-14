@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"linkup/config"
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/models"
@@ -46,6 +47,7 @@ type AdminService struct {
 	adminRepo           repository.AdminRepository
 	mediaRepo           *repository.MediaRepository
 	adRepo              repository.AdRepository
+	violationRuleRepo   *repository.ViolationRuleRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
 }
@@ -71,6 +73,11 @@ func NewAdminService(authRepo *repository.AuthRepository, banRepo *repository.Ba
 // SetCloudinary gán Cloudinary client cho admin service (tránh breaking constructor).
 func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
 	s.cloudinary = cld
+}
+
+// SetViolationRuleRepository gán repo để tra cứu tên rule trong report detail.
+func (s *AdminService) SetViolationRuleRepository(repo *repository.ViolationRuleRepository) {
+	s.violationRuleRepo = repo
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -167,36 +174,36 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 	communitiesChangePct := calcPercentChange(totalCommunities, prevCounts["communities"])
 
 	return dto.AdminAnalyticsResponse{
-		TotalUsers:              totalUsers,
-		TotalPosts:              totalPosts,
-		TotalReports:            totalReports,
-		TotalComments:           totalComments,
-		TotalMedia:              totalMedia,
-		TotalGroups:             totalGroups,
-		TotalCommunities:        totalCommunities,
-		TotalActiveBans:         activeBanCount,
-		PendingReports:          pendingReports,
-		FlaggedMediaCount:       flaggedMediaCount,
-		ActiveUsersToday:        activeUsersToday,
-		TotalLikes:              totalLikes,
-		TotalShares:             totalShares,
-		UsersChangePercent:      usersChangePct,
-		PostsChangePercent:      postsChangePct,
-		ReportsChangePercent:    reportsChangePct,
-		CommentsChangePercent:   commentsChangePct,
-		MediaChangePercent:      mediaChangePct,
-		GroupsChangePercent:     groupsChangePct,
+		TotalUsers:               totalUsers,
+		TotalPosts:               totalPosts,
+		TotalReports:             totalReports,
+		TotalComments:            totalComments,
+		TotalMedia:               totalMedia,
+		TotalGroups:              totalGroups,
+		TotalCommunities:         totalCommunities,
+		TotalActiveBans:          activeBanCount,
+		PendingReports:           pendingReports,
+		FlaggedMediaCount:        flaggedMediaCount,
+		ActiveUsersToday:         activeUsersToday,
+		TotalLikes:               totalLikes,
+		TotalShares:              totalShares,
+		UsersChangePercent:       usersChangePct,
+		PostsChangePercent:       postsChangePct,
+		ReportsChangePercent:     reportsChangePct,
+		CommentsChangePercent:    commentsChangePct,
+		MediaChangePercent:       mediaChangePct,
+		GroupsChangePercent:      groupsChangePct,
 		CommunitiesChangePercent: communitiesChangePct,
-		ChartData:               chartDataUsers,
-		ChartDataUsers:          chartDataUsers,
-		ChartDataPosts:          chartDataPosts,
-		ChartDataReports:        chartDataReports,
-		ChartDataComments:       chartDataComments,
-		TopUsers:                topUsers,
-		TopPosts:                topPosts,
-		UserStatusDistribution:  userDist,
+		ChartData:                chartDataUsers,
+		ChartDataUsers:           chartDataUsers,
+		ChartDataPosts:           chartDataPosts,
+		ChartDataReports:         chartDataReports,
+		ChartDataComments:        chartDataComments,
+		TopUsers:                 topUsers,
+		TopPosts:                 topPosts,
+		UserStatusDistribution:   userDist,
 		ReportStatusDistribution: reportDist,
-		GeneratedAt:             time.Now().UTC(),
+		GeneratedAt:              time.Now().UTC(),
 	}, nil
 }
 
@@ -292,6 +299,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, status); err != nil {
 		return err
 	}
+	utils.InvalidateAuthCache(targetUserID)
 
 	statusMsg := fmt.Sprintf("Trạng thái tài khoản của bạn đã được cập nhật thành: %s", status)
 	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
@@ -354,6 +362,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if err := s.authRepo.UpdateUserStatus(ctx, targetUserID, models.UserStatusBanned); err != nil {
 		return dto.AdminBanUserResponse{}, err
 	}
+	utils.InvalidateAuthCache(targetUserID)
 
 	banMsg := fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", input.Reason)
 	if expiresAt != nil {
@@ -883,28 +892,108 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 		CreatedAt:        report.CreatedAt,
 	}
 
+	if report.ViolationRuleID != nil && s.violationRuleRepo != nil {
+		if rule, err := s.violationRuleRepo.FindByID(ctx, *report.ViolationRuleID); err == nil {
+			detail.ViolationRuleTitle = &rule.Title
+		}
+	}
+
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
 		if err == nil {
 			detail.TargetType = "post"
 			detail.PostOwnerID = &post.UserID
+			username, displayName, avatarURI, _ := s.resolveReportUserInfo(ctx, post.UserID)
+			mediaURIs := []string{}
+			if mediaMap, merr := s.mediaRepo.GetByPostIDs(ctx, []string{post.ID}); merr == nil {
+				for _, m := range mediaMap[post.ID] {
+					mediaURIs = append(mediaURIs, m.FileURI)
+				}
+			}
+			detail.TargetPost = &dto.AdminReportTargetPost{
+				PostID:           post.ID,
+				OwnerID:          post.UserID,
+				OwnerUsername:    username,
+				OwnerDisplayName: displayName,
+				OwnerAvatarURI:   avatarURI,
+				Title:            post.Title,
+				Excerpt:          excerptRunes(post.Content, 200),
+				MediaURIs:        mediaURIs,
+				Status:           string(post.Status),
+				LikesCount:       post.LikesCount,
+				CommentsCount:    post.CommentsCount,
+				CreatedAt:        post.CreatedAt,
+			}
 		} else {
 			detail.TargetType = "post"
 		}
 	} else if report.TargetUserID != nil {
 		detail.TargetType = "user"
+		if u, err := s.authRepo.FindByID(ctx, *report.TargetUserID); err == nil {
+			username, displayName, avatarURI, status := s.resolveReportUserInfo(ctx, u.ID)
+			detail.TargetUser = &dto.AdminReportTargetUser{
+				UserID:      u.ID,
+				Username:    username,
+				DisplayName: displayName,
+				AvatarURI:   avatarURI,
+				Status:      status,
+			}
+		}
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
 		if err == nil {
 			detail.TargetType = "comment"
 			detail.CommentOwnerID = &comment.UserID
 			detail.CommentContent = &comment.Content
+			username, displayName, avatarURI, _ := s.resolveReportUserInfo(ctx, comment.UserID)
+			postTitle := ""
+			if post, perr := s.postRepo.FindByID(ctx, comment.PostID); perr == nil {
+				postTitle = post.Title
+			}
+			detail.TargetComment = &dto.AdminReportTargetComment{
+				CommentID:        comment.ID,
+				Content:          comment.Content,
+				OwnerID:          comment.UserID,
+				OwnerUsername:    username,
+				OwnerDisplayName: displayName,
+				OwnerAvatarURI:   avatarURI,
+				PostID:           comment.PostID,
+				PostTitle:        postTitle,
+				Status:           string(comment.Status),
+				CreatedAt:        comment.CreatedAt,
+			}
 		} else {
 			detail.TargetType = "comment"
 		}
 	}
 
 	return detail, nil
+}
+
+// resolveReportUserInfo nạp tên/avatar phục vụ snapshot trong report detail.
+// Lỗi từng nguồn được bỏ qua để detail vẫn trả về phần còn lại.
+func (s *AdminService) resolveReportUserInfo(ctx context.Context, userID string) (username, displayName, avatarURI, status string) {
+	if u, err := s.authRepo.FindByID(ctx, userID); err == nil && u != nil {
+		username = u.Username
+		status = string(u.Status)
+		displayName = u.Username
+	}
+	if profiles, err := s.profileRepo.FindByIDs(ctx, []string{userID}); err == nil && len(profiles) > 0 {
+		if profiles[0].DisplayName != "" {
+			displayName = profiles[0].DisplayName
+		}
+		avatarURI = profiles[0].AvatarURI
+	}
+	return username, displayName, avatarURI, status
+}
+
+// excerptRunes cắt chuỗi theo số ký tự (rune) để hiển thị tóm tắt.
+func excerptRunes(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
 }
 
 func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID string, input dto.AdminReportReviewInput) error {
@@ -983,6 +1072,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		if err := s.authRepo.UpdateUserStatus(ctx, *report.TargetUserID, models.UserStatusBanned); err != nil {
 			return fmt.Errorf("ban user: %w", err)
 		}
+		utils.InvalidateAuthCache(*report.TargetUserID)
 
 		ban := models.NewBan(*report.TargetUserID, superAdminID, input.Reason, expiresAt)
 		ban.ID = utils.GenerateUUID()
@@ -1007,33 +1097,89 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		return err
 	}
 
-	reporterMessage := fmt.Sprintf("Báo cáo %s đã được xử lý bằng hành động: %s.", report.ID, action)
+	// Mô tả mục tiêu bằng ngôn ngữ tự nhiên (tên/tựa, không phải UUID) để
+	// người nhận thông báo hiểu đang nói về nội dung nào.
+	descriptor := "nội dung bạn đã báo cáo"
+	var postTitle, commentExcerpt, targetUsername string
+	if report.TargetPostID != nil {
+		if post, err := s.postRepo.FindByID(ctx, *report.TargetPostID); err == nil {
+			postTitle = strings.TrimSpace(post.Title)
+			if postTitle == "" {
+				postTitle = excerptRunes(post.Content, 60)
+			}
+			descriptor = fmt.Sprintf("bài viết %q", excerptRunes(postTitle, 60))
+		} else {
+			descriptor = "bài viết bạn đã báo cáo"
+		}
+	} else if report.TargetCommentID != nil {
+		if comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID); err == nil {
+			commentExcerpt = excerptRunes(comment.Content, 60)
+			descriptor = fmt.Sprintf("bình luận %q", commentExcerpt)
+		} else {
+			descriptor = "bình luận bạn đã báo cáo"
+		}
+	} else if report.TargetUserID != nil {
+		username, displayName, _, _ := s.resolveReportUserInfo(ctx, *report.TargetUserID)
+		targetUsername = username
+		if targetUsername == "" {
+			targetUsername = displayName
+		}
+		if targetUsername == "" {
+			descriptor = "người dùng bạn đã báo cáo"
+		} else {
+			descriptor = fmt.Sprintf("người dùng @%s", targetUsername)
+		}
+	}
+
+	var reporterMessage string
+	switch action {
+	case "hide":
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: nội dung đã bị ẩn. Lý do: %s", descriptor, input.Reason)
+	case "ban":
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: tài khoản đã bị cấm. Lý do: %s", descriptor, input.Reason)
+	default:
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xem xét: nội dung không vi phạm.", descriptor)
+	}
 	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
 
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
 		if err == nil {
-			targetMessage := fmt.Sprintf("Bài viết của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+			label := postTitle
+			if label == "" {
+				label = excerptRunes(post.Content, 60)
+			}
+			targetMessage := fmt.Sprintf("Bài viết %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", excerptRunes(label, 60), input.Reason)
 			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
 		}
 	} else if report.TargetUserID != nil {
-		targetMessage := fmt.Sprintf("Tài khoản của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
-		_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+		if action != "ban" {
+			// Nhánh ban có thông báo riêng chi tiết hơn bên dưới — tránh gửi trùng.
+			targetMessage := "Tài khoản của bạn đã bị báo cáo và đã được xem xét bởi quản trị viên."
+			_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+		}
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
 		if err == nil {
-			targetMessage := fmt.Sprintf("Bình luận của bạn đã bị báo cáo và đã được %s bởi quản trị viên.", action)
+			if commentExcerpt == "" {
+				commentExcerpt = excerptRunes(comment.Content, 60)
+			}
+			targetMessage := fmt.Sprintf("Bình luận %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", commentExcerpt, input.Reason)
 			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
 		}
 	}
 
 	if report.TargetUserID != nil && action == "ban" {
+		reason := strings.TrimSpace(input.Reason)
+		if reason == "" {
+			reason = "vi phạm quy tắc cộng đồng"
+		}
 		_, _ = s.notificationService.Create(
 			ctx,
 			*report.TargetUserID,
 			nil,
 			models.NotificationTypeMessage,
-			"Tài khoản của bạn đã bị cấm vì vi phạm báo cáo.",
+			fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", reason),
 			nil,
 			report.TargetUserID,
 			nil,
@@ -1096,7 +1242,7 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 	}
 
 	mediaItems := make([]dto.AdminMediaItem, 0, len(items))
-	for _, m := range items {	
+	for _, m := range items {
 		mediaItems = append(mediaItems, dto.AdminMediaItem{
 			ID:           m.ID,
 			UserID:       m.UserID,
@@ -1291,6 +1437,46 @@ func (s *AdminService) ListAds(ctx context.Context, adminID string, input dto.Ad
 	return resp, nil
 }
 
+// GetFeedMetrics trả số liệu cổng rollout rank v2: v2 chỉ mở rộng khi
+// small_author_exposure tăng và CTR/report-rate không xấu đi.
+func (s *AdminService) GetFeedMetrics(ctx context.Context, adminID string, days int) (dto.AdminFeedMetricsResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return dto.AdminFeedMetricsResponse{}, err
+	}
+
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+	since := time.Now().AddDate(0, 0, -days)
+	threshold := config.DefaultFeedRankV2.SmallAuthorFollowers
+
+	m, err := s.postRepo.GetFeedMetrics(ctx, since, threshold)
+	if err != nil {
+		return dto.AdminFeedMetricsResponse{}, fmt.Errorf("tổng hợp metrics feed thất bại: %w", err)
+	}
+
+	resp := dto.AdminFeedMetricsResponse{
+		Days:                 days,
+		TotalViews:           m.TotalViews,
+		FeedViews:            m.FeedViews,
+		DetailViews:          m.DetailViews,
+		SmallAuthorViews:     m.SmallAuthorViews,
+		SmallAuthorsSurfaced: m.SmallAuthorsSurfaced,
+		PostReports:          m.PostReports,
+		SmallAuthorThreshold: threshold,
+	}
+	if m.FeedViews > 0 {
+		resp.DetailCTR = float64(m.DetailViews) / float64(m.FeedViews)
+	}
+	if m.TotalViews > 0 {
+		resp.SmallAuthorExposurePct = float64(m.SmallAuthorViews) / float64(m.TotalViews) * 100
+	}
+	return resp, nil
+}
+
 func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string, input dto.AdminAdStatusInput) error {
 	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return err
@@ -1306,19 +1492,42 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 		return nil
 	}
 
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, adminID, models.RoleSuperAdmin)
-	if err != nil {
-		return fmt.Errorf("kiểm tra quyền thất bại: %w", err)
+	// Moderation logic: chỉ cho phép approve khi ad đang pending
+	if newStatus == string(models.AdStatusActive) && ad.Status != models.AdStatusPending {
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
 	}
-
-	if !isSuperAdmin && newStatus == string(models.AdStatusActive) {
-		return errorsapp.New(errorsapp.ErrCodeAdminNotSuperadmin)
+	// Reject chỉ khi ad đang pending
+	if newStatus == string(models.AdStatusRejected) && ad.Status != models.AdStatusPending {
+		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+	}
+	// Reject phải có lý do
+	if newStatus == string(models.AdStatusRejected) && strings.TrimSpace(input.RejectionReason) == "" {
+		return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
 	}
 
 	ad.Status = models.ParseAdStatus(newStatus)
+	if newStatus == string(models.AdStatusRejected) {
+		ad.RejectionReason = &input.RejectionReason
+	}
 	if err := s.adRepo.Update(ad); err != nil {
 		return fmt.Errorf("cập nhật trạng thái quảng cáo thất bại: %w", err)
 	}
+
+	// Notify partner
+	statusMsg := fmt.Sprintf("Quảng cáo '%s' của bạn đã được %s.", ad.Title, func() string {
+		switch ad.Status {
+		case models.AdStatusActive:
+			return "phê duyệt"
+		case models.AdStatusRejected:
+			return "từ chối"
+		default:
+			return "cập nhật trạng thái"
+		}
+	}())
+	if newStatus == string(models.AdStatusRejected) && input.RejectionReason != "" {
+		statusMsg += " Lý do: " + input.RejectionReason
+	}
+	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
 
 	return nil
 }

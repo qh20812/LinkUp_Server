@@ -52,3 +52,8 @@ func (s *TagService) ProcessCommentHashtags(ctx context.Context, tx *gorm.DB, po
 func (s *TagService) GetPostIDsByHashtag(ctx context.Context, hashtagName string) ([]string, error) {
 	return s.tagRepo.GetPostIDsByHashtag(ctx, hashtagName)
 }
+
+// GetHashtagNamesByPostIDs lấy hashtag post-level của các bài viết (phục vụ interest profile).
+func (s *TagService) GetHashtagNamesByPostIDs(ctx context.Context, postIDs []string) (map[string][]string, error) {
+	return s.tagRepo.GetHashtagNamesByPostIDs(ctx, postIDs)
+}

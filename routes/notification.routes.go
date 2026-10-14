@@ -13,6 +13,7 @@ func RegisterNotificationRoutes(router *gin.Engine, ctrl *controllers.Notificati
 	g.Use(middlewares.AuthMiddleware(env, db))
 	{
 		g.GET("", ctrl.GetNotifications)
+		g.GET("/summary", ctrl.GetSummary)
 		g.PUT("/:id/read", ctrl.MarkAsRead)
 		g.PUT("/read-all", ctrl.MarkAllAsRead)
 		g.GET("/unread-count", ctrl.GetUnreadCount)

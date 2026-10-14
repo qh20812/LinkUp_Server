@@ -246,6 +246,38 @@ func (s *AuthService) GoogleLogin(ctx context.Context, idToken string) (dto.Auth
 		return dto.AuthResponse{}, err
 	}
 
+	return s.loginWithGoogleClaims(ctx, claims)
+}
+
+// GoogleLoginWithCode xử lý flow auth-code (web mới): đổi code lấy ID token
+// rồi đi chung logic với GoogleLogin. Giữ GoogleLogin cũ cho client legacy.
+func (s *AuthService) GoogleLoginWithCode(ctx context.Context, code string) (dto.AuthResponse, error) {
+	if s.googleVerifier == nil || strings.TrimSpace(s.env.GoogleClientSecret) == "" {
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeGoogleNotConfigured)
+	}
+
+	clientID := strings.TrimSpace(s.env.GoogleClientID)
+	if clientID == "" && len(s.env.GoogleClientIDs) > 0 {
+		clientID = strings.TrimSpace(s.env.GoogleClientIDs[0])
+	}
+	if clientID == "" {
+		return dto.AuthResponse{}, errorsapp.New(errorsapp.ErrCodeGoogleNotConfigured)
+	}
+
+	idToken, err := ExchangeGoogleAuthCode(ctx, code, clientID, strings.TrimSpace(s.env.GoogleClientSecret))
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	claims, err := s.googleVerifier.Verify(ctx, idToken)
+	if err != nil {
+		return dto.AuthResponse{}, err
+	}
+
+	return s.loginWithGoogleClaims(ctx, claims)
+}
+
+func (s *AuthService) loginWithGoogleClaims(ctx context.Context, claims *GoogleClaims) (dto.AuthResponse, error) {
 	email := normalizeEmail(claims.Email)
 	user, err := s.authRepo.FindByEmail(ctx, email)
 	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
@@ -504,7 +536,11 @@ func (s *AuthService) Logout(ctx context.Context, userID string) error {
 	if s.sessionRepo != nil {
 		_ = s.sessionRepo.RevokeAllByUserID(ctx, userID)
 	}
-	return s.authRepo.IncrementTokenVersion(ctx, userID)
+	if err := s.authRepo.IncrementTokenVersion(ctx, userID); err != nil {
+		return err
+	}
+	utils.InvalidateAuthCache(userID)
+	return nil
 }
 
 func (s *AuthService) accessTTL(ctx context.Context) time.Duration {
@@ -602,7 +638,11 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID string, input d
 	if s.sessionRepo != nil {
 		_ = s.sessionRepo.RevokeAllByUserID(ctx, userID)
 	}
-	return s.authRepo.IncrementTokenVersion(ctx, userID)
+	if err := s.authRepo.IncrementTokenVersion(ctx, userID); err != nil {
+		return err
+	}
+	utils.InvalidateAuthCache(userID)
+	return nil
 }
 
 func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenInput, deviceName, ipAddress, userAgent string) (dto.TokenResponse, error) {
@@ -663,6 +703,44 @@ func (s *AuthService) RefreshToken(ctx context.Context, input dto.RefreshTokenIn
 	}
 
 	return dto.TokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(s.accessTTL(ctx).Seconds()),
+		RefreshTTLIn: int64(s.refreshTTL(ctx).Seconds()),
+	}, nil
+}
+
+// ReissueTokensForUser cấp lại access/refresh với role hiện tại từ DB,
+// giữ nguyên sessionID (jti). Dùng khi role đổi giữa chừng (vd: subscribe
+// nâng USER → PARTNER) mà client vẫn cần JWT claim mới ngay lập tức.
+func (s *AuthService) ReissueTokensForUser(ctx context.Context, userID, sessionID string) (*dto.TokenResponse, error) {
+	user, err := s.authRepo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return nil, errorsapp.New(errorsapp.ErrCodeUserNotFound)
+		}
+		return nil, err
+	}
+
+	if err := s.ensureBanStatus(ctx, user); err != nil {
+		return nil, err
+	}
+	if !user.IsActive() {
+		return nil, errorsapp.New(errorsapp.ErrCodeAccountInactive)
+	}
+
+	role, err := s.authRepo.GetUserRole(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	accessToken, refreshToken, err := s.generateTokens(ctx, user, role, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.TokenResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",

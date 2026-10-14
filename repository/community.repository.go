@@ -869,20 +869,21 @@ func mapRoleNameToGroupRole(name models.RoleName) models.GroupRole {
 
 func (r *CommunityRepository) ListCommunities(ctx context.Context, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
 	type communityRow struct {
-		ID          string    `gorm:"column:id"`
-		CreatorID   string    `gorm:"column:creator_id"`
-		Name        string    `gorm:"column:name"`
-		Description string    `gorm:"column:description"`
-		AvatarURI   string    `gorm:"column:avatar_uri"`
-		Privacy     string    `gorm:"column:privacy"`
-		MemberCount int       `gorm:"column:member_count"`
-		CreatedAt   time.Time `gorm:"column:created_at"`
+		ID            string    `gorm:"column:id"`
+		CreatorID     string    `gorm:"column:creator_id"`
+		Name          string    `gorm:"column:name"`
+		Description   string    `gorm:"column:description"`
+		AvatarURI     string    `gorm:"column:avatar_uri"`
+		BackgroundURI string    `gorm:"column:background_uri"`
+		Privacy       string    `gorm:"column:privacy"`
+		MemberCount   int       `gorm:"column:member_count"`
+		CreatedAt     time.Time `gorm:"column:created_at"`
 	}
 
 	query := r.db.WithContext(ctx).
 		Table("communities").
 		Select(`communities.id, communities.creator_id, communities.name, communities.description, communities.avatar_uri,
-			communities.privacy, communities.created_at,
+			communities.background_uri, communities.privacy, communities.created_at,
 			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
 		Where("communities.status = ?", models.CommunityStatusActive)
 
@@ -905,14 +906,15 @@ func (r *CommunityRepository) ListCommunities(ctx context.Context, keyword strin
 	items := make([]dto.CommunityListItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, dto.CommunityListItem{
-			ID:          row.ID,
-			CreatorID:   row.CreatorID,
-			Name:        row.Name,
-			Description: row.Description,
-			AvatarURI:   row.AvatarURI,
-			Privacy:     row.Privacy,
-			MemberCount: row.MemberCount,
-			CreatedAt:   row.CreatedAt,
+			ID:            row.ID,
+			CreatorID:     row.CreatorID,
+			Name:          row.Name,
+			Description:   row.Description,
+			AvatarURI:     row.AvatarURI,
+			BackgroundURI: row.BackgroundURI,
+			Privacy:       row.Privacy,
+			MemberCount:   row.MemberCount,
+			CreatedAt:     row.CreatedAt,
 		})
 	}
 	return items, total, nil
@@ -979,20 +981,21 @@ func (r *CommunityRepository) GetCommunityDetailForUser(ctx context.Context, com
 
 func (r *CommunityRepository) ListUserJoinedCommunities(ctx context.Context, userID string, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
 	type communityRow struct {
-		ID          string    `gorm:"column:id"`
-		Name        string    `gorm:"column:name"`
-		Description string    `gorm:"column:description"`
-		AvatarURI   string    `gorm:"column:avatar_uri"`
-		Privacy     string    `gorm:"column:privacy"`
-		MemberCount int       `gorm:"column:member_count"`
-		CreatedAt   time.Time `gorm:"column:created_at"`
+		ID            string    `gorm:"column:id"`
+		Name          string    `gorm:"column:name"`
+		Description   string    `gorm:"column:description"`
+		AvatarURI     string    `gorm:"column:avatar_uri"`
+		BackgroundURI string    `gorm:"column:background_uri"`
+		Privacy       string    `gorm:"column:privacy"`
+		MemberCount   int       `gorm:"column:member_count"`
+		CreatedAt     time.Time `gorm:"column:created_at"`
 	}
 
 	query := r.db.WithContext(ctx).
 		Table("communities").
 		Joins("JOIN group_members gm ON gm.community_id = communities.id AND gm.user_id = ?", userID).
 		Select(`communities.id, communities.name, communities.description, communities.avatar_uri,
-			communities.privacy, communities.created_at,
+			communities.background_uri, communities.privacy, communities.created_at,
 			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
 		Where("communities.status = ?", models.CommunityStatusActive)
 
@@ -1015,13 +1018,14 @@ func (r *CommunityRepository) ListUserJoinedCommunities(ctx context.Context, use
 	items := make([]dto.CommunityListItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, dto.CommunityListItem{
-			ID:          row.ID,
-			Name:        row.Name,
-			Description: row.Description,
-			AvatarURI:   row.AvatarURI,
-			Privacy:     row.Privacy,
-			MemberCount: row.MemberCount,
-			CreatedAt:   row.CreatedAt,
+			ID:            row.ID,
+			Name:          row.Name,
+			Description:   row.Description,
+			AvatarURI:     row.AvatarURI,
+			BackgroundURI: row.BackgroundURI,
+			Privacy:       row.Privacy,
+			MemberCount:   row.MemberCount,
+			CreatedAt:     row.CreatedAt,
 		})
 	}
 	return items, total, nil
@@ -1029,19 +1033,20 @@ func (r *CommunityRepository) ListUserJoinedCommunities(ctx context.Context, use
 
 func (r *CommunityRepository) ListUserCreatedCommunities(ctx context.Context, userID string, keyword string, page, pageSize int) ([]dto.CommunityListItem, int64, error) {
 	type communityRow struct {
-		ID          string    `gorm:"column:id"`
-		Name        string    `gorm:"column:name"`
-		Description string    `gorm:"column:description"`
-		AvatarURI   string    `gorm:"column:avatar_uri"`
-		Privacy     string    `gorm:"column:privacy"`
-		MemberCount int       `gorm:"column:member_count"`
-		CreatedAt   time.Time `gorm:"column:created_at"`
+		ID            string    `gorm:"column:id"`
+		Name          string    `gorm:"column:name"`
+		Description   string    `gorm:"column:description"`
+		AvatarURI     string    `gorm:"column:avatar_uri"`
+		BackgroundURI string    `gorm:"column:background_uri"`
+		Privacy       string    `gorm:"column:privacy"`
+		MemberCount   int       `gorm:"column:member_count"`
+		CreatedAt     time.Time `gorm:"column:created_at"`
 	}
 
 	query := r.db.WithContext(ctx).
 		Table("communities").
 		Select(`communities.id, communities.name, communities.description, communities.avatar_uri,
-			communities.privacy, communities.created_at,
+			communities.background_uri, communities.privacy, communities.created_at,
 			COALESCE((SELECT COUNT(*) FROM group_members WHERE community_id = communities.id), 0) AS member_count`).
 		Where("communities.creator_id = ? AND communities.status = ?", userID, models.CommunityStatusActive)
 
@@ -1064,13 +1069,14 @@ func (r *CommunityRepository) ListUserCreatedCommunities(ctx context.Context, us
 	items := make([]dto.CommunityListItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, dto.CommunityListItem{
-			ID:          row.ID,
-			Name:        row.Name,
-			Description: row.Description,
-			AvatarURI:   row.AvatarURI,
-			Privacy:     row.Privacy,
-			MemberCount: row.MemberCount,
-			CreatedAt:   row.CreatedAt,
+			ID:            row.ID,
+			Name:          row.Name,
+			Description:   row.Description,
+			AvatarURI:     row.AvatarURI,
+			BackgroundURI: row.BackgroundURI,
+			Privacy:       row.Privacy,
+			MemberCount:   row.MemberCount,
+			CreatedAt:     row.CreatedAt,
 		})
 	}
 	return items, total, nil
