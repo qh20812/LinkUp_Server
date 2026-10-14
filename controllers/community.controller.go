@@ -1,22 +1,69 @@
 package controllers
 
 import (
+	"context"
 	errorsapp "linkup/errors"
 	"linkup/dto"
 	"linkup/models"
 	"linkup/services"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
+const maxCreateCommunityBodySize = 15 << 20
+
+func isRequestBodyTooLarge(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "request body too large")
+}
+
+// respondServiceError maps service-layer errors to HTTP status codes:
+// AppError → errorsapp.StatusCode mapping (400 validation, 403 forbidden,
+// 404 not found, 409 conflict, 500 internal); plain errors → 500 without
+// leaking internal details.
+func respondServiceError(c *gin.Context, err error) {
+	if appErr, ok := errorsapp.IsAppError(err); ok {
+		errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		return
+	}
+	errorsapp.RespondError(c, http.StatusInternalServerError, errorsapp.New(errorsapp.ErrCodeInternal))
+}
+
+// respondUploadError preserves media validation AppErrors (media.* → 400 via
+// StatusCode) instead of masking them as community upload failures.
+func respondUploadError(c *gin.Context, err error) {
+	if appErr, ok := errorsapp.IsAppError(err); ok {
+		errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		return
+	}
+	errorsapp.RespondError(c, http.StatusInternalServerError, errorsapp.New(errorsapp.ErrCodeInternal))
+}
+
+// cleanupUploadedMedia deletes already-uploaded media best-effort when a later
+// step of community creation fails, so files do not linger on Cloudinary and
+// consume storage quota. Failures are logged, never fatal.
+func cleanupUploadedMedia(ctx context.Context, mediaService services.MediaService, userID string, mediaIDs []string) {
+	if len(mediaIDs) == 0 {
+		return
+	}
+	// Decouple from request cancellation: the client may already be gone.
+	ctx = context.WithoutCancel(ctx)
+	for _, mediaID := range mediaIDs {
+		if err := mediaService.DeleteMedia(ctx, userID, mediaID); err != nil {
+			log.Printf("[community] failed to cleanup orphan media %s after failed create: %v", mediaID, err)
+		}
+	}
+}
+
 type CommunityController struct {
-	communityService *services.CommunityService
+	communityService CommunityService
 	mediaService     services.MediaService
 }
 
-func NewCommunityController(communityService *services.CommunityService, mediaService services.MediaService) *CommunityController {
+func NewCommunityController(communityService CommunityService, mediaService services.MediaService) *CommunityController {
 	return &CommunityController{communityService: communityService, mediaService: mediaService}
 }
 
@@ -27,29 +74,39 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 		return
 	}
 
-	name := c.PostForm("name")
-	description := c.PostForm("description")
-	autoApprove := c.PostForm("auto_approve") == "true"
-	privacy := models.ParseCommunityPrivacy(c.PostForm("privacy"))
-
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCreateCommunityBodySize)
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
+		if isRequestBodyTooLarge(err) {
+			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeMediaFileTooLarge))
+			return
+		}
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}
 
+	name := strings.TrimSpace(c.PostForm("name"))
+	description := strings.TrimSpace(c.PostForm("description"))
+	autoApprove := c.PostForm("auto_approve") == "true"
+	// No silent fallback: unknown values are rejected by service validation
+	// (community.PRIVACY_INVALID). Empty means public (model default).
+	privacy := models.CommunityPrivacy(strings.ToLower(strings.TrimSpace(c.PostForm("privacy"))))
+
+	// Avatar/background moderation is asynchronous (mediaService.UploadMedia
+	// stores status pending and moderates in background), so there is no
+	// synchronous rejected status to check here. Rejected assets are handled
+	// by the background moderation flow (status update + notification).
+	// Uploaded media IDs are tracked so a later failure can clean them up.
+	var uploadedMediaIDs []string
 	avatarURI := ""
 	file, err := c.FormFile("avatar")
 	if err == nil && file != nil {
 		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
 		if err != nil {
-			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed))
-			return
-		}
-		if media.Status == models.MediaStatusRejected {
-			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundRejected))
+			respondUploadError(c, err)
 			return
 		}
 		avatarURI = media.FileURI
+		uploadedMediaIDs = append(uploadedMediaIDs, media.ID)
 	}
 
 	backgroundURI := ""
@@ -57,31 +114,35 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	if err == nil && bgFile != nil {
 		bgMedia, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), bgFile)
 		if err != nil {
-			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed))
-			return
-		}
-		if bgMedia.Status == models.MediaStatusRejected {
-			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeBackgroundRejected))
+			cleanupUploadedMedia(c.Request.Context(), ctrl.mediaService, userID.(string), uploadedMediaIDs)
+			respondUploadError(c, err)
 			return
 		}
 		backgroundURI = bgMedia.FileURI
+		uploadedMediaIDs = append(uploadedMediaIDs, bgMedia.ID)
 	}
 
-	community, groupChat, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, backgroundURI, privacy, autoApprove)
+	result, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, backgroundURI, privacy, autoApprove)
 	if err != nil {
-		errorsapp.Respond(c, http.StatusBadRequest, err)
+		cleanupUploadedMedia(c.Request.Context(), ctrl.mediaService, userID.(string), uploadedMediaIDs)
+		respondServiceError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"message":      "Tạo cộng đồng thành công!",
-		"community_id": community.ID,
-		"auto_approve": community.AutoApprove,
+		"community_id": result.Community.ID,
+		"community":    result.Community,
+		"auto_approve": result.Community.AutoApprove,
 		"default_group_chat": gin.H{
-			"id":   groupChat.ID,
-			"name": groupChat.Name,
+			"id":   result.Chat.ID,
+			"name": result.Chat.Name,
 		},
-	})
+	}
+	if result.InviteCode != "" {
+		resp["invite_code"] = result.InviteCode
+	}
+	c.JSON(http.StatusCreated, resp)
 }
 
 func (ctrl *CommunityController) SetCommunityBackground(c *gin.Context) {
@@ -93,7 +154,12 @@ func (ctrl *CommunityController) SetCommunityBackground(c *gin.Context) {
 
 	communityID := c.Param("communityID")
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxCreateCommunityBodySize)
 	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
+		if isRequestBodyTooLarge(err) {
+			errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeMediaFileTooLarge))
+			return
+		}
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeCommunityInvalidFormat))
 		return
 	}

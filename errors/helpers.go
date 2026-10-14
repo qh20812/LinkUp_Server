@@ -252,6 +252,56 @@ func StatusCode(code string) int {
 		}
 	case strings.HasPrefix(code, "ban."):
 		return http.StatusNotFound
+	case strings.HasPrefix(code, "community."):
+		switch {
+		case strings.HasSuffix(code, "NOT_FOUND"):
+			return http.StatusNotFound
+		case code == ErrCodeAdminCannotCreate ||
+			code == ErrCodeNotCommunityAdmin ||
+			code == ErrCodeNotCommunityMember ||
+			code == ErrCodeCannotChangeOwnRole ||
+			code == ErrCodeCannotTargetAdmin ||
+			code == ErrCodeCreatorCannotLeave ||
+			code == ErrCodeCannotKickCreator ||
+			code == ErrCodeCannotKickAdmin ||
+			code == ErrCodeCannotInviteSelf ||
+			code == ErrCodeOnlyCreatorCanTransfer ||
+			code == ErrCodeCommunityCreateLimited:
+			return http.StatusForbidden
+		case code == ErrCodeCommunityNameExists ||
+			code == ErrCodeAlreadyMember ||
+			code == ErrCodeJoinRequestPending ||
+			code == ErrCodeJoinRequestHandled ||
+			code == ErrCodeInviteCodeExpired ||
+			code == ErrCodeInviteCodeInactive ||
+			code == ErrCodeInviteCodeMaxUses ||
+			code == ErrCodeInvitationHandled ||
+			code == ErrCodeRuleTitleDuplicate:
+			return http.StatusConflict
+		case code == ErrCodeCommunityCreateThrottled:
+			return http.StatusTooManyRequests
+		case code == ErrCodeEncryptionKeyFailed ||
+			code == ErrCodeBackgroundUploadFailed ||
+			code == ErrCodeBackgroundUpdateFailed ||
+			code == ErrCodeCommunityUpdateFailed ||
+			code == ErrCodeJoinRequestFailed ||
+			code == ErrCodeMemberCheckFailed ||
+			code == ErrCodeKickFailed ||
+			code == ErrCodeRoleUpdateFailed ||
+			code == ErrCodeTransferFailed ||
+			code == ErrCodeInviteCodeCreateFail ||
+			code == ErrCodeInviteCodeSaveFail ||
+			code == ErrCodeInviteCodeDeactFail ||
+			code == ErrCodeInviteCodeListFail ||
+			code == ErrCodeInvitationSendFailed ||
+			code == ErrCodeInvitationListFailed ||
+			code == ErrCodeRuleCheckFailed ||
+			code == ErrCodeRulePositionFailed ||
+			code == ErrCodeImageReadFailed:
+			return http.StatusInternalServerError
+		default:
+			return http.StatusBadRequest
+		}
 	default:
 		return http.StatusInternalServerError
 	}

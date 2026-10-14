@@ -23,7 +23,7 @@ const (
 type Community struct {
 	ID            string           `json:"id"`
 	CreatorID     string           `json:"creator_id"`
-	Name          string           `json:"name"`
+	Name          string           `json:"name" gorm:"type:varchar(255);not null;uniqueIndex"`
 	Description   string           `json:"description"`
 	AvatarURI     string           `json:"avatar_uri"`
 	BackgroundURI string           `json:"background_uri"`

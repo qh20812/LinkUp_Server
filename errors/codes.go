@@ -57,11 +57,14 @@ const (
 	ErrCodeCommunityDescTooLong       = "community.DESC_TOO_LONG"
 	ErrCodeCommunityAvatarInvalid     = "community.AVATAR_INVALID"
 	ErrCodeCommunityBackgroundInvalid = "community.BACKGROUND_INVALID"
+	ErrCodeCommunityPrivacyInvalid    = "community.PRIVACY_INVALID"
 	ErrCodeCommunityInvalidFormat     = "community.INVALID_FORMAT"
 
 	// Community - Business
 	ErrCodeCommunityNotFound        = "community.NOT_FOUND"
 	ErrCodeCommunityNameExists      = "community.NAME_EXISTS"
+	ErrCodeCommunityCreateLimited   = "community.CREATE_LIMIT_REACHED"
+	ErrCodeCommunityCreateThrottled = "community.CREATE_RATE_LIMITED"
 	ErrCodeAdminCannotCreate        = "community.ADMIN_CANNOT_CREATE"
 	ErrCodeEncryptionKeyFailed      = "community.ENCRYPTION_KEY_FAILED"
 	ErrCodeBackgroundUploadFailed   = "community.BACKGROUND_UPLOAD_FAILED"

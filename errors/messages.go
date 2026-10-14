@@ -106,11 +106,14 @@ var Messages = map[string]string{
 	"community.DESC_TOO_LONG":      "Mô tả cộng đồng không được vượt quá 500 ký tự",
 	"community.AVATAR_INVALID":     "Avatar URI không hợp lệ",
 	"community.BACKGROUND_INVALID": "Background URI không hợp lệ",
+	"community.PRIVACY_INVALID":    "Quyền riêng tư không hợp lệ. Chỉ chấp nhận: public, invitation_only",
 	"community.INVALID_FORMAT":     "Dữ liệu đầu vào không hợp lệ",
 
 	// Community - Business
 	"community.NOT_FOUND":          "Cộng đồng không tồn tại",
 	"community.NAME_EXISTS":        "Tên cộng đồng đã tồn tại",
+	"community.CREATE_LIMIT_REACHED": "Bạn đã đạt giới hạn số cộng đồng được tạo",
+	"community.CREATE_RATE_LIMITED":  "Bạn tạo cộng đồng quá nhanh, vui lòng thử lại sau",
 	"community.ADMIN_CANNOT_CREATE": "Quản trị viên không được tạo cộng đồng",
 	"community.ENCRYPTION_KEY_FAILED": "Lỗi khi tạo mã khóa mã hóa",
 	"community.BACKGROUND_UPLOAD_FAILED": "Tải ảnh background thất bại",

@@ -173,6 +173,70 @@ func (r *CommunityRepository) IsNameTaken(ctx context.Context, name string) (boo
 	return count > 0, err
 }
 
+// CountByCreator đếm tổng số cộng đồng một user đã tạo (phục vụ quota).
+func (r *CommunityRepository) CountByCreator(ctx context.Context, creatorID string) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&models.Community{}).
+		Where("creator_id = ?", creatorID).
+		Count(&count).Error
+	return count, err
+}
+
+// CountCreatedSince đếm số cộng đồng user tạo từ mốc thời gian (phục vụ throttle).
+func (r *CommunityRepository) CountCreatedSince(ctx context.Context, creatorID string, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&models.Community{}).
+		Where("creator_id = ? AND created_at >= ?", creatorID, since).
+		Count(&count).Error
+	return count, err
+}
+
+// defaultCommunityRules là bộ nội quy khởi tạo cho cộng đồng mới.
+var defaultCommunityRules = []struct {
+	Category models.RuleCategory
+	Title    string
+	Content  string
+}{
+	{models.RuleConduct, "Tôn trọng mọi thành viên", "Không công kích cá nhân, miệt thị hay gây gổ dưới mọi hình thức."},
+	{models.RuleProhibited, "Cấm spam và quảng cáo", "Không đăng bài spam, quảng cáo hoặc nội dung không liên quan đến chủ đề cộng đồng."},
+	{models.RuleGuidelines, "Đăng bài đúng chủ đề", "Đặt tiêu đề rõ ràng, dùng hashtag phù hợp để mọi người dễ theo dõi."},
+}
+
+// SeedCommunityDefaults chèn nội quy mẫu và một mã mời không giới hạn cho
+// cộng đồng mới, trả về mã mời đã tạo. Best-effort: caller log lỗi mà không
+// fail quá trình tạo (mã rỗng khi lỗi).
+func (r *CommunityRepository) SeedCommunityDefaults(ctx context.Context, communityID, creatorID string, now time.Time) (string, error) {
+	for i, dr := range defaultCommunityRules {
+		rule := models.NewCommunityRule(communityID, dr.Category, dr.Title, dr.Content, i)
+		rule.ID = utils.GenerateUUID()
+		rule.CreatedAt = now
+		if err := r.db.WithContext(ctx).Create(&rule).Error; err != nil {
+			return "", fmt.Errorf("seed default rule %q: %w", dr.Title, err)
+		}
+	}
+
+	code, err := utils.GenerateInviteCode()
+	if err != nil {
+		return "", fmt.Errorf("generate starter invite code: %w", err)
+	}
+	invite := &models.CommunityInviteCode{
+		ID:          utils.GenerateUUID(),
+		CommunityID: communityID,
+		Code:        code,
+		CreatedBy:   creatorID,
+		MaxUses:     0,
+		ExpiresAt:   nil,
+		IsActive:    true,
+		CreatedAt:   now,
+	}
+	if err := r.db.WithContext(ctx).Create(invite).Error; err != nil {
+		return "", fmt.Errorf("seed starter invite code: %w", err)
+	}
+	return code, nil
+}
+
 // UpdateBackground cập nhật background_uri của community.
 func (r *CommunityRepository) UpdateBackground(ctx context.Context, communityID, backgroundURI string) error {
 	return r.db.WithContext(ctx).

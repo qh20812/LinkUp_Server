@@ -12,25 +12,30 @@ func TestValidateCreateCommunity(t *testing.T) {
 	v := validations.NewCommunityValidation()
 
 	tests := []struct {
-		name        string
-		community   string
-		description string
-		avatarURI   string
-		wantErr     string
+		name         string
+		community    string
+		description  string
+		avatarURI    string
+		backgroundURI string
+		privacy      models.CommunityPrivacy
+		wantErr      string
 	}{
-		{"valid minimal", "Go Developers", "", "", ""},
-		{"valid full", "Cloud Architects", "A community for cloud architecture", "https://example.com/avatar.png", ""},
-		{"empty name", "", "Some description", "", "Tên cộng đồng không được để trống"},
-		{"name too short", "AB", "Some description", "", "Tên cộng đồng phải có ít nhất 3 ký tự"},
-		{"name too long", string(make([]rune, 101)), "Some description", "", "Tên cộng đồng không được vượt quá 100 ký tự"},
-		{"description too long", "Valid Name", string(make([]rune, 501)), "", "Mô tả cộng đồng không được vượt quá 500 ký tự"},
-		{"invalid avatar", "Valid Name", "", "not-a-url", "Avatar URI không hợp lệ"},
-		{"avatar without scheme", "Valid Name", "", "example.com/avatar.png", "Avatar URI không hợp lệ"},
+		{"valid minimal", "Go Developers", "", "", "", "", ""},
+		{"valid full", "Cloud Architects", "A community for cloud architecture", "https://example.com/avatar.png", "https://example.com/bg.png", models.PrivacyPublic, ""},
+		{"valid invitation only", "Secret Group", "", "", "", models.PrivacyInvitationOnly, ""},
+		{"empty name", "", "Some description", "", "", "", "Tên cộng đồng không được để trống"},
+		{"name too short", "AB", "Some description", "", "", "", "Tên cộng đồng phải có ít nhất 3 ký tự"},
+		{"name too long", string(make([]rune, 101)), "Some description", "", "", "", "Tên cộng đồng không được vượt quá 100 ký tự"},
+		{"description too long", "Valid Name", string(make([]rune, 501)), "", "", "", "Mô tả cộng đồng không được vượt quá 500 ký tự"},
+		{"invalid avatar", "Valid Name", "", "not-a-url", "", "", "Avatar URI không hợp lệ"},
+		{"avatar without scheme", "Valid Name", "", "example.com/avatar.png", "", "", "Avatar URI không hợp lệ"},
+		{"invalid background", "Valid Name", "", "", "not-a-url", "", "Background URI không hợp lệ"},
+		{"invalid privacy typo", "Valid Name", "", "", "", "publik", "Quyền riêng tư không hợp lệ. Chỉ chấp nhận: public, invitation_only"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := v.ValidateCreateCommunity(tt.community, tt.description, tt.avatarURI)
+			err := v.ValidateCreateCommunity(tt.community, tt.description, tt.avatarURI, tt.backgroundURI, tt.privacy)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)

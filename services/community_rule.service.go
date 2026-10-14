@@ -2,12 +2,15 @@ package services
 
 import (
 	"context"
+	"errors"
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type CommunityRuleService struct {
@@ -25,7 +28,7 @@ func NewCommunityRuleService(ruleRepo *repository.CommunityRuleRepository, commu
 }
 
 func (s *CommunityRuleService) CreateRule(ctx context.Context, userID, communityID string, category models.RuleCategory, title, content string, position *int) (*models.CommunityRule, error) {
-	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireRuleAdmin(ctx, communityID, userID); err != nil {
 		return nil, err
 	}
 
@@ -70,7 +73,7 @@ func (s *CommunityRuleService) UpdateRule(ctx context.Context, userID, ruleID, t
 		return nil, errorsapp.New(errorsapp.ErrCodeRuleNotFound)
 	}
 
-	if err := s.groupRole.RequireRole(ctx, existing.CommunityID, userID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireRuleAdmin(ctx, existing.CommunityID, userID); err != nil {
 		return nil, err
 	}
 
@@ -114,7 +117,7 @@ func (s *CommunityRuleService) DeleteRule(ctx context.Context, userID, ruleID st
 		return errorsapp.New(errorsapp.ErrCodeRuleNotFound)
 	}
 
-	if err := s.groupRole.RequireRole(ctx, existing.CommunityID, userID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireRuleAdmin(ctx, existing.CommunityID, userID); err != nil {
 		return err
 	}
 
@@ -123,4 +126,17 @@ func (s *CommunityRuleService) DeleteRule(ctx context.Context, userID, ruleID st
 
 func (s *CommunityRuleService) GetRulesByCommunity(ctx context.Context, communityID string) ([]models.CommunityRule, error) {
 	return s.ruleRepo.FindByCommunityID(ctx, communityID)
+}
+
+// requireRuleAdmin wraps groupRole.RequireRole, mapping a missing role row
+// (user is not a member at all) to ErrNotCommunityAdmin instead of leaking a
+// raw record-not-found error.
+func (s *CommunityRuleService) requireRuleAdmin(ctx context.Context, communityID, userID string) error {
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return validations.ErrNotCommunityAdmin
+		}
+		return err
+	}
+	return nil
 }

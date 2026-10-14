@@ -13,3 +13,21 @@ type NotificationPreference struct {
 	ShareEnabled         bool   `json:"share_enabled"`
 	MediaEnabled         bool   `json:"media_enabled"`
 }
+
+// NewDefaultNotificationPreference returns an all-enabled preference row for
+// a new user (or a user predating preference rows).
+func NewDefaultNotificationPreference(userID string) *NotificationPreference {
+	return &NotificationPreference{
+		UserID:               userID,
+		LikeEnabled:          true,
+		CommentEnabled:       true,
+		FollowEnabled:        true,
+		MessageEnabled:       true,
+		FriendRequestEnabled: true,
+		CommunityEnabled:     true,
+		VoiceCallEnabled:     true,
+		StoryReactEnabled:    true,
+		ShareEnabled:         true,
+		MediaEnabled:         true,
+	}
+}

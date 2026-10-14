@@ -28,6 +28,10 @@ func connectAndMigrateCommunity(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Profile{},
@@ -42,10 +46,12 @@ func connectAndMigrateCommunity(t *testing.T) *gorm.DB {
 		&models.NotificationPreference{},
 		&models.CommunityInviteCode{},
 		&models.CommunityInvitation{},
+		&models.CommunityRule{},
 	); err != nil {
 		t.Fatalf("auto-migrate: %v", err)
 	}
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM community_rules")
 		db.Exec("DELETE FROM community_invitations")
 		db.Exec("DELETE FROM community_invite_codes")
 		db.Exec("DELETE FROM notifications")
@@ -59,6 +65,9 @@ func connectAndMigrateCommunity(t *testing.T) *gorm.DB {
 		db.Exec("DELETE FROM profiles")
 		db.Exec("DELETE FROM users")
 		db.Exec("DELETE FROM roles")
+		// Release pooled connections: suites open a new pool per test and
+		// Aiven caps total connections; without this, large runs starve.
+		sqlDB.Close()
 	})
 	return db
 }
@@ -117,6 +126,9 @@ func seedUser(t *testing.T, db *gorm.DB) string {
 		FollowEnabled:        true,
 		MessageEnabled:       true,
 		FriendRequestEnabled: true,
+		// Community notifications must be on: service tests assert
+		// community notifications are persisted on create/join/approve.
+		CommunityEnabled: true,
 	}).Error; err != nil {
 		t.Fatalf("create notification preference: %v", err)
 	}
@@ -286,7 +298,7 @@ func TestCreateCommunity_HappyPath(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Test Community", "Description", "", "", models.PrivacyPublic, false)
+	community, chat, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Test Community", "Description", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -311,7 +323,7 @@ func TestCreateCommunity_AutoApprove(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Approve", "", "", "", models.PrivacyPublic, true)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Approve", "", "", "", models.PrivacyPublic, true))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -324,7 +336,7 @@ func TestCreateCommunity_AutoApproveDefault(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "No Auto Approve", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "No Auto Approve", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -337,7 +349,7 @@ func TestCreateCommunity_VerifyDBState(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Verify DB", "", "", "", models.PrivacyPublic, false)
+	community, chat, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Verify DB", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -371,7 +383,7 @@ func TestCreateCommunity_EncryptionKey(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	_, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Enc Key", "", "", "", models.PrivacyPublic, false)
+	_, chat, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Enc Key", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -388,7 +400,7 @@ func TestCreateCommunity_RollbackOnFKFail(t *testing.T) {
 	ctx := context.Background()
 
 	fakeCreatorID := "non-existent-user-id"
-	_, _, err := seed.Service.CreateCommunity(ctx, fakeCreatorID, "Rollback", "", "", "", models.PrivacyPublic, false)
+	_, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, fakeCreatorID, "Rollback", "", "", "", models.PrivacyPublic, false))
 	if err == nil {
 		t.Fatal("expected error for non-existent creator, got nil")
 	}
@@ -412,12 +424,12 @@ func TestCreateCommunity_NameTaken(t *testing.T) {
 
 	communityName := "Unique Community Name"
 
-	_, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", "", models.PrivacyPublic, false)
+	_, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("first CreateCommunity: %v", err)
 	}
 
-	_, _, err = seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", "", models.PrivacyPublic, false)
+	_, _, err = unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, communityName, "", "", "", models.PrivacyPublic, false))
 	if err == nil {
 		t.Fatal("expected error for duplicate name, got nil")
 	}
@@ -432,7 +444,7 @@ func TestRequestJoin_AutoApprove_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", "", models.PrivacyPublic, true)
+	community, chat, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", "", models.PrivacyPublic, true))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -470,7 +482,7 @@ func TestRequestJoin_AutoApprove_AlreadyMember(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", "", models.PrivacyPublic, true)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto Community", "", "", "", models.PrivacyPublic, true))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -493,7 +505,7 @@ func TestRequestJoin_AutoApprove_NoChat(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto NoChat", "", "", "", models.PrivacyPublic, true)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Auto NoChat", "", "", "", models.PrivacyPublic, true))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -511,7 +523,7 @@ func TestRequestJoin_JoinRequest_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -547,7 +559,7 @@ func TestRequestJoin_JoinRequest_Duplicate(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Join Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -583,7 +595,7 @@ func TestRequestJoin_DeactivatedCode_Fails(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Deactivated Code", "", "", "", models.PrivacyPublic, true)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Deactivated Code", "", "", "", models.PrivacyPublic, true))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -612,7 +624,7 @@ func TestApproveJoinRequest_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, chat, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false)
+	community, chat, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -660,7 +672,7 @@ func TestApproveJoinRequest_AlreadyHandled(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -685,7 +697,7 @@ func TestApproveJoinRequest_NotAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Approve Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -760,7 +772,7 @@ func TestCreateCommunity_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	_, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, false)
+	_, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -778,7 +790,7 @@ func TestRequestJoin_AutoApprove_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, true)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, true))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -804,7 +816,7 @@ func TestApproveJoinRequest_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Notif Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1254,7 +1266,7 @@ func TestRejectJoinRequest_Success(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1291,7 +1303,7 @@ func TestRejectJoinRequest_AlreadyHandled(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1318,7 +1330,7 @@ func TestRejectJoinRequest_NotAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1354,7 +1366,7 @@ func TestRejectJoinRequest_SendsNotification(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Notif Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Reject Notif Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1380,7 +1392,7 @@ func TestListPendingRequests_HasRequests(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Pending Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Pending Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1409,7 +1421,7 @@ func TestListPendingRequests_Empty(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Empty Pending", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Empty Pending", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1427,7 +1439,7 @@ func TestListPendingRequests_NotAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Pending Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Pending Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1478,7 +1490,7 @@ func TestUpdateMemberRole_HappyPath(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1522,7 +1534,7 @@ func TestUpdateMemberRole_InvalidRole(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1550,7 +1562,7 @@ func TestUpdateMemberRole_NotAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1568,7 +1580,7 @@ func TestUpdateMemberRole_CannotChangeOwnRole(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1586,7 +1598,7 @@ func TestUpdateMemberRole_MemberNotFound(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1604,7 +1616,7 @@ func TestUpdateMemberRole_CannotTargetAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Role Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1625,7 +1637,7 @@ func TestKickMember_HappyPath(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1661,7 +1673,7 @@ func TestKickMember_EmptyReason(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1679,7 +1691,7 @@ func TestKickMember_ReasonTooShort(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1710,7 +1722,7 @@ func TestKickMember_NotAdmin(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1728,7 +1740,7 @@ func TestKickMember_CannotKickSelf(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1746,7 +1758,7 @@ func TestKickMember_MemberNotFound(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1764,7 +1776,7 @@ func TestKickMember_CannotKickCreator(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Kick Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1803,7 +1815,7 @@ func TestLeaveCommunity_HappyPath(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1845,7 +1857,7 @@ func TestLeaveCommunity_MemberNotFound(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1863,7 +1875,7 @@ func TestLeaveCommunity_CreatorCannotLeave(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Leave Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1883,7 +1895,7 @@ func TestTransferOwnership_HappyPath(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1919,7 +1931,7 @@ func TestTransferOwnership_SelfTransfer(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1947,7 +1959,7 @@ func TestTransferOwnership_NotCreator(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -1972,7 +1984,7 @@ func TestTransferOwnership_TargetNotMember(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	community, _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false)
+	community, _, err := unwrapCreateResult(seed.Service.CreateCommunity(ctx, seed.CreatorID, "Transfer Community", "", "", "", models.PrivacyPublic, false))
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
