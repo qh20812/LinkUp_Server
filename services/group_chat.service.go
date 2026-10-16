@@ -834,28 +834,34 @@ func (s *GroupChatService) GetChatBackground(ctx context.Context, chatID, userID
 		return &dto.ChatBackgroundResponse{Type: "", Value: ""}, nil
 	}
 	return &dto.ChatBackgroundResponse{
-		Type:  string(settings.BackgroundType),
-		Value: settings.BackgroundValue,
+		Type:            string(settings.BackgroundType),
+		Value:           settings.BackgroundValue,
+		OverlayStrength: settings.OverlayStrength,
 	}, nil
 }
 
-func (s *GroupChatService) UpdateChatBackground(ctx context.Context, chatID, userID, bgType, bgValue string) (*dto.ChatBackgroundResponse, error) {
+func (s *GroupChatService) UpdateChatBackground(ctx context.Context, chatID, userID, bgType, bgValue string, overlay int) (*dto.ChatBackgroundResponse, error) {
 	parsed := models.ParseBackgroundType(bgType)
 	if parsed == "" {
 		return nil, fmt.Errorf("invalid background type: %s", bgType)
+	}
+	if overlay < 30 || overlay > 150 {
+		return nil, fmt.Errorf("invalid overlay strength (want 30–150): %d", overlay)
 	}
 	settings := &models.ChatUserSettings{
 		ChatID:          chatID,
 		UserID:          userID,
 		BackgroundType:  parsed,
 		BackgroundValue: bgValue,
+		OverlayStrength: overlay,
 	}
 	if err := s.chatUserSettingsRepo.Upsert(ctx, settings); err != nil {
 		return nil, err
 	}
 	return &dto.ChatBackgroundResponse{
-		Type:  string(parsed),
-		Value: bgValue,
+		Type:            string(parsed),
+		Value:           bgValue,
+		OverlayStrength: overlay,
 	}, nil
 }
 

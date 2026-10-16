@@ -162,18 +162,22 @@ type ChatConversationDTO struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 	BackgroundType  string          `json:"background_type,omitempty"`
 	BackgroundValue string          `json:"background_value,omitempty"`
+	BackgroundOverlay int           `json:"background_overlay,omitempty"`
 }
 
 // ChatBackgroundDTO is the request body for updating chat background.
 type ChatBackgroundDTO struct {
 	Type  string `json:"type" binding:"required"`
 	Value string `json:"value" binding:"required"`
+	// Optional overlay strength percent (30–150). Absent = 100 (default).
+	OverlayStrength *int `json:"overlay_strength"`
 }
 
 // ChatBackgroundResponse is the response body for chat background.
 type ChatBackgroundResponse struct {
-	Type  string `json:"type"`
-	Value string `json:"value"`
+	Type            string `json:"type"`
+	Value           string `json:"value"`
+	OverlayStrength int    `json:"overlay_strength"`
 }
 
 type ChatListResponse struct {

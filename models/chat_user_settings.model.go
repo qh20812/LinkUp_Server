@@ -16,6 +16,9 @@ type ChatUserSettings struct {
     UserID          string         `json:"user_id" gorm:"primaryKey;column:user_id"`
     BackgroundType  BackgroundType `json:"background_type" gorm:"column:background_type"`
     BackgroundValue string         `json:"background_value" gorm:"column:background_value;size:500"`
+    // Overlay strength percent applied on top of the adaptive readability
+    // overlay (30–150, 100 = as designed). Per chat per user.
+    OverlayStrength int            `json:"overlay_strength" gorm:"column:overlay_strength"`
     CreatedAt       time.Time      `json:"created_at"`
     UpdatedAt       time.Time      `json:"updated_at"`
 }

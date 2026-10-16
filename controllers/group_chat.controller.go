@@ -470,7 +470,12 @@ func (ctrl *GroupChatController) UpdateChatBackground(c *gin.Context) {
 		return
 	}
 
-	background, err := ctrl.groupService.UpdateChatBackground(c.Request.Context(), chatID, userID, input.Type, input.Value)
+	overlay := 100
+	if input.OverlayStrength != nil {
+		overlay = *input.OverlayStrength
+	}
+
+	background, err := ctrl.groupService.UpdateChatBackground(c.Request.Context(), chatID, userID, input.Type, input.Value, overlay)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return

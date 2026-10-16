@@ -44,6 +44,7 @@ func (r *ChatUserSettingsRepository) Upsert(ctx context.Context, settings *model
 	updates := map[string]any{
 		"background_type":  settings.BackgroundType,
 		"background_value": settings.BackgroundValue,
+		"overlay_strength": settings.OverlayStrength,
 		"updated_at":       now,
 	}
 	return r.db.WithContext(ctx).Model(&models.ChatUserSettings{}).
