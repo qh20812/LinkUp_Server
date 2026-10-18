@@ -412,6 +412,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		UpdatedAt            time.Time   `gorm:"column:updated_at"`
 		BackgroundType       string      `gorm:"column:background_type"`
 		BackgroundValue      string      `gorm:"column:background_value"`
+		BackgroundOverlay    int         `gorm:"column:background_overlay"`
 	}{}
 
 	err := r.db.WithContext(ctx).
@@ -430,7 +431,8 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			lm.created_at AS last_created_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at,
 			COALESCE(cus.background_type, '') AS background_type,
-			COALESCE(cus.background_value, '') AS background_value`).
+			COALESCE(cus.background_value, '') AS background_value,
+			COALESCE(cus.overlay_strength, 100) AS background_overlay`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
 		Joins("JOIN chat_participants AS partner ON partner.chat_id = chats.id AND partner.user_id <> ?", userID).
 		Joins("LEFT JOIN profiles ON profiles.user_id = partner.user_id").
@@ -476,6 +478,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		if row.BackgroundType != "" {
 			conv.BackgroundType = row.BackgroundType
 			conv.BackgroundValue = row.BackgroundValue
+			conv.BackgroundOverlay = row.BackgroundOverlay
 		}
 
 		if row.LastMessageID != nil && row.LastContent != nil && row.LastCreatedAt != nil {

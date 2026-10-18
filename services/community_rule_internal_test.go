@@ -27,6 +27,10 @@ func connectAndMigrateCommunityRule(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("connect test db: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Profile{},
@@ -48,6 +52,8 @@ func connectAndMigrateCommunityRule(t *testing.T) *gorm.DB {
 		db.Exec("DELETE FROM notification_preferences")
 		db.Exec("DELETE FROM users")
 		db.Exec("DELETE FROM roles")
+		// Release pooled connections so large runs don't starve Aiven's cap.
+		sqlDB.Close()
 	})
 	return db
 }
@@ -581,6 +587,59 @@ func TestGetRulesByCommunity_Empty(t *testing.T) {
 	}
 	if len(rules) != 0 {
 		t.Fatalf("got %d rules, want 0", len(rules))
+	}
+}
+
+// ─── Outsider (no role row at all) must get ErrNotCommunityAdmin,
+// not a raw record-not-found leak ──────────────────────────────────
+
+func TestCreateRule_OutsiderNotAdmin(t *testing.T) {
+	seed := newCommunityRuleTestSeed(t)
+	ctx := context.Background()
+	outsiderID := seedUser(t, seed.DB)
+
+	_, err := seed.Service.CreateRule(ctx, outsiderID, seed.CommunityID, models.RuleConduct, "Outsider rule", "", nil)
+	if err == nil {
+		t.Fatal("expected error for outsider, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+func TestUpdateRule_OutsiderNotAdmin(t *testing.T) {
+	seed := newCommunityRuleTestSeed(t)
+	ctx := context.Background()
+	outsiderID := seedUser(t, seed.DB)
+
+	rule, err := seed.Service.CreateRule(ctx, seed.AdminID, seed.CommunityID, models.RuleConduct, "Admin rule", "", nil)
+	if err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	_, err = seed.Service.UpdateRule(ctx, outsiderID, rule.ID, "Hacked", "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for outsider, got nil")
+	}
+	if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
+	}
+}
+
+func TestDeleteRule_OutsiderNotAdmin(t *testing.T) {
+	seed := newCommunityRuleTestSeed(t)
+	ctx := context.Background()
+	outsiderID := seedUser(t, seed.DB)
+
+	rule, err := seed.Service.CreateRule(ctx, seed.AdminID, seed.CommunityID, models.RuleConduct, "Admin rule", "", nil)
+	if err != nil {
+		t.Fatalf("CreateRule: %v", err)
+	}
+
+	if err := seed.Service.DeleteRule(ctx, outsiderID, rule.ID); err == nil {
+		t.Fatal("expected error for outsider, got nil")
+	} else if !errors.Is(err, validations.ErrNotCommunityAdmin) {
+		t.Errorf("error = %v, want ErrNotCommunityAdmin", err)
 	}
 }
 

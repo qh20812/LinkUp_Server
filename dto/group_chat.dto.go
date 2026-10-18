@@ -76,14 +76,15 @@ type GroupChatTransferOwnershipInput struct {
 }
 
 type GroupChatConversationDTO struct {
-	ChatID          string          `json:"chat_id"`
-	Name            string          `json:"name"`
-	AvatarURI       string          `json:"avatar_uri"`
-	MemberCount     int             `json:"member_count"`
-	LastMessage     *MessagePayload `json:"last_message,omitempty"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	BackgroundType  string          `json:"background_type,omitempty"`
-	BackgroundValue string          `json:"background_value,omitempty"`
+	ChatID            string          `json:"chat_id"`
+	Name              string          `json:"name"`
+	AvatarURI         string          `json:"avatar_uri"`
+	MemberCount       int             `json:"member_count"`
+	LastMessage       *MessagePayload `json:"last_message,omitempty"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	BackgroundType    string          `json:"background_type,omitempty"`
+	BackgroundValue   string          `json:"background_value,omitempty"`
+	BackgroundOverlay int             `json:"background_overlay,omitempty"`
 }
 
 type GroupChatListResponse struct {

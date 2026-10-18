@@ -434,6 +434,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		UpdatedAt         time.Time  `gorm:"column:updated_at"`
 		BackgroundType    string     `gorm:"column:background_type"`
 		BackgroundValue   string     `gorm:"column:background_value"`
+		BackgroundOverlay int        `gorm:"column:background_overlay"`
 	}
 
 	var rows []row
@@ -453,7 +454,8 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			lm.created_at AS last_created_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at,
 			COALESCE(cus.background_type, '') AS background_type,
-			COALESCE(cus.background_value, '') AS background_value`).
+			COALESCE(cus.background_value, '') AS background_value,
+			COALESCE(cus.overlay_strength, 100) AS background_overlay`).
 		Joins("JOIN chat_participants AS me ON me.chat_id = chats.id AND me.user_id = ?", userID).
 		Joins("JOIN chat_participants AS cp2 ON cp2.chat_id = chats.id").
 		Joins(`LEFT JOIN messages AS lm ON lm.id = (
@@ -467,7 +469,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeGroup).
-		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value").
+		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value, cus.overlay_strength").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -486,6 +488,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		if r.BackgroundType != "" {
 			item.BackgroundType = r.BackgroundType
 			item.BackgroundValue = r.BackgroundValue
+			item.BackgroundOverlay = r.BackgroundOverlay
 		}
 		if r.LastMsgID != nil && r.LastContent != nil && r.LastCreated != nil {
 			item.LastMessage = &dto.MessagePayload{

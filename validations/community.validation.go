@@ -16,7 +16,10 @@ var (
 	ErrCommunityDescMaxLength     = errorsapp.New(errorsapp.ErrCodeCommunityDescTooLong)
 	ErrCommunityAvatarInvalid     = errorsapp.New(errorsapp.ErrCodeCommunityAvatarInvalid)
 	ErrCommunityBackgroundInvalid = errorsapp.New(errorsapp.ErrCodeCommunityBackgroundInvalid)
+	ErrCommunityPrivacyInvalid    = errorsapp.New(errorsapp.ErrCodeCommunityPrivacyInvalid)
 	ErrCommunityNameExists        = errorsapp.New(errorsapp.ErrCodeCommunityNameExists)
+	ErrCommunityCreateLimited     = errorsapp.New(errorsapp.ErrCodeCommunityCreateLimited)
+	ErrCommunityCreateThrottled   = errorsapp.New(errorsapp.ErrCodeCommunityCreateThrottled)
 	ErrAlreadyMember              = errorsapp.New(errorsapp.ErrCodeAlreadyMember)
 	ErrJoinRequestPending         = errorsapp.New(errorsapp.ErrCodeJoinRequestPending)
 	ErrJoinRequestNotFound        = errorsapp.New(errorsapp.ErrCodeJoinRequestNotFound)
@@ -49,7 +52,7 @@ func NewCommunityValidation() *CommunityValidation {
 	return &CommunityValidation{}
 }
 
-func (v *CommunityValidation) ValidateCreateCommunity(name, description, avatarURI string) error {
+func (v *CommunityValidation) ValidateCreateCommunity(name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy) error {
 	if err := v.ValidateName(name); err != nil {
 		return err
 	}
@@ -60,6 +63,14 @@ func (v *CommunityValidation) ValidateCreateCommunity(name, description, avatarU
 		if err := v.ValidateAvatarURI(avatarURI); err != nil {
 			return err
 		}
+	}
+	if backgroundURI != "" {
+		if err := v.ValidateBackgroundURI(backgroundURI); err != nil {
+			return err
+		}
+	}
+	if err := v.ValidatePrivacy(privacy); err != nil {
+		return err
 	}
 	return nil
 }
@@ -125,6 +136,15 @@ func (v *CommunityValidation) ValidateBackgroundURI(backgroundURI string) error 
 		return ErrCommunityBackgroundInvalid
 	}
 	return nil
+}
+
+func (v *CommunityValidation) ValidatePrivacy(privacy models.CommunityPrivacy) error {
+	switch privacy {
+	case "", models.PrivacyPublic, models.PrivacyInvitationOnly:
+		return nil
+	default:
+		return ErrCommunityPrivacyInvalid
+	}
 }
 
 func (v *CommunityValidation) ValidateUpdateRole(role string) error {

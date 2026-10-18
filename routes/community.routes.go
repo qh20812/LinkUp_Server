@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"time"
+
 	"linkup/config"
 	"linkup/controllers"
 	"linkup/middlewares"
@@ -20,7 +22,7 @@ func RegisterCommunityRoutes(router *gin.Engine, ctrl *controllers.CommunityCont
 	{
 		communityGroup.GET("/joined", ctrl.ListJoinedCommunities)
 		communityGroup.GET("/created", ctrl.ListCreatedCommunities)
-		communityGroup.POST("", ctrl.CreateCommunity)
+		communityGroup.POST("", middlewares.RateLimit(10, time.Minute), ctrl.CreateCommunity)
 		communityGroup.PUT("/:communityID", ctrl.UpdateCommunity)
 		communityGroup.PUT("/:communityID/background", ctrl.SetCommunityBackground)
 		communityGroup.POST("/:communityID/join", ctrl.RequestJoin)

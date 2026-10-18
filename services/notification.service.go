@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"linkup/dto"
@@ -87,6 +88,16 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	pref, err := s.prefRepo.GetByUserID(ctx, receiverID)
 	if err != nil {
 		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
+	}
+
+	// Users predating preference rows (or registered before defaults existed)
+	// get an all-enabled row on first notification instead of nothing.
+	if pref == nil {
+		if err := s.prefRepo.Upsert(ctx, models.NewDefaultNotificationPreference(receiverID)); err != nil {
+			log.Printf("[notification] failed to seed default preferences for user %s: %v", receiverID, err)
+		} else {
+			pref, _ = s.prefRepo.GetByUserID(ctx, receiverID)
+		}
 	}
 
 	if pref != nil && !isNotificationEnabled(pref, notifType) {

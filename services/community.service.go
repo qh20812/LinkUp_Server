@@ -30,6 +30,32 @@ type CommunityService struct {
 	validation   *validations.CommunityValidation
 }
 
+// requireCommunityAdmin wraps groupRole.RequireRole, mapping a missing role
+// row (gorm.ErrRecordNotFound — user is not a member at all) to
+// ErrNotCommunityAdmin. All other errors pass through untouched for the
+// caller to handle as before.
+func (s *CommunityService) requireCommunityAdmin(ctx context.Context, communityID, userID string) error {
+	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return validations.ErrNotCommunityAdmin
+		}
+		return err
+	}
+	return nil
+}
+
+// isDuplicateEntryError reports whether err (possibly wrapped by fmt.Errorf
+// %w in the repository layer) is a MySQL unique-constraint violation. Used to
+// map check-then-insert races on communities.name to ErrCommunityNameExists
+// instead of a generic internal error.
+func isDuplicateEntryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Duplicate entry") || strings.Contains(msg, "duplicate key")
+}
+
 func NewCommunityService(repo *repository.CommunityRepository, validation *validations.CommunityValidation, authRepo *repository.AuthRepository, profileRepo *repository.ProfileRepository, mediaService MediaService, notifService *NotificationService, postRepo *repository.PostRepository) *CommunityService {
 	return &CommunityService{
 		repo:         repo,
@@ -43,40 +69,72 @@ func NewCommunityService(repo *repository.CommunityRepository, validation *valid
 	}
 }
 
-func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*models.Community, *models.Chat, error) {
-	if err := s.validation.ValidateCreateCommunity(name, description, avatarURI); err != nil {
-		return nil, nil, err
+const (
+	// CreatorInitialPoints là điểm đóng góp khởi tạo cho người sáng lập.
+	CreatorInitialPoints = 500
+	// MaxCommunitiesPerUser giới hạn tổng số cộng đồng mỗi user được tạo (chống spam).
+	MaxCommunitiesPerUser = 10
+	// MaxCommunitiesPerDay giới hạn số cộng đồng tạo trong 24h gần nhất (chống spam).
+	MaxCommunitiesPerDay = 3
+)
+
+// CreateCommunityResult gom kết quả tạo cộng đồng: entity, group chat mặc
+// định và mã mời khởi tạo (rỗng nếu seed best-effort thất bại).
+type CreateCommunityResult struct {
+	Community  *models.Community
+	Chat       *models.Chat
+	InviteCode string
+}
+
+func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*CreateCommunityResult, error) {
+	name = strings.TrimSpace(name)
+	description = strings.TrimSpace(description)
+	if err := s.validation.ValidateCreateCommunity(name, description, avatarURI, backgroundURI, privacy); err != nil {
+		return nil, err
 	}
 
-	isAdmin, err := s.authRepo.HasRole(ctx, creatorID, models.RoleAdmin)
+	isPrivileged, err := s.authRepo.HasAnyRole(ctx, creatorID, models.RoleAdmin, models.RoleSuperAdmin)
 	if err != nil {
-		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
-	isSuperAdmin, err := s.authRepo.HasRole(ctx, creatorID, models.RoleSuperAdmin)
+	if isPrivileged {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdminCannotCreate)
+	}
+
+	now := time.Now().UTC()
+
+	total, err := s.repo.CountByCreator(ctx, creatorID)
 	if err != nil {
-		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
-	if isAdmin || isSuperAdmin {
-		return nil, nil, errorsapp.New(errorsapp.ErrCodeAdminCannotCreate)
+	if total >= MaxCommunitiesPerUser {
+		return nil, validations.ErrCommunityCreateLimited
+	}
+
+	recent, err := s.repo.CountCreatedSince(ctx, creatorID, now.Add(-24*time.Hour))
+	if err != nil {
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+	}
+	if recent >= MaxCommunitiesPerDay {
+		return nil, validations.ErrCommunityCreateThrottled
 	}
 
 	creator, err := s.authRepo.FindByID(ctx, creatorID)
 	if err != nil {
-		return nil, nil, errorsapp.New(errorsapp.ErrCodeUserNotFound)
+		return nil, errorsapp.New(errorsapp.ErrCodeUserNotFound)
 	}
 	if !creator.IsActive() {
-		return nil, nil, errorsapp.New(errorsapp.ErrCodeAccountInactive)
+		return nil, errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
 	taken, err := s.repo.IsNameTaken(ctx, name)
 	if err != nil {
-		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	if taken {
-		return nil, nil, validations.ErrCommunityNameExists
+		return nil, validations.ErrCommunityNameExists
 	}
 
-	now := time.Now().UTC()
 	community := models.NewCommunity(creatorID, name, description, avatarURI, backgroundURI, privacy)
 	community.ID = utils.GenerateUUID()
 	community.AutoApprove = autoApprove
@@ -85,7 +143,7 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 	adminMember := models.NewGroupMember(community.ID, creatorID)
 	adminMember.ID = utils.GenerateUUID()
 	adminMember.JoinedAt = now
-	adminMember.Points = 500
+	adminMember.Points = CreatorInitialPoints
 
 	scopeType := models.ScopeTypeCommunity
 	userRoles := []models.UserRole{
@@ -95,17 +153,17 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 
 	var communityAdminRole, groupAdminRole models.Role
 	if err := s.repo.FindRoleByName(ctx, models.RoleCommunityAdmin, &communityAdminRole); err != nil {
-		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	if err := s.repo.FindRoleByName(ctx, models.RoleGroupAdmin, &groupAdminRole); err != nil {
-		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 	userRoles[0].RoleID = communityAdminRole.ID
 	userRoles[1].RoleID = groupAdminRole.ID
 
 	encKey, err := utils.GenerateEncryptionKey()
 	if err != nil {
-		return nil, nil, errorsapp.New(errorsapp.ErrCodeEncryptionKeyFailed)
+		return nil, errorsapp.New(errorsapp.ErrCodeEncryptionKeyFailed)
 	}
 
 	chat := models.NewChat(models.ChatTypeGroup, community.Name, community.AvatarURI)
@@ -119,19 +177,36 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 	adminParticipant.JoinedAt = now
 
 	if err := s.repo.CreateCommunityWithDefaultGroupChat(ctx, &community, &adminMember, userRoles, &chat, []models.ChatParticipant{adminParticipant}); err != nil {
-		return nil, nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
+		if isDuplicateEntryError(err) {
+			return nil, validations.ErrCommunityNameExists
+		}
+		return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
-	s.notifService.Create(ctx, creatorID, nil,
+	// Best-effort: nội quy mẫu + mã mời khởi tạo. Thất bại chỉ log vì cộng
+	// đồng đã tạo xong và vẫn hoạt động đầy đủ khi thiếu chúng.
+	inviteCode, err := s.repo.SeedCommunityDefaults(ctx, community.ID, creatorID, now)
+	if err != nil {
+		log.Printf("[community] failed to seed defaults for community %s: %v", community.ID, err)
+	}
+
+	if _, err := s.notifService.Create(ctx, creatorID, nil,
 		models.NotificationTypeCommunityGroupChatAdded,
 		"Tạo cộng đồng thành công! Group chat mặc định đã sẵn sàng",
-		nil, nil, nil)
+		nil, nil, nil); err != nil {
+		log.Printf("[community] failed to send creation notification to user %s: %v", creatorID, err)
+	}
+	log.Printf("[community] user %s created community %s (%s)", creatorID, community.ID, community.Name)
 
-	return &community, &chat, nil
+	return &CreateCommunityResult{
+		Community:  &community,
+		Chat:       &chat,
+		InviteCode: inviteCode,
+	}, nil
 }
 
 func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, communityID string, file *multipart.FileHeader) error {
-	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, userID); err != nil {
 		return err
 	}
 
@@ -153,15 +228,19 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 		return errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed)
 	}
 
-	if media.Status == models.MediaStatusRejected {
-		return errorsapp.New(errorsapp.ErrCodeBackgroundRejected)
-	}
+	// UploadMedia stores status pending and moderates in background, so there
+	// is no synchronous rejected status to check here.
 
 	if err := s.validation.ValidateBackgroundURI(media.FileURI); err != nil {
 		return err
 	}
 
 	if err := s.repo.UpdateBackground(ctx, community.ID, media.FileURI); err != nil {
+		// Update failed after upload → remove the orphan media best-effort so
+		// it does not linger on Cloudinary and consume storage quota.
+		if delErr := s.mediaService.DeleteMedia(context.WithoutCancel(ctx), userID, media.ID); delErr != nil {
+			log.Printf("[community] failed to cleanup orphan media %s after background update failure: %v", media.ID, delErr)
+		}
 		return errorsapp.New(errorsapp.ErrCodeBackgroundUpdateFailed)
 	}
 
@@ -169,8 +248,14 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 }
 
 func (s *CommunityService) UpdateCommunity(ctx context.Context, userID, communityID string, input dto.UpdateCommunityInput) error {
-	if err := s.groupRole.RequireRole(ctx, communityID, userID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, userID); err != nil {
 		return err
+	}
+
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Description != nil {
+		trimmed := strings.TrimSpace(*input.Description)
+		input.Description = &trimmed
 	}
 
 	if err := s.validation.ValidateUpdateCommunity(input.Name, input.Description); err != nil {
@@ -213,6 +298,9 @@ func (s *CommunityService) UpdateCommunity(ctx context.Context, userID, communit
 	}
 
 	if err := s.repo.UpdateCommunity(ctx, communityID, fields); err != nil {
+		if isDuplicateEntryError(err) {
+			return validations.ErrCommunityNameExists
+		}
 		return errorsapp.New(errorsapp.ErrCodeCommunityUpdateFailed)
 	}
 
@@ -371,7 +459,7 @@ func (s *CommunityService) joinByInvitation(ctx context.Context, userID string, 
 }
 
 func (s *CommunityService) ListPendingRequests(ctx context.Context, adminID, communityID string) (dto.JoinRequestListResponse, error) {
-	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, adminID); err != nil {
 		if _, ok := errorsapp.IsAppError(err); ok {
 			return dto.JoinRequestListResponse{}, validations.ErrNotCommunityAdmin
 		}
@@ -414,7 +502,7 @@ func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requ
 		return validations.ErrJoinRequestAlreadyHandled
 	}
 
-	if err := s.groupRole.RequireRole(ctx, req.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, req.CommunityID, adminID); err != nil {
 		if _, ok := errorsapp.IsAppError(err); ok {
 			return validations.ErrNotCommunityAdmin
 		}
@@ -447,7 +535,7 @@ func (s *CommunityService) RejectJoinRequest(ctx context.Context, adminID, reque
 		return validations.ErrJoinRequestAlreadyHandled
 	}
 
-	if err := s.groupRole.RequireRole(ctx, req.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, req.CommunityID, adminID); err != nil {
 		if _, ok := errorsapp.IsAppError(err); ok {
 			return validations.ErrNotCommunityAdmin
 		}
@@ -472,7 +560,7 @@ func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, commun
 		return validations.ErrCommunityNotFound
 	}
 
-	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, adminID); err != nil {
 		if _, ok := errorsapp.IsAppError(err); ok {
 			return validations.ErrNotCommunityAdmin
 		}
@@ -523,7 +611,7 @@ func (s *CommunityService) KickMember(ctx context.Context, adminID, communityID,
 		return validations.ErrCommunityNotFound
 	}
 
-	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, adminID); err != nil {
 		if _, ok := errorsapp.IsAppError(err); ok {
 			return validations.ErrNotCommunityAdmin
 		}
@@ -664,7 +752,7 @@ func (s *CommunityService) TransferOwnership(ctx context.Context, requesterID, c
 // ── Invite code management ──────────────────────────────────────────────────
 
 func (s *CommunityService) CreateInviteCode(ctx context.Context, adminID, communityID string, maxUses int, expiresAt *time.Time) (*dto.InviteCodeResponse, error) {
-	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, adminID); err != nil {
 		return nil, err
 	}
 
@@ -701,7 +789,7 @@ func (s *CommunityService) CreateInviteCode(ctx context.Context, adminID, commun
 }
 
 func (s *CommunityService) ListInviteCodes(ctx context.Context, adminID, communityID string) ([]dto.InviteCodeResponse, error) {
-	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, adminID); err != nil {
 		return nil, err
 	}
 
@@ -731,7 +819,7 @@ func (s *CommunityService) DeactivateInviteCode(ctx context.Context, adminID, co
 		return validations.ErrInviteCodeNotFound
 	}
 
-	if err := s.groupRole.RequireRole(ctx, inviteCode.CommunityID, adminID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, inviteCode.CommunityID, adminID); err != nil {
 		return err
 	}
 
@@ -745,7 +833,7 @@ func (s *CommunityService) DeactivateInviteCode(ctx context.Context, adminID, co
 // ── Direct invitation ──────────────────────────
 
 func (s *CommunityService) SendInvitation(ctx context.Context, inviterID, communityID, inviteeID string) (*dto.InvitationItem, error) {
-	if err := s.groupRole.RequireRole(ctx, communityID, inviterID, models.GroupRoleAdmin); err != nil {
+	if err := s.requireCommunityAdmin(ctx, communityID, inviterID); err != nil {
 		return nil, err
 	}
 

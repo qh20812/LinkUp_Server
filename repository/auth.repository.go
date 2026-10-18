@@ -151,6 +151,24 @@ func (r *AuthRepository) HasRole(ctx context.Context, userID string, roleName mo
 	return count > 0, nil
 }
 
+// HasAnyRole kiểm tra user có ít nhất một trong các platform role (scope=NULL)
+// trong 1 query duy nhất.
+func (r *AuthRepository) HasAnyRole(ctx context.Context, userID string, roleNames ...models.RoleName) (bool, error) {
+	if len(roleNames) == 0 {
+		return false, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ? AND roles.name IN ? AND user_roles.scope_id IS NULL", userID, roleNames).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("check roles: %w", err)
+	}
+	return count > 0, nil
+}
+
 // HasScopedRole kiểm tra user có role trong scope (community/chat) cụ thể không.
 func (r *AuthRepository) HasScopedRole(ctx context.Context, userID string, roleName models.RoleName, scopeID string, scopeType models.ScopeType) (bool, error) {
 	var count int64

@@ -347,7 +347,12 @@ func (ctrl *ChatController) UpdateChatBackground(c *gin.Context) {
 		return
 	}
 
-	background, err := ctrl.chatService.UpdateChatBackground(c.Request.Context(), chatID, userID, input.Type, input.Value)
+	overlay := 100
+	if input.OverlayStrength != nil {
+		overlay = *input.OverlayStrength
+	}
+
+	background, err := ctrl.chatService.UpdateChatBackground(c.Request.Context(), chatID, userID, input.Type, input.Value, overlay)
 	if err != nil {
 		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
 		return
