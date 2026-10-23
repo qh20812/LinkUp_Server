@@ -23,7 +23,6 @@ type AdminRepository interface {
 	GetActiveBanCount() (int64, error)
 
 	GetPendingReportCount() (int64, error)
-	GetFlaggedMediaCount() (int64, error)
 	GetActiveUsersToday() (int64, error)
 
 	GetTotalLikes() (int64, error)
@@ -146,14 +145,6 @@ func (r *adminRepository) GetPendingReportCount() (int64, error) {
 	var count int64
 	err := r.db.Model(&models.Report{}).
 		Where("status = ?", "pending").
-		Count(&count).Error
-	return count, err
-}
-
-func (r *adminRepository) GetFlaggedMediaCount() (int64, error) {
-	var count int64
-	err := r.db.Model(&models.Media{}).
-		Where("status = ?", "flagged").
 		Count(&count).Error
 	return count, err
 }

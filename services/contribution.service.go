@@ -9,6 +9,7 @@ import (
 	"linkup/repository"
 	"linkup/utils"
 	"linkup/validations"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,22 +17,22 @@ import (
 )
 
 type ContributionService struct {
-	contributionRepo   *repository.ContributionRepository
-	communityRepo      *repository.CommunityRepository
-	profileRepo        *repository.ProfileRepository
+	contributionRepo    *repository.ContributionRepository
+	communityRepo       *repository.CommunityRepository
+	profileRepo         *repository.ProfileRepository
 	notificationService *NotificationService
-	validation         *validations.ContributionValidation
-	groupRole          *utils.GroupRoleChecker
+	validation          *validations.ContributionValidation
+	groupRole           *utils.GroupRoleChecker
 }
 
 func NewContributionService(contributionRepo *repository.ContributionRepository, communityRepo *repository.CommunityRepository, profileRepo *repository.ProfileRepository, notificationService *NotificationService, validation *validations.ContributionValidation) *ContributionService {
 	return &ContributionService{
-		contributionRepo:   contributionRepo,
-		communityRepo:      communityRepo,
-		profileRepo:        profileRepo,
+		contributionRepo:    contributionRepo,
+		communityRepo:       communityRepo,
+		profileRepo:         profileRepo,
 		notificationService: notificationService,
-		validation:         validation,
-		groupRole:          utils.NewGroupRoleChecker(communityRepo.GetUserRole),
+		validation:          validation,
+		groupRole:           utils.NewGroupRoleChecker(communityRepo.GetUserRole),
 	}
 }
 
@@ -70,32 +71,32 @@ func (s *ContributionService) RequireMember(ctx context.Context, communityID, us
 }
 
 func (s *ContributionService) UpdatePolicy(ctx context.Context, adminID, communityID string, input dto.UpdatePolicyInput) error {
-		if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
-			return validations.ErrCommunityNotFound
-		}
-		if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
-			return validations.ErrNotCommunityAdmin
-		}
-		if err := s.validation.ValidateUpdatePolicyInput(input); err != nil {
-			return err
-		}
-
-		now := time.Now().UTC()
-		policy := &models.CommunityPolicy{
-			CommunityID:                 communityID,
-			PostWeight:                  input.PostWeight,
-			CommentWeight:               input.CommentWeight,
-			ReactionWeight:              input.ReactionWeight,
-			EventWeight:                 input.EventWeight,
-			TopContributorThreshold:     input.TopContributorThreshold,
-			ModeratorPromotionThreshold: input.ModeratorPromotionThreshold,
-			AutoPromoteEnabled:          input.AutoPromoteEnabled,
-			BadgeEnabled:                input.BadgeEnabled,
-			UpdatedAt:                   &now,
-		}
-
-		return s.contributionRepo.UpsertPolicy(ctx, policy)
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return validations.ErrCommunityNotFound
 	}
+	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+		return validations.ErrNotCommunityAdmin
+	}
+	if err := s.validation.ValidateUpdatePolicyInput(input); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	policy := &models.CommunityPolicy{
+		CommunityID:                 communityID,
+		PostWeight:                  input.PostWeight,
+		CommentWeight:               input.CommentWeight,
+		ReactionWeight:              input.ReactionWeight,
+		EventWeight:                 input.EventWeight,
+		TopContributorThreshold:     input.TopContributorThreshold,
+		ModeratorPromotionThreshold: input.ModeratorPromotionThreshold,
+		AutoPromoteEnabled:          input.AutoPromoteEnabled,
+		BadgeEnabled:                input.BadgeEnabled,
+		UpdatedAt:                   &now,
+	}
+
+	return s.contributionRepo.UpsertPolicy(ctx, policy)
+}
 
 func (s *ContributionService) RecalculateScore(ctx context.Context, communityID, userID string) (*models.MemberContribution, error) {
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
@@ -116,28 +117,28 @@ func (s *ContributionService) RecalculateScore(ctx context.Context, communityID,
 }
 
 func (s *ContributionService) GetLeaderboard(ctx context.Context, communityID string, page, pageSize int) ([]dto.LeaderboardItem, error) {
-		if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
-			return nil, validations.ErrCommunityNotFound
-		}
-
-		page, pageSize = s.validation.NormalizePagination(page, pageSize)
-		offset := (page - 1) * pageSize
-		items, err := s.contributionRepo.GetLeaderboard(ctx, communityID, offset, pageSize)
-		if err != nil {
-			return nil, err
-		}
-		return items, nil
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return nil, validations.ErrCommunityNotFound
 	}
+
+	page, pageSize = s.validation.NormalizePagination(page, pageSize)
+	offset := (page - 1) * pageSize
+	items, err := s.contributionRepo.GetLeaderboard(ctx, communityID, offset, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
 func (s *ContributionService) GetCommunityMembers(ctx context.Context, communityID string, page, pageSize int) ([]dto.CommunityMemberItem, error) {
-		if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
-			return nil, validations.ErrCommunityNotFound
-		}
-
-		page, pageSize = s.validation.NormalizePagination(page, pageSize)
-		offset := (page - 1) * pageSize
-		return s.contributionRepo.GetCommunityMembers(ctx, communityID, offset, pageSize)
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return nil, validations.ErrCommunityNotFound
 	}
+
+	page, pageSize = s.validation.NormalizePagination(page, pageSize)
+	offset := (page - 1) * pageSize
+	return s.contributionRepo.GetCommunityMembers(ctx, communityID, offset, pageSize)
+}
 
 func (s *ContributionService) GetContribution(ctx context.Context, communityID, userID string) (*models.MemberContribution, error) {
 	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
@@ -186,33 +187,286 @@ func (s *ContributionService) GetContributionResponse(ctx context.Context, commu
 	}, nil
 }
 
-func (s *ContributionService) GetActiveChallengeResponses(ctx context.Context, communityID string) ([]dto.ChallengeResponse, error) {
-	challenges, err := s.GetActiveChallenges(ctx, communityID)
+// Trạng thái hiển thị của challenge, tính từ status trong DB + mốc thời gian.
+const (
+	ChallengeStateUpcoming  = "upcoming"
+	ChallengeStateActive    = "active"
+	ChallengeStateEnded     = "ended"
+	ChallengeStateCancelled = "cancelled"
+)
+
+// MaxChallengePostsPerDay là trần số bài được tính điểm mỗi ngày cho mỗi người trong
+// một challenge — chặn farm điểm bằng cách spam hashtag.
+const MaxChallengePostsPerDay = 3
+
+// challengeAwardDate trả mốc ngày (UTC) dùng cho trần điểm theo ngày.
+func challengeAwardDate(now time.Time) time.Time {
+	return now.UTC().Truncate(24 * time.Hour)
+}
+
+// challengeState suy ra trạng thái thực tế: status='active' nhưng đã qua end_date
+// vẫn phải hiển thị là đã kết thúc (DB không tự cập nhật status).
+func challengeState(challenge *models.CommunityChallenge, now time.Time) string {
+	switch challenge.Status {
+	case models.ChallengeStatusCancelled:
+		return ChallengeStateCancelled
+	case models.ChallengeStatusCompleted:
+		return ChallengeStateEnded
+	}
+	if now.Before(challenge.StartDate) {
+		return ChallengeStateUpcoming
+	}
+	if now.After(challenge.EndDate) {
+		return ChallengeStateEnded
+	}
+	return ChallengeStateActive
+}
+
+// challengeStatePriority dùng để sắp xếp: đang diễn ra → sắp diễn ra → đã kết thúc → đã huỷ.
+func challengeStatePriority(state string) int {
+	switch state {
+	case ChallengeStateActive:
+		return 0
+	case ChallengeStateUpcoming:
+		return 1
+	case ChallengeStateEnded:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func (s *ContributionService) buildChallengeResponse(ctx context.Context, challenge *models.CommunityChallenge, participants int, joined, canManage bool, dailyAwarded int) dto.ChallengeResponse {
+	creatorName := ""
+	if s.profileRepo != nil {
+		if profile, err := s.profileRepo.FindByUserID(ctx, challenge.CreatorID); err == nil && profile != nil {
+			creatorName = profile.DisplayName
+		}
+	}
+	return dto.ChallengeResponse{
+		ID:                challenge.ID,
+		CommunityID:       challenge.CommunityID,
+		CreatorID:         challenge.CreatorID,
+		CreatorName:       creatorName,
+		Title:             challenge.Title,
+		Description:       challenge.Description,
+		Hashtag:           challenge.Hashtag,
+		PointsPerPost:     challenge.PointsPerPost,
+		StartDate:         challenge.StartDate,
+		EndDate:           challenge.EndDate,
+		MaxParticipants:   challenge.MaxParticipants,
+		Status:            string(challenge.Status),
+		State:             challengeState(challenge, time.Now().UTC()),
+		ParticipantsCount: participants,
+		Joined:            joined,
+		CanManage:         canManage,
+		DailyPostLimit:    MaxChallengePostsPerDay,
+		DailyPostsAwarded: dailyAwarded,
+		CreatedAt:         challenge.CreatedAt,
+	}
+}
+
+// challengeDailyAwarded trả số bài đã được tính điểm hôm nay của viewer.
+// Lỗi ở đây chỉ ảnh hưởng hiển thị nên trả 0 thay vì chặn cả request.
+func (s *ContributionService) challengeDailyAwarded(ctx context.Context, challengeID, viewerID string) int {
+	if viewerID == "" {
+		return 0
+	}
+	counts, err := s.contributionRepo.GetChallengeDailyAwardCounts(
+		ctx, viewerID, []string{challengeID}, challengeAwardDate(time.Now().UTC()),
+	)
+	if err != nil {
+		return 0
+	}
+	return counts[challengeID]
+}
+
+// GetChallengeResponses trả danh sách challenge kèm state/joined/can_manage.
+// viewerID rỗng nghĩa là khách chưa đăng nhập.
+func (s *ContributionService) GetChallengeResponses(ctx context.Context, communityID, viewerID string, includeEnded bool) ([]dto.ChallengeResponse, error) {
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return nil, validations.ErrCommunityNotFound
+	}
+
+	challenges, err := s.contributionRepo.GetChallengesByCommunity(ctx, communityID, includeEnded)
+	if err != nil {
+		return nil, err
+	}
+	if len(challenges) == 0 {
+		return []dto.ChallengeResponse{}, nil
+	}
+
+	ids := make([]string, 0, len(challenges))
+	for _, challenge := range challenges {
+		ids = append(ids, challenge.ID)
+	}
+
+	counts, err := s.contributionRepo.CountChallengeParticipantsByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 
-	responses := make([]dto.ChallengeResponse, 0, len(challenges))
-	for _, challenge := range challenges {
-		participantsCount, err := s.contributionRepo.CountChallengeParticipants(ctx, challenge.ID)
+	joined := map[string]bool{}
+	canManage := false
+	dailyAwarded := map[string]int{}
+	if viewerID != "" {
+		joined, err = s.contributionRepo.GetJoinedChallengeIDs(ctx, viewerID, ids)
 		if err != nil {
 			return nil, err
 		}
-		responses = append(responses, dto.ChallengeResponse{
-			ID:                challenge.ID,
-			Title:             challenge.Title,
-			Description:       challenge.Description,
-			Hashtag:           challenge.Hashtag,
-			PointsPerPost:     challenge.PointsPerPost,
-			StartDate:         challenge.StartDate,
-			EndDate:           challenge.EndDate,
-			MaxParticipants:   challenge.MaxParticipants,
-			Status:            string(challenge.Status),
-			ParticipantsCount: participantsCount,
-		})
+		dailyAwarded, err = s.contributionRepo.GetChallengeDailyAwardCounts(
+			ctx, viewerID, ids, challengeAwardDate(time.Now().UTC()),
+		)
+		if err != nil {
+			return nil, err
+		}
+		if isAdmin, roleErr := s.groupRole.IsAdmin(ctx, communityID, viewerID); roleErr == nil {
+			canManage = isAdmin
+		}
 	}
 
+	responses := make([]dto.ChallengeResponse, 0, len(challenges))
+	for i := range challenges {
+		challenge := &challenges[i]
+		responses = append(responses, s.buildChallengeResponse(
+			ctx, challenge, counts[challenge.ID], joined[challenge.ID], canManage, dailyAwarded[challenge.ID],
+		))
+	}
+
+	sort.SliceStable(responses, func(i, j int) bool {
+		pi, pj := challengeStatePriority(responses[i].State), challengeStatePriority(responses[j].State)
+		if pi != pj {
+			return pi < pj
+		}
+		return responses[i].StartDate.Before(responses[j].StartDate)
+	})
+
 	return responses, nil
+}
+
+// GetChallengeDetail trả chi tiết một challenge trong community.
+func (s *ContributionService) GetChallengeDetail(ctx context.Context, communityID, challengeID, viewerID string) (*dto.ChallengeResponse, error) {
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return nil, validations.ErrCommunityNotFound
+	}
+
+	challenge, err := s.contributionRepo.GetChallengeByID(ctx, challengeID)
+	if err != nil || challenge.CommunityID != communityID {
+		return nil, errorsapp.New(errorsapp.ErrCodeContribChallengeNotFound)
+	}
+
+	participants, err := s.contributionRepo.CountChallengeParticipants(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+
+	joined, canManage := false, false
+	if viewerID != "" {
+		if _, err := s.contributionRepo.FindChallengeParticipant(ctx, challengeID, viewerID); err == nil {
+			joined = true
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if isAdmin, roleErr := s.groupRole.IsAdmin(ctx, communityID, viewerID); roleErr == nil {
+			canManage = isAdmin
+		}
+	}
+
+	response := s.buildChallengeResponse(ctx, challenge, participants, joined, canManage,
+		s.challengeDailyAwarded(ctx, challengeID, viewerID))
+	return &response, nil
+}
+
+// UpdateChallenge cho phép admin sửa nội dung, thời gian, phần thưởng và đổi trạng thái
+// (active → completed/cancelled, hoặc mở lại).
+func (s *ContributionService) UpdateChallenge(ctx context.Context, adminID, communityID, challengeID string, input dto.UpdateChallengeInput) (*dto.ChallengeResponse, error) {
+	if _, err := s.communityRepo.FindByID(ctx, communityID); err != nil {
+		return nil, validations.ErrCommunityNotFound
+	}
+	if err := s.groupRole.RequireRole(ctx, communityID, adminID, models.GroupRoleAdmin); err != nil {
+		return nil, validations.ErrNotCommunityAdmin
+	}
+
+	challenge, err := s.contributionRepo.GetChallengeByID(ctx, challengeID)
+	if err != nil || challenge.CommunityID != communityID {
+		return nil, errorsapp.New(errorsapp.ErrCodeContribChallengeNotFound)
+	}
+
+	merged := dto.CreateChallengeInput{
+		Title:           challenge.Title,
+		Description:     challenge.Description,
+		Hashtag:         challenge.Hashtag,
+		PointsPerPost:   challenge.PointsPerPost,
+		StartDate:       challenge.StartDate.Format(time.RFC3339),
+		EndDate:         challenge.EndDate.Format(time.RFC3339),
+		MaxParticipants: challenge.MaxParticipants,
+	}
+	if input.Title != nil {
+		merged.Title = *input.Title
+	}
+	if input.Description != nil {
+		merged.Description = *input.Description
+	}
+	if input.Hashtag != nil {
+		merged.Hashtag = *input.Hashtag
+	}
+	if input.PointsPerPost != nil {
+		merged.PointsPerPost = *input.PointsPerPost
+	}
+	if input.StartDate != nil {
+		merged.StartDate = *input.StartDate
+	}
+	if input.EndDate != nil {
+		merged.EndDate = *input.EndDate
+	}
+	if input.MaxParticipants != nil {
+		if *input.MaxParticipants <= 0 {
+			merged.MaxParticipants = nil
+		} else {
+			limit := *input.MaxParticipants
+			merged.MaxParticipants = &limit
+		}
+	}
+
+	start, end, err := s.validation.ValidateUpdateChallenge(merged)
+	if err != nil {
+		return nil, err
+	}
+
+	status := challenge.Status
+	if input.Status != nil {
+		normalized := strings.ToLower(strings.TrimSpace(*input.Status))
+		if err := s.validation.ValidateChallengeStatus(normalized); err != nil {
+			return nil, err
+		}
+		status = models.ChallengeStatus(normalized)
+	}
+
+	challenge.Title = strings.TrimSpace(merged.Title)
+	challenge.Description = strings.TrimSpace(merged.Description)
+	challenge.Hashtag = strings.TrimSpace(merged.Hashtag)
+	challenge.PointsPerPost = merged.PointsPerPost
+	challenge.StartDate = start
+	challenge.EndDate = end
+	challenge.MaxParticipants = merged.MaxParticipants
+	challenge.Status = status
+
+	if err := s.contributionRepo.UpdateChallenge(ctx, challenge); err != nil {
+		return nil, err
+	}
+
+	participants, err := s.contributionRepo.CountChallengeParticipants(ctx, challengeID)
+	if err != nil {
+		return nil, err
+	}
+	joined := false
+	if _, err := s.contributionRepo.FindChallengeParticipant(ctx, challengeID, adminID); err == nil {
+		joined = true
+	}
+
+	response := s.buildChallengeResponse(ctx, challenge, participants, joined, true,
+		s.challengeDailyAwarded(ctx, challengeID, adminID))
+	return &response, nil
 }
 
 func (s *ContributionService) GetChallengeParticipants(ctx context.Context, challengeID string) ([]dto.ChallengeParticipantItem, error) {
@@ -336,38 +590,28 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, communit
 			continue
 		}
 
-		participant, err := s.contributionRepo.FindChallengeParticipant(ctx, challenge.ID, userID)
-		if err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
+		// Chỉ người đã chủ động join mới được tính điểm. Người chưa join vẫn đăng bài
+		// bình thường, chỉ không được cộng vào challenge (tránh chiếm suất của người khác).
+		if _, err := s.contributionRepo.FindChallengeParticipant(ctx, challenge.ID, userID); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
 			}
-			participant = nil
-		}
-		if participant == nil {
-			if err := s.contributionRepo.JoinChallengeAtomic(ctx, &models.ChallengeParticipant{
-				ChallengeID: challenge.ID,
-				UserID:      userID,
-				JoinedAt:    now,
-			}, challenge.MaxParticipants); err != nil {
-				if errors.Is(err, repository.ErrRepoChallengeAlreadyJoined) {
-					participant, err = s.contributionRepo.FindChallengeParticipant(ctx, challenge.ID, userID)
-					if err != nil {
-						return err
-					}
-				} else if errors.Is(err, repository.ErrRepoChallengeParticipantLimitHit) {
-					continue
-				} else {
-					return err
-				}
-			}
-			if participant == nil {
-				participant = &models.ChallengeParticipant{ChallengeID: challenge.ID, UserID: userID, JoinedAt: now}
-			}
+			return err
 		}
 
-		participant.PostsCount++
-		participant.TotalPointsEarned += challenge.PointsPerPost
-		if err := s.contributionRepo.UpdateChallengeParticipant(ctx, challenge.ID, userID, participant.PostsCount, participant.TotalPointsEarned); err != nil {
+		// Trần điểm/ngày: chỉ N bài đầu tiên trong ngày mỗi challenge được tính;
+		// các bài sau bị bỏ qua hoàn toàn để chặn farm điểm bằng spam hashtag.
+		awarded, err := s.contributionRepo.IncrementChallengeDailyAward(
+			ctx, challenge.ID, userID, challengeAwardDate(now), MaxChallengePostsPerDay, challenge.PointsPerPost,
+		)
+		if err != nil {
+			return err
+		}
+		if !awarded {
+			continue
+		}
+
+		if err := s.contributionRepo.IncrementChallengeParticipant(ctx, challenge.ID, userID, challenge.PointsPerPost); err != nil {
 			return err
 		}
 
@@ -377,21 +621,21 @@ func (s *ContributionService) ProcessChallengePost(ctx context.Context, communit
 		communityDeltas[challenge.CommunityID].EventParticipations++
 	}
 
-	for communityID, delta := range communityDeltas {
+	for deltaCommunityID, delta := range communityDeltas {
 		for i := 0; i < delta.EventParticipations; i++ {
-			if _, err := s.ensureContribution(ctx, communityID, userID); err != nil {
+			if _, err := s.ensureContribution(ctx, deltaCommunityID, userID); err != nil {
 				return err
 			}
-			if err := s.contributionRepo.AtomicIncrement(ctx, communityID, userID, "event_participations"); err != nil {
+			if err := s.contributionRepo.AtomicIncrement(ctx, deltaCommunityID, userID, "event_participations"); err != nil {
 				return err
 			}
 		}
 
-		contribution, err := s.contributionRepo.GetContribution(ctx, communityID, userID)
+		contribution, err := s.contributionRepo.GetContribution(ctx, deltaCommunityID, userID)
 		if err != nil {
 			return err
 		}
-		policy, err := s.ensurePolicy(ctx, communityID)
+		policy, err := s.ensurePolicy(ctx, deltaCommunityID)
 		if err != nil {
 			return err
 		}

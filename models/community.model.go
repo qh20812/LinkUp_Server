@@ -25,9 +25,11 @@ type Community struct {
 	CreatorID     string           `json:"creator_id"`
 	Name          string           `json:"name" gorm:"type:varchar(255);not null;uniqueIndex"`
 	Description   string           `json:"description"`
-	AvatarURI     string           `json:"avatar_uri"`
-	BackgroundURI string           `json:"background_uri"`
-	AutoApprove   bool             `json:"auto_approve"`
+	AvatarURI         string           `json:"avatar_uri"`
+	BackgroundURI     string           `json:"background_uri"`
+	AvatarMediaID     *string          `json:"avatar_media_id,omitempty"`
+	BackgroundMediaID *string          `json:"background_media_id,omitempty"`
+	AutoApprove       bool             `json:"auto_approve"`
 	Privacy       CommunityPrivacy `json:"privacy" gorm:"type:varchar(20);default:public"`
 	Status        CommunityStatus  `json:"status" gorm:"type:varchar(20);default:active"`
 	CreatedAt     time.Time        `json:"created_at"`

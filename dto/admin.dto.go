@@ -124,15 +124,16 @@ type AdminReportFilterInput struct {
 }
 
 type AdminReportListItem struct {
-	ID               string    `json:"id"`
-	ReporterID       string    `json:"reporter_id"`
-	ReporterUsername string    `json:"reporter_username"`
-	ReporterEmail    string    `json:"reporter_email"`
-	TargetType       string    `json:"target_type"`
-	TargetUserID     *string   `json:"target_user_id,omitempty"`
-	TargetPostID     *string   `json:"target_post_id,omitempty"`
-	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
-	ReportType       string    `json:"report_type"`
+	ID                string  `json:"id"`
+	ReporterID        string  `json:"reporter_id"`
+	ReporterUsername  string  `json:"reporter_username"`
+	ReporterEmail     string  `json:"reporter_email"`
+	TargetType        string  `json:"target_type"`
+	TargetUserID      *string `json:"target_user_id,omitempty"`
+	TargetPostID      *string `json:"target_post_id,omitempty"`
+	TargetCommentID   *string `json:"target_comment_id,omitempty"`
+	TargetCommunityID *string `json:"target_community_id,omitempty"`
+	ReportType        string  `json:"report_type"`
 	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
 	ViolationRuleTitle *string `json:"violation_rule_title,omitempty"`
 	ReasonDetail     string    `json:"reason_detail"`
@@ -148,27 +149,29 @@ type AdminReportListResponse struct {
 }
 
 type AdminReportDetailResponse struct {
-	ID               string    `json:"id"`
-	ReporterID       string    `json:"reporter_id"`
-	ReporterUsername string    `json:"reporter_username"`
-	ReporterEmail    string    `json:"reporter_email"`
-	TargetType       string    `json:"target_type"`
-	TargetUserID     *string   `json:"target_user_id,omitempty"`
-	TargetPostID     *string   `json:"target_post_id,omitempty"`
-	TargetCommentID  *string   `json:"target_comment_id,omitempty"`
-	ReportType       string    `json:"report_type"`
-	ViolationRuleID  *string   `json:"violation_rule_id,omitempty"`
-	ViolationRuleTitle *string `json:"violation_rule_title,omitempty"`
-	ReasonDetail     string    `json:"reason_detail"`
-	Status           string    `json:"status"`
-	CreatedAt        time.Time `json:"created_at"`
-	PostOwnerID      *string   `json:"post_owner_id,omitempty"`
-	CommentOwnerID   *string   `json:"comment_owner_id,omitempty"`
-	CommentContent   *string   `json:"comment_content,omitempty"`
+	ID                string    `json:"id"`
+	ReporterID        string    `json:"reporter_id"`
+	ReporterUsername  string    `json:"reporter_username"`
+	ReporterEmail     string    `json:"reporter_email"`
+	TargetType        string    `json:"target_type"`
+	TargetUserID      *string   `json:"target_user_id,omitempty"`
+	TargetPostID      *string   `json:"target_post_id,omitempty"`
+	TargetCommentID   *string   `json:"target_comment_id,omitempty"`
+	TargetCommunityID *string   `json:"target_community_id,omitempty"`
+	ReportType        string    `json:"report_type"`
+	ViolationRuleID   *string   `json:"violation_rule_id,omitempty"`
+	ViolationRuleTitle *string  `json:"violation_rule_title,omitempty"`
+	ReasonDetail      string    `json:"reason_detail"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+	PostOwnerID       *string   `json:"post_owner_id,omitempty"`
+	CommentOwnerID    *string   `json:"comment_owner_id,omitempty"`
+	CommentContent    *string   `json:"comment_content,omitempty"`
 	// Snapshot nội dung bị báo cáo để admin duyệt không cần tra ID thủ công.
-	TargetPost    *AdminReportTargetPost    `json:"target_post,omitempty"`
-	TargetComment *AdminReportTargetComment `json:"target_comment,omitempty"`
-	TargetUser    *AdminReportTargetUser    `json:"target_user,omitempty"`
+	TargetPost      *AdminReportTargetPost      `json:"target_post,omitempty"`
+	TargetComment   *AdminReportTargetComment   `json:"target_comment,omitempty"`
+	TargetUser      *AdminReportTargetUser      `json:"target_user,omitempty"`
+	TargetCommunity *AdminReportTargetCommunity `json:"target_community,omitempty"`
 }
 
 // AdminReportTargetPost snapshot bài viết bị báo cáo.
@@ -198,6 +201,23 @@ type AdminReportTargetComment struct {
 	PostID           string    `json:"post_id"`
 	PostTitle        string    `json:"post_title"`
 	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// AdminReportTargetCommunity snapshot cộng đồng bị báo cáo (kèm ảnh đại diện /
+// ảnh bìa để admin đánh giá nội dung mà không cần mở trang cộng đồng).
+type AdminReportTargetCommunity struct {
+	CommunityID      string    `json:"community_id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	AvatarURI        string    `json:"avatar_uri"`
+	BackgroundURI    string    `json:"background_uri"`
+	OwnerID          string    `json:"owner_id"`
+	OwnerUsername    string    `json:"owner_username"`
+	OwnerDisplayName string    `json:"owner_display_name"`
+	OwnerAvatarURI   string    `json:"owner_avatar_uri"`
+	Status           string    `json:"status"`
+	Privacy          string    `json:"privacy"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -289,11 +309,6 @@ type AdminMediaListResponse struct {
 	Page  int              `json:"page"`
 }
 
-type AdminReviewMediaInput struct {
-	Action string `json:"action" binding:"required,oneof=approve reject"`
-	Reason string `json:"reason" binding:"required"`
-}
-
 // ── Admin Community Management ──
 
 type AdminCommunityFilterInput struct {
@@ -356,6 +371,13 @@ type AdminModerateInput struct {
 type AdminWarnInput struct {
 	Reason  string `json:"reason" binding:"required"`
 	Message string `json:"message" binding:"required"`
+}
+
+// AdminCommunityMediaRemoveInput gỡ ảnh cộng đồng bị báo cáo vi phạm
+// (avatar hoặc background) mà không cần ẩn cả cộng đồng.
+type AdminCommunityMediaRemoveInput struct {
+	Target string `json:"target" binding:"required,oneof=avatar background"`
+	Reason string `json:"reason"`
 }
 
 // ── Shared Moderation Log ──
@@ -421,7 +443,6 @@ type AdminAnalyticsResponse struct {
 	TotalCommunities         int64            `json:"total_communities"`
 	TotalActiveBans          int64            `json:"total_active_bans"`
 	PendingReports           int64            `json:"pending_reports"`
-	FlaggedMediaCount        int64            `json:"flagged_media_count"`
 	ActiveUsersToday         int64            `json:"active_users_today"`
 	TotalLikes               int64            `json:"total_likes"`
 	TotalShares              int64            `json:"total_shares"`

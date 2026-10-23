@@ -237,12 +237,50 @@ func (r *CommunityRepository) SeedCommunityDefaults(ctx context.Context, communi
 	return code, nil
 }
 
-// UpdateBackground cập nhật background_uri của community.
-func (r *CommunityRepository) UpdateBackground(ctx context.Context, communityID, backgroundURI string) error {
+// UpdateBackground cập nhật background_uri + background_media_id của community.
+// backgroundMediaID rỗng nghĩa là NULL (cộng đồng cũ không có media ID).
+func (r *CommunityRepository) UpdateBackground(ctx context.Context, communityID, backgroundURI, backgroundMediaID string) error {
+	var mediaID *string
+	if backgroundMediaID != "" {
+		mediaID = &backgroundMediaID
+	}
 	return r.db.WithContext(ctx).
 		Model(&models.Community{}).
 		Where("id = ?", communityID).
-		Update("background_uri", backgroundURI).Error
+		Updates(map[string]interface{}{
+			"background_uri":      backgroundURI,
+			"background_media_id": mediaID,
+		}).Error
+}
+
+// communityMediaColumns: whitelist cột ảnh cộng đồng theo target, để tên cột
+// không bao giờ đi thẳng từ input người dùng vào câu SQL.
+var communityMediaColumns = map[string]struct{ URIColumn, MediaColumn string }{
+	"avatar":     {URIColumn: "avatar_uri", MediaColumn: "avatar_media_id"},
+	"background": {URIColumn: "background_uri", MediaColumn: "background_media_id"},
+}
+
+// ClearMedia gỡ URI + media ID của ảnh cộng đồng (target: "avatar"|"background").
+// Dùng khi admin gỡ ảnh vi phạm mà không cần ẩn cả cộng đồng.
+func (r *CommunityRepository) ClearMedia(ctx context.Context, communityID, target string) error {
+	cols, ok := communityMediaColumns[target]
+	if !ok {
+		return fmt.Errorf("community media target không hợp lệ: %s", target)
+	}
+	result := r.db.WithContext(ctx).
+		Model(&models.Community{}).
+		Where("id = ?", communityID).
+		Updates(map[string]interface{}{
+			cols.URIColumn:   "",
+			cols.MediaColumn: nil,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("gỡ ảnh cộng đồng thất bại: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("không tìm thấy cộng đồng %s", communityID)
+	}
+	return nil
 }
 
 // UpdateCommunity cập nhật các trường của community (partial update).

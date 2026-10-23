@@ -27,6 +27,7 @@ func TestContributionController_InputGuards(t *testing.T) {
 	unauthRouter.PUT("/api/communities/:communityID/policy", ctrl.UpdatePolicy)
 	unauthRouter.POST("/api/communities/:communityID/challenges", ctrl.CreateChallenge)
 	unauthRouter.POST("/api/communities/:communityID/challenges/:challengeID/join", ctrl.JoinChallenge)
+	unauthRouter.PATCH("/api/communities/:communityID/challenges/:challengeID", ctrl.UpdateChallenge)
 
 	authRouter := gin.New()
 	authRouter.Use(func(c *gin.Context) {
@@ -35,6 +36,7 @@ func TestContributionController_InputGuards(t *testing.T) {
 	})
 	authRouter.PUT("/api/communities/:communityID/policy", ctrl.UpdatePolicy)
 	authRouter.POST("/api/communities/:communityID/challenges", ctrl.CreateChallenge)
+	authRouter.PATCH("/api/communities/:communityID/challenges/:challengeID", ctrl.UpdateChallenge)
 
 	tests := []struct {
 		name       string
@@ -75,6 +77,23 @@ func TestContributionController_InputGuards(t *testing.T) {
 			router:     authRouter,
 			method:     http.MethodPost,
 			url:        "/api/communities/community-1/challenges",
+			body:       []byte(`{invalid`),
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "Dữ liệu đầu vào không hợp lệ",
+		},
+		{
+			name:       "unauthorized update challenge",
+			router:     unauthRouter,
+			method:     http.MethodPatch,
+			url:        "/api/communities/community-1/challenges/challenge-1",
+			wantStatus: http.StatusUnauthorized,
+			wantErr:    "Không tìm thấy thông tin chứng thực người dùng",
+		},
+		{
+			name:       "invalid challenge patch json after auth",
+			router:     authRouter,
+			method:     http.MethodPatch,
+			url:        "/api/communities/community-1/challenges/challenge-1",
 			body:       []byte(`{invalid`),
 			wantStatus: http.StatusBadRequest,
 			wantErr:    "Dữ liệu đầu vào không hợp lệ",

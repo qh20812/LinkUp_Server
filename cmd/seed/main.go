@@ -3,17 +3,18 @@ package main
 import (
 	"log"
 
-	"linkup/cmd/seed/internal"
-	"linkup/cmd/seed/reset"
-	"linkup/cmd/seed/schema"
-	"linkup/cmd/seed/users"
+	"linkup/cmd/seed/contribution"
 	"linkup/cmd/seed/core"
-	"linkup/cmd/seed/profiles"
-	"linkup/cmd/seed/social"
-	"linkup/cmd/seed/relationships"
+	"linkup/cmd/seed/extended"
+	"linkup/cmd/seed/internal"
 	"linkup/cmd/seed/messaging"
 	"linkup/cmd/seed/moderation"
-	"linkup/cmd/seed/extended"
+	"linkup/cmd/seed/profiles"
+	"linkup/cmd/seed/relationships"
+	"linkup/cmd/seed/reset"
+	"linkup/cmd/seed/schema"
+	"linkup/cmd/seed/social"
+	"linkup/cmd/seed/users"
 	"linkup/config"
 )
 
@@ -36,6 +37,7 @@ func main() {
 		{"profiles", func() error { return profiles.Run(env, state) }},
 		{"social", func() error { return social.Run(env, state) }},
 		{"relationships", func() error { return relationships.Run(env, state) }},
+		{"contribution", func() error { return contribution.Run(env, state) }},
 		{"messaging", func() error { return messaging.Run(env, state) }},
 		{"moderation", func() error { return moderation.Run(env, state) }},
 		{"extended", func() error { return extended.Run(env, state) }},

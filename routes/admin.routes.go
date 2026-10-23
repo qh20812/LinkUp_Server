@@ -37,7 +37,6 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	// ── Admin Media ──
 	adminGroup.GET("/media/grouped", adminController.ListMediaGroupedByUser)
 	adminGroup.GET("/media/flagged", adminController.ListFlaggedMedia)
-	adminGroup.POST("/media/:id/review", adminController.ReviewMedia)
 	adminGroup.POST("/media/cleanup-rejected", adminController.CleanupRejectedMedia)
 
 	// ── Admin Groups ──
@@ -60,6 +59,7 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 	adminGroup.POST("/communities/:id/unarchive", adminController.UnarchiveCommunity)
 	adminGroup.POST("/communities/:id/archive", adminController.ArchiveCommunity)
 	adminGroup.POST("/communities/:id/warn", adminController.WarnCommunity)
+	adminGroup.POST("/communities/:id/media/remove", adminController.RemoveCommunityMedia)
 	adminGroup.DELETE("/groups/:chatID", adminController.DeleteGroup)
 	adminGroup.DELETE("/communities/:id", adminController.DeleteCommunity)
 

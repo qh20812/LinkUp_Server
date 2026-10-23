@@ -18,9 +18,10 @@ type Report struct {
 	ID              string       `json:"id"`
 	ReporterID      string       `json:"reporter_id"`
 	ReportType      string       `json:"report_type"`
-	TargetUserID    *string      `json:"target_user_id,omitempty"`
-	TargetPostID    *string      `json:"target_post_id,omitempty"`
-	TargetCommentID *string      `json:"target_comment_id,omitempty"`
+	TargetUserID      *string    `json:"target_user_id,omitempty"`
+	TargetPostID      *string    `json:"target_post_id,omitempty"`
+	TargetCommentID   *string    `json:"target_comment_id,omitempty"`
+	TargetCommunityID *string    `json:"target_community_id,omitempty"`
 	ViolationRuleID *string      `json:"violation_rule_id,omitempty"`
 	ReasonDetail    string       `json:"reason_detail"`
 	Status          ReportStatus `json:"status"`

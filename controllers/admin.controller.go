@@ -604,6 +604,28 @@ func (ctrl *AdminController) UnarchiveCommunity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Bỏ đình chỉ cộng đồng thành công"})
 }
 
+func (ctrl *AdminController) RemoveCommunityMedia(c *gin.Context) {
+	communityID := c.Param("id")
+	if communityID == "" {
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
+		return
+	}
+
+	var input dto.AdminCommunityMediaRemoveInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
+		return
+	}
+
+	userID := c.GetString("userID")
+	if err := ctrl.adminService.RemoveCommunityMedia(c.Request.Context(), userID, communityID, input); err != nil {
+		errors.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Gỡ ảnh cộng đồng thành công"})
+}
+
 func (ctrl *AdminController) ArchiveCommunity(c *gin.Context) {
 	communityID := c.Param("id")
 	if communityID == "" {
@@ -731,23 +753,6 @@ func (ctrl *AdminController) ListFlaggedMedia(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
-}
-
-func (ctrl *AdminController) ReviewMedia(c *gin.Context) {
-	adminID := c.GetString("userID")
-	mediaID := c.Param("id")
-
-	var input dto.AdminReviewMediaInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
-		return
-	}
-
-	if err := ctrl.adminService.ReviewMedia(c.Request.Context(), adminID, mediaID, input); err != nil {
-		errors.Respond(c, http.StatusBadRequest, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "Xử lý media thành công"})
 }
 
 func (ctrl *AdminController) CleanupRejectedMedia(c *gin.Context) {

@@ -20,7 +20,7 @@ func Run(env config.Env) error {
 		"chats", "group_chat_bans", "group_chat_member_requests", "group_chat_member_settings",
 		"group_chat_mutes", "group_chat_settings",
 		"community_join_requests", "community_invitations", "community_invite_codes", "group_members", "community_rules", "communities", "tags",
-		"community_policies", "member_contributions", "community_challenges", "challenge_participants",
+		"community_policies", "member_contributions", "community_challenges", "challenge_participants", "challenge_daily_awards",
 		"post_reactions", "bookmarks", "blocks", "friends",
 		"follows", "comments", "posts", "media", "stories",
 		"ads", "user_roles", "profiles", "violation_rules",

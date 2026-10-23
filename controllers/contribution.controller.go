@@ -207,31 +207,91 @@ func (ctrl *ContributionController) CreateChallenge(c *gin.Context) {
 	}
 
 	if err := ctrl.contributionService.CreateChallenge(c.Request.Context(), adminID, communityID, input); err != nil {
-		status := http.StatusBadRequest
-		if err == validations.ErrCommunityNotFound {
-			status = http.StatusNotFound
-		}
-		errorsapp.Respond(c, status, err)
+		respondContributionError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Tạo challenge thành công!"})
 }
 
+// viewerIDFromContext trả về ID người đang đăng nhập, chuỗi rỗng nếu là khách.
+func viewerIDFromContext(c *gin.Context) string {
+	val, exists := c.Get("userID")
+	if !exists {
+		return ""
+	}
+	return fmt.Sprintf("%v", val)
+}
+
+// respondContributionError ánh xạ lỗi service sang HTTP status theo mã lỗi,
+// để lỗi quyền (403) và không tìm thấy (404) không bị trả nhầm thành 400.
+func respondContributionError(c *gin.Context, err error) {
+	if appErr, ok := errorsapp.IsAppError(err); ok {
+		errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		return
+	}
+	errorsapp.Respond(c, http.StatusBadRequest, err)
+}
+
 func (ctrl *ContributionController) GetActiveChallenges(c *gin.Context) {
 	communityID := c.Param("communityID")
+	includeEnded := c.Query("include_ended") == "true"
 
-	challenges, err := ctrl.contributionService.GetActiveChallengeResponses(c.Request.Context(), communityID)
+	challenges, err := ctrl.contributionService.GetChallengeResponses(
+		c.Request.Context(), communityID, viewerIDFromContext(c), includeEnded,
+	)
 	if err != nil {
-		status := http.StatusBadRequest
-		if err == validations.ErrCommunityNotFound {
-			status = http.StatusNotFound
-		}
-		errorsapp.Respond(c, status, err)
+		respondContributionError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": challenges})
+}
+
+func (ctrl *ContributionController) GetChallenge(c *gin.Context) {
+	communityID := c.Param("communityID")
+	challengeID := c.Param("challengeID")
+	if challengeID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	challenge, err := ctrl.contributionService.GetChallengeDetail(
+		c.Request.Context(), communityID, challengeID, viewerIDFromContext(c),
+	)
+	if err != nil {
+		respondContributionError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": challenge})
+}
+
+func (ctrl *ContributionController) UpdateChallenge(c *gin.Context) {
+	adminID := viewerIDFromContext(c)
+	if adminID == "" {
+		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
+		return
+	}
+	communityID := c.Param("communityID")
+	challengeID := c.Param("challengeID")
+
+	var input dto.UpdateChallengeInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+		return
+	}
+
+	challenge, err := ctrl.contributionService.UpdateChallenge(c.Request.Context(), adminID, communityID, challengeID, input)
+	if err != nil {
+		respondContributionError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Cập nhật challenge thành công!",
+		"data":    challenge,
+	})
 }
 
 func (ctrl *ContributionController) JoinChallenge(c *gin.Context) {

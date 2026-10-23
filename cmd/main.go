@@ -171,9 +171,8 @@ func main() {
 		mediaRepository := repository.NewMediaRepository(gormDB)
 		cldForMedia, _ := cloudinary.NewFromURL(env.CloudinaryEnv)
 		aiModerationService := services.NewCloudinaryModerationService(cldForMedia)
-		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv, aiModerationService, notificationService)
+		mediaService := services.NewMediaService(*mediaRepository, env.CloudinaryEnv, aiModerationService)
 		postService.SetMediaService(mediaService)
-		mediaService.SetModerationRepo(repository.NewModerationRepository(gormDB))
 		mediaController := controllers.NewMediaController(mediaService)
 		routes.RegisterMediaRoutes(router, mediaController, env, gormDB)
 
@@ -184,8 +183,7 @@ func main() {
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
-		// Wire sau khi cả media + story repo đã khởi tạo
-		mediaService.SetStoryRepo(storyRepository)
+		// Wire sau khi media + story repo đã khởi tạo
 		mediaService.SetHub(hub)
 		// Đánh fail media kẹt staging từ lần chạy trước (crash/deploy giữa upload).
 		mediaService.ReconcileStaleStaging()
@@ -269,6 +267,8 @@ func main() {
 		communityService := services.NewCommunityService(communityRepository, communityValidation, authRepository, profileRepository, mediaService, notificationService, postRepository)
 		communityController := controllers.NewCommunityController(communityService, mediaService)
 		routes.RegisterCommunityRoutes(router, communityController, env, gormDB)
+		// Report cộng đồng cần tra cứu community (khởi tạo muộn hơn report service).
+		reportService.SetCommunityRepo(communityRepository)
 
 		// ===== KHỞI TẠO COMMUNITY RULE (QUY TẮC CỘNG ĐỒNG) =====
 		communityRuleRepository := repository.NewCommunityRuleRepository(gormDB)

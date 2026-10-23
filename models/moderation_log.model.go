@@ -15,6 +15,7 @@ const (
 	ModerationActionDelete        ModerationAction = "delete"
 	ModerationActionUpdate        ModerationAction = "update"
 	ModerationActionHide          ModerationAction = "hide"
+	ModerationActionRemoveMedia   ModerationAction = "remove_media"
 	ModerationActionTransferOwner ModerationAction = "transfer_owner"
 )
 
@@ -65,6 +66,8 @@ func ParseModerationAction(value string) ModerationAction {
 		return ModerationActionUpdate
 	case string(ModerationActionHide):
 		return ModerationActionHide
+	case string(ModerationActionRemoveMedia):
+		return ModerationActionRemoveMedia
 	case string(ModerationActionTransferOwner):
 		return ModerationActionTransferOwner
 	default:

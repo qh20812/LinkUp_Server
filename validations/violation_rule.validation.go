@@ -48,7 +48,7 @@ func (v *ViolationRuleValidation) ValidateDescription(description string) error 
 func (v *ViolationRuleValidation) ValidateApplicable(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	switch value {
-	case "post", "comment", "user":
+	case "post", "comment", "user", "community":
 		return value
 	default:
 		return "all"

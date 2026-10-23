@@ -198,6 +198,8 @@ func Run(env config.Env) error {
 			description TEXT,
 			avatar_uri VARCHAR(512) NOT NULL DEFAULT '',
 			background_uri VARCHAR(512) NOT NULL DEFAULT '',
+			avatar_media_id VARCHAR(36) NULL,
+			background_media_id VARCHAR(36) NULL,
 			auto_approve TINYINT(1) NOT NULL DEFAULT 0,
 			privacy VARCHAR(20) NOT NULL DEFAULT 'public',
 			created_at DATETIME NOT NULL,
@@ -490,6 +492,7 @@ func Run(env config.Env) error {
 			target_user_id VARCHAR(36) NULL,
 			target_post_id VARCHAR(36) NULL,
 			target_comment_id VARCHAR(36) NULL,
+			target_community_id VARCHAR(36) NULL,
 			violation_rule_id VARCHAR(36) NULL,
 			reason_detail TEXT,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -796,6 +799,21 @@ func Run(env config.Env) error {
 			UNIQUE INDEX idx_challenge_participants_pair (challenge_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+		// 39b. Trần điểm theo ngày (chống farm) - mỗi người/challenge/ngày 1 dòng
+		`CREATE TABLE IF NOT EXISTS challenge_daily_awards (
+			id VARCHAR(36) PRIMARY KEY,
+			challenge_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			award_date DATE NOT NULL,
+			posts_count INT NOT NULL DEFAULT 0,
+			points_earned INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (challenge_id) REFERENCES community_challenges(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			UNIQUE INDEX idx_challenge_daily_awards_pair (challenge_id, user_id, award_date)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		// 40. Soft-delete for call history (user-level hide, row stays for the other party)
 		`CREATE TABLE IF NOT EXISTS call_hidden (
 			call_id VARCHAR(36) NOT NULL,
@@ -1007,6 +1025,19 @@ func Run(env config.Env) error {
 	// communities.status: moderation state for communities
 	if err := addColumnIfMissing(database, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'"); err != nil {
 		return fmt.Errorf("schema: add communities.status: %w", err)
+	}
+	// reports.target_community_id: báo cáo nhắm vào cộng đồng (hậu kiểm, thay
+	// cho việc duyệt ảnh cộng đồng trước khi công khai).
+	if err := addColumnIfMissing(database, "reports", "target_community_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add reports.target_community_id: %w", err)
+	}
+	// communities.avatar_media_id / background_media_id: cho phép admin gỡ
+	// riêng ảnh cộng đồng mà không phải ẩn cả cộng đồng.
+	if err := addColumnIfMissing(database, "communities", "avatar_media_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add communities.avatar_media_id: %w", err)
+	}
+	if err := addColumnIfMissing(database, "communities", "background_media_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add communities.background_media_id: %w", err)
 	}
 
 	// FK from chats.creator_id to users.id

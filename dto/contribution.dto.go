@@ -67,17 +67,44 @@ type CreateChallengeInput struct {
 	MaxParticipants *int   `json:"max_participants,omitempty"`
 }
 
+// UpdateChallengeInput là payload PATCH — mọi field đều optional.
+// Field nil = giữ nguyên giá trị cũ.
+type UpdateChallengeInput struct {
+	Title         *string `json:"title"`
+	Description   *string `json:"description"`
+	Hashtag       *string `json:"hashtag"`
+	PointsPerPost *int    `json:"points_per_post"`
+	StartDate     *string `json:"start_date"`
+	EndDate       *string `json:"end_date"`
+	// MaxParticipants <= 0 nghĩa là bỏ giới hạn số người tham gia.
+	MaxParticipants *int `json:"max_participants"`
+	// Status chỉ chấp nhận active | completed | cancelled.
+	Status *string `json:"status"`
+}
+
 type ChallengeResponse struct {
-	ID                string    `json:"id"`
-	Title             string    `json:"title"`
-	Description       string    `json:"description"`
-	Hashtag           string    `json:"hashtag"`
+	ID          string `json:"id"`
+	CommunityID string `json:"community_id"`
+	CreatorID   string `json:"creator_id"`
+	CreatorName string `json:"creator_name"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Hashtag     string `json:"hashtag"`
+	// PointsPerPost là điểm mỗi bài viết hợp lệ được cộng cho người tham gia.
 	PointsPerPost     int       `json:"points_per_post"`
 	StartDate         time.Time `json:"start_date"`
 	EndDate           time.Time `json:"end_date"`
 	MaxParticipants   *int      `json:"max_participants,omitempty"`
 	Status            string    `json:"status"`
+	State             string    `json:"state"`
 	ParticipantsCount int       `json:"participants_count"`
+	Joined            bool      `json:"joined"`
+	CanManage         bool      `json:"can_manage"`
+	// DailyPostLimit là trần số bài được tính điểm mỗi ngày cho mỗi người (chống farm).
+	DailyPostLimit int `json:"daily_post_limit"`
+	// DailyPostsAwarded là số bài đã được tính điểm hôm nay của người xem (0 nếu là khách).
+	DailyPostsAwarded int       `json:"daily_posts_awarded"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type ChallengeParticipantItem struct {

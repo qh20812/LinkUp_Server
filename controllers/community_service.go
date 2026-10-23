@@ -15,7 +15,7 @@ import (
 // the concrete service does not require touching this list unless a handler
 // calls a new method.
 type CommunityService interface {
-	CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error)
+	CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error)
 	SetCommunityBackground(ctx context.Context, userID, communityID string, file *multipart.FileHeader) error
 	UpdateCommunity(ctx context.Context, userID, communityID string, input dto.UpdateCommunityInput) error
 	RequestJoin(ctx context.Context, userID, communityID, inviteCode, invitationID string) (*dto.JoinResult, error)

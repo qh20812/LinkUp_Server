@@ -282,6 +282,33 @@ func Run(db *gorm.DB) {
 	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_message", "message_id", "messages", "id")
 	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_user", "user_id", "users", "id")
 
+	// ===== Challenge daily awards (trần điểm/ngày chống farm) =====
+	if !db.Migrator().HasTable(&models.ChallengeDailyAward{}) {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS challenge_daily_awards (
+			id VARCHAR(36) PRIMARY KEY,
+			challenge_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			award_date DATE NOT NULL,
+			posts_count INT NOT NULL DEFAULT 0,
+			points_earned INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE INDEX idx_challenge_daily_awards_pair (challenge_id, user_id, award_date)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create challenge_daily_awards table: %v", err)
+		}
+	}
+	ensureForeignKey(db, "challenge_daily_awards", "fk_challenge_daily_awards_challenge", "challenge_id", "community_challenges", "id")
+	ensureForeignKey(db, "challenge_daily_awards", "fk_challenge_daily_awards_user", "user_id", "users", "id")
+
+	// ===== Cột media + status của communities =====
+	// DB cũ được seed trước khi các cột này tồn tại. GORM INSERT liệt kê đủ cột
+	// của model nên thiếu cột nào là Error 1054 (Unknown column ... in 'field
+	// list') ngay khi tạo cộng đồng. Idempotent, không mất dữ liệu.
+	ensureColumn(db, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'")
+	ensureColumn(db, "communities", "avatar_media_id", "VARCHAR(36) NULL")
+	ensureColumn(db, "communities", "background_media_id", "VARCHAR(36) NULL")
+
 	// Seed dữ liệu mặc định cho các Gói Quảng Cáo
 	seedAdPackages(db)
 }
@@ -430,8 +457,8 @@ func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn st
 	if err != nil || r.Count > 0 {
 		return
 	}
-	if err := db.Exec("ALTER TABLE "+table+" ADD CONSTRAINT "+fkName+
-		" FOREIGN KEY ("+column+") REFERENCES "+refTable+"("+refColumn+")").Error; err != nil {
+	if err := db.Exec("ALTER TABLE " + table + " ADD CONSTRAINT " + fkName +
+		" FOREIGN KEY (" + column + ") REFERENCES " + refTable + "(" + refColumn + ")").Error; err != nil {
 		log.Printf("Warning: ensure FK %s: %v", fkName, err)
 	}
 }

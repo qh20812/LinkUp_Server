@@ -105,7 +105,9 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 	// 4. Upload file đính kèm
 	var mediaList []models.AdMedia
 	for idx, fileHeader := range files {
-		uploadedMedia, err := s.mediaService.UploadMedia(ctx.Request.Context(), partnerID, fileHeader)
+		// Media quảng cáo auto-approve; bản thân ad vẫn qua bước admin duyệt
+		// (SetAdStatus pending→active) nên không cần moderation ở mức file.
+		uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx.Request.Context(), partnerID, fileHeader)
 		if err != nil {
 			return nil, fmt.Errorf("lỗi upload file %s: %w", fileHeader.Filename, err)
 		}

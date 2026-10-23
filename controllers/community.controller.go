@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const maxCreateCommunityBodySize = 15 << 20
+const maxCreateCommunityBodySize = 45 << 20
 
 func isRequestBodyTooLarge(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "request body too large")
@@ -91,38 +91,39 @@ func (ctrl *CommunityController) CreateCommunity(c *gin.Context) {
 	// (community.PRIVACY_INVALID). Empty means public (model default).
 	privacy := models.CommunityPrivacy(strings.ToLower(strings.TrimSpace(c.PostForm("privacy"))))
 
-	// Avatar/background moderation is asynchronous (mediaService.UploadMedia
-	// stores status pending and moderates in background), so there is no
-	// synchronous rejected status to check here. Rejected assets are handled
-	// by the background moderation flow (status update + notification).
-	// Uploaded media IDs are tracked so a later failure can clean them up.
+	// Ảnh cộng đồng đi theo đường auto-approve: không chạy AI moderation,
+	// không chờ admin duyệt. Nội dung vi phạm được xử lý hậu kiểm qua report
+	// system (xem Phase report cộng đồng). Uploaded media IDs are tracked so a
+	// later failure can clean them up.
 	var uploadedMediaIDs []string
-	avatarURI := ""
+	avatarURI, avatarMediaID := "", ""
 	file, err := c.FormFile("avatar")
 	if err == nil && file != nil {
-		media, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), file)
+		media, err := ctrl.mediaService.AutoApproveUpload(c.Request.Context(), userID.(string), file)
 		if err != nil {
 			respondUploadError(c, err)
 			return
 		}
 		avatarURI = media.FileURI
+		avatarMediaID = media.ID
 		uploadedMediaIDs = append(uploadedMediaIDs, media.ID)
 	}
 
-	backgroundURI := ""
+	backgroundURI, backgroundMediaID := "", ""
 	bgFile, err := c.FormFile("background")
 	if err == nil && bgFile != nil {
-		bgMedia, err := ctrl.mediaService.UploadMedia(c.Request.Context(), userID.(string), bgFile)
+		bgMedia, err := ctrl.mediaService.AutoApproveUpload(c.Request.Context(), userID.(string), bgFile)
 		if err != nil {
 			cleanupUploadedMedia(c.Request.Context(), ctrl.mediaService, userID.(string), uploadedMediaIDs)
 			respondUploadError(c, err)
 			return
 		}
 		backgroundURI = bgMedia.FileURI
+		backgroundMediaID = bgMedia.ID
 		uploadedMediaIDs = append(uploadedMediaIDs, bgMedia.ID)
 	}
 
-	result, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, backgroundURI, privacy, autoApprove)
+	result, err := ctrl.communityService.CreateCommunity(c.Request.Context(), userID.(string), name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID, privacy, autoApprove)
 	if err != nil {
 		cleanupUploadedMedia(c.Request.Context(), ctrl.mediaService, userID.(string), uploadedMediaIDs)
 		respondServiceError(c, err)
