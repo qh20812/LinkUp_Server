@@ -2,11 +2,15 @@ package reset
 
 import (
 	"fmt"
+	"strings"
 
 	"linkup/cmd/seed/internal"
 	"linkup/config"
 )
 
+// Run xoá toàn bộ bảng trong database hiện tại. Danh sách bảng được đọc từ
+// information_schema thay vì liệt kê tay — nhờ vậy bảng do GORM AutoMigrate
+// tạo (story, e2e key, session…) cũng được dọn, không còn sót dữ liệu cũ.
 func Run(env config.Env) error {
 	database, err := internal.Connect(env)
 	if err != nil {
@@ -14,29 +18,38 @@ func Run(env config.Env) error {
 	}
 	defer database.Close()
 
-	tables := []string{
-		"ad_media", "ad_analytics", "moderation_logs", "bans", "reports",
-		"notifications", "notification_preferences", "calls", "messages", "chat_participants", "chat_invitations",
-		"chats", "group_chat_bans", "group_chat_member_requests", "group_chat_member_settings",
-		"group_chat_mutes", "group_chat_settings",
-		"community_join_requests", "community_invitations", "community_invite_codes", "group_members", "community_rules", "communities", "tags",
-		"community_policies", "member_contributions", "community_challenges", "challenge_participants", "challenge_daily_awards",
-		"post_reactions", "bookmarks", "blocks", "friends",
-		"follows", "comments", "posts", "media", "stories",
-		"ads", "user_roles", "profiles", "violation_rules",
-		"emojis", "roles", "users",
-		"call_hidden", "password_histories", "password_reset_tokens", "post_shares",
-		"partner_subscriptions", "ad_packages",
-		"story_interacts", "story_views", "post_views", "user_interests",
+	rows, err := database.Query(
+		`SELECT table_name FROM information_schema.tables
+		 WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'`,
+	)
+	if err != nil {
+		return fmt.Errorf("reset: list tables: %w", err)
+	}
+
+	tables := make([]string, 0, 64)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return fmt.Errorf("reset: scan table name: %w", err)
+		}
+		tables = append(tables, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reset: iterate tables: %w", err)
 	}
 
 	if err := internal.Exec(database, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {
 		return fmt.Errorf("reset: disable fk: %w", err)
 	}
 
-	for _, t := range tables {
-		if err := internal.Exec(database, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", t)); err != nil {
-			return fmt.Errorf("reset: drop %s: %w", t, err)
+	for _, name := range tables {
+		if strings.ContainsRune(name, '`') {
+			return fmt.Errorf("reset: bảng có tên không hợp lệ: %q", name)
+		}
+		if err := internal.Exec(database, fmt.Sprintf("DROP TABLE IF EXISTS `%s`", name)); err != nil {
+			return fmt.Errorf("reset: drop %s: %w", name, err)
 		}
 	}
 
@@ -44,5 +57,6 @@ func Run(env config.Env) error {
 		return fmt.Errorf("reset: enable fk: %w", err)
 	}
 
+	fmt.Printf("reset: đã xoá %d bảng\n", len(tables))
 	return nil
 }

@@ -134,6 +134,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 			return fmt.Errorf("core: missing emoji %s after upsert", e.code)
 		}
 		state.EmojiIDs = append(state.EmojiIDs, realID)
+		state.EmojiIDByCode[e.code] = realID
 		if e.isReaction {
 			state.ReactionEmojiIDs = append(state.ReactionEmojiIDs, realID)
 		}
@@ -148,15 +149,12 @@ func Run(env config.Env, state *internal.SeedState) error {
 		sortOrder    int
 	}
 
-	rules := []violationRule{
-		{internal.UUID(), "Spam / quảng cáo làm phiền", "Đăng nội dung quảng cáo lặp lại, link rác hoặc nội dung không liên quan.", "all", "low", 1},
-		{internal.UUID(), "Quấy rối / bắt nạt", "Tấn công, đe dọa hoặc xúc phạm người khác.", "all", "high", 2},
-		{internal.UUID(), "Ngôn từ thù ghét / phân biệt đối xử", "Nội dung kỳ thị chủng tộc, giới tính, tôn giáo hoặc nhóm người.", "all", "high", 3},
-		{internal.UUID(), "Nội dung nhạy cảm / đồi trụy", "Hình ảnh, video hoặc mô tả mang tính khiêu dâm, bạo lực quá mức.", "all", "high", 4},
-		{internal.UUID(), "Thông tin sai lệch", "Tin giả, thông tin sai sự thật gây hiểu lầm.", "post", "medium", 5},
-		{internal.UUID(), "Lừa đảo / giả mạo", "Tài khoản giả mạo người khác hoặc hành vi lừa đảo.", "user", "high", 6},
-		{internal.UUID(), "Vi phạm bản quyền", "Đăng lại nội dung có bản quyền mà không được phép.", "post", "medium", 7},
-		{internal.UUID(), "Lý do khác", "Vi phạm không thuộc các nhóm trên (mô tả chi tiết ở lý do).", "all", "low", 99},
+	rules := make([]violationRule, 0, len(seeddata.ViolationRules))
+	for _, r := range seeddata.ViolationRules {
+		rules = append(rules, violationRule{
+			id: internal.UUID(), title: r.Title, description: r.Description,
+			applicableTo: r.ApplicableTo, severity: r.Severity, sortOrder: r.SortOrder,
+		})
 	}
 
 	now = time.Now().UTC()
@@ -168,6 +166,7 @@ func Run(env config.Env, state *internal.SeedState) error {
 			return fmt.Errorf("core: insert violation_rule %s: %w", v.title, err)
 		}
 		state.ViolationRuleIDs = append(state.ViolationRuleIDs, v.id)
+		state.ViolationRuleIDByTitle[v.title] = v.id
 	}
 
 	superAdminID := state.RoleIDs[0]

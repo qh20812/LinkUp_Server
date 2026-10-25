@@ -25,14 +25,14 @@ go test ./services/...                     # some need TEST_DSN env var; include
 ```
 cmd/main.go → controller → service → repository (GORM)
 middlewares/  → auth.middleware.go + rbac.middleware.go
-cmd/seed/     → raw database/sql (10 ordered steps)
+cmd/seed/     → raw database/sql (11 ordered steps, data in `seeddata/`)
 ws/           → gorilla/websocket Hub (per-user broadcast + chat rooms)
 groupws/      → separate Hub type for group chat real-time events
 ```
 
 - **Module `linkup`** (Go 1.26.3, Gin). Run from repo root.
 - **DB**: `db/mysql.go` returns `*sql.DB`; `cmd/main.go` wraps with `gorm.Open(mysql.New(mysql.Config{Conn: database}), ...)`. All code inside `if database != nil { ... }` guard — WS + health endpoint run without DB.
-- **49 model files** (`models/*.model.go`), 46 tables in DB seed schema (+ story tables via GORM AutoMigrate in `cmd/main.go`).
+- **49 model files** (`models/*.model.go`), 68 tables in DB seed schema (includes every GORM-`AutoMigrate` table so a freshly seeded DB is complete on its own).
 - **All model IDs are `string` (UUID)**. Foreign keys are `string`/`*string`.
 - **Validation split**: DTOs use `binding` tags (community, group_chat, post:`ReactPostInput`, chat). Others use `validations` package (13 validators, sentinel errors, struct methods). Query params: `form:` tags + `c.ShouldBindQuery`.
 - **RBAC**: `RequireRoles` checks platform roles (`user_roles` JOIN, scope_id IS NULL). `CheckAdOwnership` guards ads for PARTNERs. `RequireContributionLevel` checks community contribution score threshold.
@@ -108,9 +108,22 @@ Auth middleware sets `userID`/`email` on Gin context. Uses `Bearer` token in `Au
 
 ## Seed system
 
-10 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → social → relationships → messaging → moderation → extended. Raw SQL (not GORM), drops all tables. Steps share data via `internal.SeedState`. UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users have bcrypt `Password123!`. Relationships step also seeds `community_rules` for each community.
+11 ordered steps (`cmd/seed/main.go`): reset → schema → users → core → profiles → **relationships → social** → contribution → messaging → moderation → extended. Raw SQL (not GORM); `reset` drops every table listed in `information_schema`, so tables created later by GORM `AutoMigrate` (stories, e2e keys) are cleaned too.
 
-**Schema sub-package** (`cmd/seed/schema/`): 46 `CREATE TABLE IF NOT EXISTS` statements, then idempotent ALTER TABLE via `addColumnIfMissing`/`addIndexIfMissing`/`addForeignKeyIfMissing` (queries `information_schema` first). DDL identifiers validated via regex whitelist.
+**`seeddata/` is the single source of truth** (`server/seeddata/`): 20 user personas, ~117 media URIs, 44 posts (title / content / media-only / title-only / album / video / repost all represented), 6 communities, 12 stories, 15 chats, 6 ads, engagement + moderation records, emoji set. Each step only **inserts** what `seeddata` declares — no random content generation at insert time. `seeddata.Validate()` runs before any DB write and also as `go test ./seeddata/` (no DB needed), so broken key references fail in a second instead of mid-seed.
+
+- `relationships` runs **before** `social` because `posts.community_id` is a real FK (`fk_posts_community`).
+- Steps share IDs via `internal.SeedState` maps (`UserIDByUsername`, `PostIDByKey`, …), not array indexes.
+- UUIDs via `internal.UUID()` (crypto/rand, RFC 9562). All seed users share password `Password123!`.
+- Logins: `minhanh.nguyen@gmail.com` (demo, has unread notifications + chat), `quocbao.pham@gmail.com` (partner/ads), `admin@linkup.vn`, `superadmin@linkup.vn`.
+- Media are **hotlinked** (Wikimedia Commons + Cloudinary demo videos), never uploaded. `./seed.exe -check-media` HEAD-checks every URI without touching the DB — 2 workers, retry/backoff, and HTTP 429 is reported as *throttled* rather than a failure.
+- `posts` CREATE TABLE lacks `shared_from_post_id`/`share_content`; both come from `addColumnIfMissing`, so reposts depend on that ALTER running first.
+- Reposts are inserted in two passes (originals first) and also get a `post_shares` row.
+- `ad_analytics` is inserted in batches of 400 — one row per round-trip to the remote DB took minutes.
+
+**Schema sub-package** (`cmd/seed/schema/`): 68 `CREATE TABLE IF NOT EXISTS` statements, then idempotent ALTER TABLE via `addColumnIfMissing`/`addIndexIfMissing`/`addForeignKeyIfMissing` (queries `information_schema` first). DDL identifiers validated via regex whitelist.
+
+⚠️ **Server `AutoMigrate` currently aborts early** at `comment_reactions` (`Error 1170: BLOB/TEXT column 'user_id' used in key specification without a key length`), so `post_views` / `user_interests` would never be created there — which made the feed return 500 until they were added to the seed schema. Keep those three tables (`post_views`, `user_interests`, `chat_user_settings`) in `cmd/seed/schema/main.go`; a fresh `seed` must leave a DB the app can serve without relying on AutoMigrate.
 
 ## Password reset flow
 

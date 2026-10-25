@@ -7,113 +7,90 @@ import (
 
 	"linkup/cmd/seed/internal"
 	"linkup/config"
+	"linkup/seeddata"
 )
 
-// Run tạo dữ liệu demo cho hệ contribution: challenge (đang diễn ra, sắp diễn ra,
-// đã kết thúc), người tham gia và điểm đóng góp để leaderboard/badge có dữ liệu.
+// Run tạo dữ liệu demo cho hệ contribution: thử thách của từng cộng đồng,
+// người tham gia và điểm đóng góp để leaderboard/badge có dữ liệu thật.
 func Run(env config.Env, state *internal.SeedState) error {
 	database, err := internal.Connect(env)
 	if err != nil {
-		return err
+		return fmt.Errorf("contribution: connect: %w", err)
 	}
 	defer database.Close()
 
-	if len(state.CommunityIDs) < 2 || len(state.UserIDs) < 8 {
-		return nil
-	}
-
 	now := time.Now().UTC()
-	activeChallengeIDs := map[int]string{}
 
-	challenges := []struct {
-		communityIdx int
-		title        string
-		description  string
-		hashtag      string
-		points       int
-		start        time.Time
-		end          time.Time
-		max          *int
-		status       string
-	}{
-		{
-			communityIdx: 0,
-			title:        "Ảnh đẹp mỗi ngày",
-			description:  "Chia sẻ bức ảnh bạn tâm đắc nhất trong tuần này.",
-			hashtag:      "#AnhDepMoiNgay",
-			points:       15,
-			start:        now.Add(-48 * time.Hour),
-			end:          now.Add(120 * time.Hour),
-			status:       "active",
-		},
-		{
-			communityIdx: 0,
-			title:        "Viết về Go",
-			description:  "Kể lại một điều thú vị bạn học được với Go.",
-			hashtag:      "#GoMoiNgay",
-			points:       20,
-			start:        now.Add(72 * time.Hour),
-			end:          now.Add(240 * time.Hour),
-			max:          intPtr(20),
-			status:       "active",
-		},
-		{
-			communityIdx: 0,
-			title:        "Chào mừng thành viên mới",
-			description:  "Giới thiệu bản thân với cộng đồng.",
-			hashtag:      "#HelloLinkUp",
-			points:       10,
-			start:        now.Add(-360 * time.Hour),
-			end:          now.Add(-240 * time.Hour),
-			status:       "completed",
-		},
-		{
-			communityIdx: 1,
-			title:        "Kiến trúc cloud tuần này",
-			description:  "Chia sẻ sơ đồ kiến trúc bạn đang dùng.",
-			hashtag:      "#CloudWeekly",
-			points:       25,
-			start:        now.Add(-24 * time.Hour),
-			end:          now.Add(144 * time.Hour),
-			max:          intPtr(50),
-			status:       "active",
-		},
+	communityIDByKey := func(key string) (string, error) {
+		id, ok := state.CommunityIDByKey[key]
+		if !ok {
+			return "", fmt.Errorf("contribution: unknown community %q", key)
+		}
+		return id, nil
 	}
 
-	for _, c := range challenges {
-		communityID := state.CommunityIDs[c.communityIdx]
-		// Theo quy ước của bước relationships: GROUP_ADMIN của community i là user 2i+2.
-		creatorID := state.UserIDs[c.communityIdx*2+2]
-		challengeID := internal.UUID()
+	activeChallenges := make(map[string]string) // communityID → challengeID
 
-		var maxParticipants any
-		if c.max != nil {
-			maxParticipants = *c.max
+	for _, c := range seeddata.Challenges {
+		communityID, err := communityIDByKey(c.Community)
+		if err != nil {
+			return err
+		}
+		community, ok := seeddata.CommunityByKey(c.Community)
+		if !ok {
+			return fmt.Errorf("contribution: community %q missing from seeddata", c.Community)
+		}
+		creatorID, ok := state.UserIDByUsername[community.Creator]
+		if !ok {
+			return fmt.Errorf("contribution: unknown creator %q", community.Creator)
 		}
 
+		var maxParticipants any
+		if c.MaxParticipants > 0 {
+			maxParticipants = c.MaxParticipants
+		}
+
+		start := now.Add(time.Duration(c.StartHours * float64(time.Hour)))
+		end := now.Add(time.Duration(c.EndHours * float64(time.Hour)))
+
+		challengeID := internal.UUID()
 		if err := internal.Exec(database,
 			`INSERT INTO community_challenges
 				(id, community_id, creator_id, title, description, hashtag, points_per_post,
 				 start_date, end_date, max_participants, status, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			challengeID, communityID, creatorID, c.title, c.description, c.hashtag,
-			c.points, c.start, c.end, maxParticipants, c.status, now,
+			challengeID, communityID, creatorID, c.Title, c.Description, c.Hashtag,
+			c.PointsPerPost, start, end, maxParticipants, c.Status, start,
 		); err != nil {
-			return fmt.Errorf("contribution: insert challenge %s: %w", c.hashtag, err)
+			return fmt.Errorf("contribution: insert challenge %s: %w", c.Hashtag, err)
 		}
 
-		if c.status == "active" && !c.start.After(now) {
-			activeChallengeIDs[c.communityIdx] = challengeID
+		if c.Status == "active" && !start.After(now) {
+			activeChallenges[communityID] = challengeID
 		}
 	}
 
-	for communityIdx, challengeID := range activeChallengeIDs {
-		memberIDs, err := loadMembers(database, state.CommunityIDs[communityIdx], 6)
+	// Người tham gia thử thách đang chạy — lấy thành viên tích cực nhất.
+	for communityID, challengeID := range activeChallenges {
+		members, err := loadMembers(database, communityID, 6)
 		if err != nil {
 			return err
 		}
-		for i, userID := range memberIDs {
-			posts := 3 - i
+		perPost := 0
+		rows, err := database.Query(`SELECT points_per_post FROM community_challenges WHERE id = ?`, challengeID)
+		if err != nil {
+			return fmt.Errorf("contribution: query points_per_post: %w", err)
+		}
+		if rows.Next() {
+			if err := rows.Scan(&perPost); err != nil {
+				rows.Close()
+				return fmt.Errorf("contribution: scan points_per_post: %w", err)
+			}
+		}
+		rows.Close()
+
+		for i, member := range members {
+			posts := 3 - i/2
 			if posts < 1 {
 				posts = 1
 			}
@@ -121,29 +98,40 @@ func Run(env config.Env, state *internal.SeedState) error {
 				`INSERT INTO challenge_participants
 					(id, challenge_id, user_id, posts_count, total_points_earned, joined_at)
 				 VALUES (?, ?, ?, ?, ?, ?)`,
-				internal.UUID(), challengeID, userID, posts, posts*15, now.Add(-time.Duration(i+1)*time.Hour),
+				internal.UUID(), challengeID, member.userID, posts, posts*perPost,
+				now.Add(-time.Duration(i+1)*6*time.Hour),
 			); err != nil {
 				return fmt.Errorf("contribution: insert participant: %w", err)
 			}
 		}
 	}
 
-	for communityIdx := 0; communityIdx < len(state.CommunityIDs); communityIdx++ {
-		memberIDs, err := loadMembers(database, state.CommunityIDs[communityIdx], 8)
+	// Điểm đóng góp: suy ra từ số điểm thành viên, giữ hai bảng khớp nhau.
+	for _, community := range seeddata.Communities {
+		communityID, err := communityIDByKey(community.Key)
 		if err != nil {
 			return err
 		}
-		for i, userID := range memberIDs {
-			validPosts, comments, reactions, events := 4+i*3, 2+i*2, 8+i*4, i
-			// Một thành viên đạt ngưỡng Top Contributor để badge hiển thị được.
-			if communityIdx == 0 && i == 0 {
-				validPosts, comments, reactions, events = 240, 60, 100, 5
-			}
+		members, err := loadMembers(database, communityID, 500)
+		if err != nil {
+			return err
+		}
 
-			score := validPosts*10 + comments*5 + reactions*2 + events*20
+		for _, member := range members {
+			points := member.points
+			validPosts := points / 55
+			qualityComments := points / 35
+			positiveReactions := points / 18
+			events := points / 700
+			score := validPosts*10 + qualityComments*5 + positiveReactions*2 + events*20
+
 			var badge any
-			if score >= 2500 {
+			if score >= community.Policy.TopThreshold {
 				badge = "Top Contributor"
+			}
+			promoted := 0
+			if score >= community.Policy.ModThreshold {
+				promoted = 1
 			}
 
 			if err := internal.Exec(database,
@@ -151,11 +139,19 @@ func Run(env config.Env, state *internal.SeedState) error {
 					(id, community_id, user_id, valid_posts, quality_comments, positive_reactions,
 					 event_participations, contribution_score, badge_type, promoted_to_mod,
 					 last_calculated_at, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-				internal.UUID(), state.CommunityIDs[communityIdx], userID,
-				validPosts, comments, reactions, events, score, badge, now, now, now,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				internal.UUID(), communityID, member.userID,
+				validPosts, qualityComments, positiveReactions, events, score, badge, promoted,
+				now, now, now,
 			); err != nil {
 				return fmt.Errorf("contribution: insert member contribution: %w", err)
+			}
+
+			if err := internal.Exec(database,
+				`UPDATE group_members SET points = ? WHERE community_id = ? AND user_id = ?`,
+				score, communityID, member.userID,
+			); err != nil {
+				return fmt.Errorf("contribution: sync member points: %w", err)
 			}
 		}
 	}
@@ -163,9 +159,14 @@ func Run(env config.Env, state *internal.SeedState) error {
 	return nil
 }
 
-func loadMembers(database *sql.DB, communityID string, limit int) ([]string, error) {
+type member struct {
+	userID string
+	points int
+}
+
+func loadMembers(database *sql.DB, communityID string, limit int) ([]member, error) {
 	rows, err := database.Query(
-		`SELECT user_id FROM group_members WHERE community_id = ? ORDER BY joined_at ASC LIMIT ?`,
+		`SELECT user_id, points FROM group_members WHERE community_id = ? ORDER BY points DESC, joined_at ASC LIMIT ?`,
 		communityID, limit,
 	)
 	if err != nil {
@@ -173,20 +174,16 @@ func loadMembers(database *sql.DB, communityID string, limit int) ([]string, err
 	}
 	defer rows.Close()
 
-	ids := make([]string, 0, limit)
+	members := make([]member, 0, limit)
 	for rows.Next() {
-		var userID string
-		if err := rows.Scan(&userID); err != nil {
+		var m member
+		if err := rows.Scan(&m.userID, &m.points); err != nil {
 			return nil, fmt.Errorf("contribution: scan member: %w", err)
 		}
-		ids = append(ids, userID)
+		members = append(members, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("contribution: iterate members: %w", err)
 	}
-	return ids, nil
-}
-
-func intPtr(v int) *int {
-	return &v
+	return members, nil
 }

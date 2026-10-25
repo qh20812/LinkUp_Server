@@ -943,6 +943,116 @@ func Run(env config.Env) error {
 			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE CASCADE,
 			INDEX idx_comment_reactions_comment_id (comment_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 47. Story extensions — bình thường do GORM AutoMigrate tạo lúc server
+		// khởi động, nhưng seed cần chúng để chèn lượt xem/cảm xúc/tắt story.
+		`CREATE TABLE IF NOT EXISTS story_views (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			story_id CHAR(36) NOT NULL,
+			viewer_id CHAR(36) NOT NULL,
+			viewed_at DATETIME(3) NULL,
+			INDEX idx_story_views_story_id (story_id),
+			INDEX idx_story_views_viewer_id (viewer_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		`CREATE TABLE IF NOT EXISTS story_interacts (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			story_id CHAR(36) NOT NULL,
+			user_id CHAR(36) NOT NULL,
+			` + "`type`" + ` VARCHAR(20) NOT NULL,
+			emoji_id VARCHAR(36) NULL,
+			click_count INT NOT NULL DEFAULT 1,
+			content TEXT NULL,
+			created_at DATETIME(3) NULL,
+			INDEX idx_story_interacts_story_id (story_id),
+			INDEX idx_story_interacts_user_id (user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		`CREATE TABLE IF NOT EXISTS story_mutes (
+			id CHAR(36) NOT NULL PRIMARY KEY,
+			user_id CHAR(36) NOT NULL,
+			muted_user_id CHAR(36) NOT NULL,
+			created_at DATETIME(3) NULL,
+			INDEX idx_story_mutes_user_id (user_id),
+			INDEX idx_story_mutes_muted_user_id (muted_user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 48. Ads packages / media — cũng do AutoMigrate tạo, seed cần để chèn
+		// gói quảng cáo và tệp đính kèm của chiến dịch.
+		`CREATE TABLE IF NOT EXISTS ad_packages (
+			id VARCHAR(36) NOT NULL PRIMARY KEY,
+			name VARCHAR(100) NOT NULL,
+			description TEXT NULL,
+			price_monthly DOUBLE NOT NULL,
+			max_slots BIGINT NOT NULL,
+			max_duration_days BIGINT NOT NULL,
+			supports_video TINYINT(1) DEFAULT 0,
+			supports_carousel TINYINT(1) DEFAULT 0,
+			has_advanced_analytics TINYINT(1) DEFAULT 0,
+			sort_order BIGINT DEFAULT 0,
+			created_at DATETIME(3) NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		`CREATE TABLE IF NOT EXISTS ad_media (
+			id VARCHAR(36) NOT NULL PRIMARY KEY,
+			ad_id VARCHAR(36) NOT NULL,
+			url TEXT NOT NULL,
+			media_type VARCHAR(20) DEFAULT 'image',
+			sort_order BIGINT DEFAULT 0,
+			created_at DATETIME(3) NULL,
+			INDEX idx_ad_media_ad_id (ad_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		`CREATE TABLE IF NOT EXISTS partner_subscriptions (
+			id VARCHAR(36) NOT NULL PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			package_id VARCHAR(36) NOT NULL,
+			slots_used BIGINT DEFAULT 0,
+			started_at DATETIME(3) NULL,
+			expires_at DATETIME(3) NULL,
+			status VARCHAR(20) DEFAULT 'active',
+			auto_renew TINYINT(1) DEFAULT 1,
+			created_at DATETIME(3) NULL,
+			updated_at DATETIME(3) NULL,
+			INDEX idx_partner_subscriptions_user_id (user_id),
+			INDEX idx_partner_subscriptions_package_id (package_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 49. post_views — log lượt xem đã dedup, dùng trong công thức xếp hạng
+		// feed và để giảm điểm bài đã xem. Server có AutoMigrate nhưng danh sách
+		// AutoMigrate dừng ở comment_reactions (lỗi index trên cột longtext),
+		// nên bảng này phải do seed tạo — thiếu nó là feed trả 500.
+		`CREATE TABLE IF NOT EXISTS post_views (
+			id CHAR(36) NOT NULL PRIMARY KEY,
+			post_id CHAR(36) NOT NULL,
+			viewer_id CHAR(36) NOT NULL,
+			source VARCHAR(16) NOT NULL,
+			created_at DATETIME(3) NULL,
+			INDEX idx_post_views_post_created (post_id, created_at),
+			INDEX idx_post_views_viewer_post_created (viewer_id, post_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 50. user_interests — điểm quan tâm theo hashtag cho feed rank v2.
+		`CREATE TABLE IF NOT EXISTS user_interests (
+			user_id CHAR(36) NOT NULL,
+			tag VARCHAR(255) NOT NULL,
+			score DOUBLE NOT NULL DEFAULT 0,
+			updated_at DATETIME(3) NULL,
+			PRIMARY KEY (user_id, tag)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 51. chat_user_settings — nền hội thoại riêng của từng người trong chat.
+		`CREATE TABLE IF NOT EXISTS chat_user_settings (
+			chat_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			background_type VARCHAR(20) NOT NULL DEFAULT '',
+			background_value VARCHAR(500) NOT NULL DEFAULT '',
+			overlay_strength INT NOT NULL DEFAULT 0,
+			hidden_at DATETIME(3) NULL,
+			created_at DATETIME(3) NULL,
+			updated_at DATETIME(3) NULL,
+			PRIMARY KEY (chat_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {
@@ -967,6 +1077,26 @@ func Run(env config.Env) error {
 		if err := addColumnIfMissing(database, "profiles", col.name, col.def); err != nil {
 			return fmt.Errorf("schema: add profiles.%s: %w", col.name, err)
 		}
+	}
+
+	// Gender + ad targeting. Các cột này server cũng thêm qua cmd/migrate, nhưng
+	// seed cần chúng tồn tại trước khi chèn dữ liệu (seed chạy trước server).
+	if err := addColumnIfMissing(database, "profiles", "gender", "VARCHAR(10) NULL DEFAULT NULL"); err != nil {
+		return fmt.Errorf("schema: add profiles.gender: %w", err)
+	}
+	for _, col := range []struct{ name, def string }{
+		{"target_gender", "VARCHAR(10) NOT NULL DEFAULT 'all'"},
+		{"target_age_min", "INT NOT NULL DEFAULT 0"},
+		{"target_age_max", "INT NOT NULL DEFAULT 100"},
+		{"target_locations", "JSON NULL"},
+		{"rejection_reason", "TEXT NULL"},
+	} {
+		if err := addColumnIfMissing(database, "ads", col.name, col.def); err != nil {
+			return fmt.Errorf("schema: add ads.%s: %w", col.name, err)
+		}
+	}
+	if err := addColumnIfMissing(database, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("schema: add ad_analytics.cost: %w", err)
 	}
 
 	// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE

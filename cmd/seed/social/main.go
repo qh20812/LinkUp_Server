@@ -1,24 +1,21 @@
 package social
 
 import (
+	"database/sql"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"linkup/cmd/seed/internal"
 	"linkup/config"
+	"linkup/seeddata"
+	"linkup/utils"
 )
 
-var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-func randRange(min, max int) int {
-	return rng.Intn(max-min+1) + min
-}
-
-func pick[T any](items []T) T {
-	return items[rng.Intn(len(items))]
-}
-
+// Run chèn toàn bộ nội dung xã hội từ seeddata: bài viết (kể cả repost), media,
+// bình luận, hashtag/mention, cảm xúc, lượt chia sẻ và quan hệ người dùng.
+//
+// Bài viết được chèn hai lượt: bài gốc trước, repost sau — vì repost tham chiếu
+// shared_from_post_id tới bài gốc.
 func Run(env config.Env, state *internal.SeedState) error {
 	database, err := internal.Connect(env)
 	if err != nil {
@@ -28,258 +25,350 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	now := time.Now().UTC()
 
-	postTitles := []string{
-		"My journey into open source",
-		"Building scalable APIs with Go",
-		"Top 10 VS Code extensions for 2026",
-		"How I learned to stop worrying and love the cloud",
-		"Understanding distributed systems",
-		"The future of AI in everyday apps",
-		"Clean code principles that matter",
-		"From monolith to microservices",
-		"Why recursive algorithms still matter",
-		"DevOps culture: more than just tools",
-		"Designing user-friendly interfaces",
-		"The art of code review",
-		"Database optimization techniques",
-		"Securing your web application",
-		"Containerization best practices",
-		"REST vs GraphQL: choosing the right API",
-		"Introduction to event-driven architecture",
-		"Performance tuning for high-traffic sites",
-		"Testing strategies for modern web apps",
-		"What I wish I knew as a junior dev",
-		"Building real-time features with WebSockets",
-		"CI/CD pipelines that actually work",
-		"Managing technical debt effectively",
-		"Data structures for interviews",
-		"Why documentation matters",
-		"Accessibility in web development",
-		"Edge computing and the IoT revolution",
-		"Blockchain beyond cryptocurrency",
-		"Serverless architecture trade-offs",
-		"Zero-trust security model explained",
+	// Bước relationships đã chèn cộng đồng; ở đây chỉ cần đảm bảo có ID cho
+	// mọi cộng đồng được bài viết tham chiếu.
+	for _, c := range seeddata.Communities {
+		if _, ok := state.CommunityIDByKey[c.Key]; !ok {
+			state.CommunityIDByKey[c.Key] = internal.UUID()
+		}
 	}
 
-	postContents := []string{
-		"After years of working with proprietary software, I finally made the leap to open source. The community has been incredibly welcoming and I've learned more in the past month than in the entire last year. Here are my key takeaways...",
-		"In this post I'll walk through the architecture of a high-performance API built with Go. We'll cover routing, middleware, database optimization, and deployment strategies that have worked well for our team.",
-		"I've curated a list of extensions that have significantly boosted my productivity. From intelligent code completion to advanced debugging tools, these plugins transform VS Code into a powerhouse.",
-		"Cloud computing doesn't have to be scary. Once you understand the fundamental concepts of scalability, redundancy, and cost optimization, you'll wonder why you didn't make the switch sooner.",
-		"Distributed systems are everywhere, but understanding them can be daunting. Let's break down the core concepts: consistency, partitioning, replication, and fault tolerance.",
-		"AI is no longer a futuristic concept — it's here and transforming how we build applications. From recommendation engines to natural language processing, the possibilities are endless.",
-		"Good code writes itself when you follow solid principles. Let's explore SRP, OCP, LSP, ISP, DIP with real-world examples that you can apply to your projects today.",
-		"Our journey from a monolithic Rails app to microservices taught us valuable lessons. Not everything needs to be a microservice, but when you get it right, the benefits are enormous.",
-		"Recursion isn't just an academic concept. From tree traversals to divide-and-conquer algorithms, understanding recursion will make you a better problem solver.",
-		"DevOps is a cultural shift, not a toolbox. The most successful transformations happen when teams embrace collaboration, automation, and continuous improvement.",
+	userID := func(key string) (string, error) {
+		id, ok := state.UserIDByUsername[key]
+		if !ok {
+			return "", fmt.Errorf("social: unknown user %q", key)
+		}
+		return id, nil
 	}
 
-	postBodies := []string{
-		"\n\nI'll cover specific examples from my own experience and provide actionable advice for anyone considering the switch. The open source ecosystem has matured enormously and there's never been a better time to get involved.",
-		"\n\nWe'll start with the basics of routing and middleware setup, then dive into more advanced topics like connection pooling, query optimization, and caching strategies.",
-		"\n\nEach extension on this list has been thoroughly tested and vetted. I'll include configuration tips and potential gotchas to watch out for.",
-		"\n\nThis guide covers the major cloud providers and their strengths, cost optimization strategies, security best practices, and how to choose the right services for your needs.",
-		"\n\nUnderstanding the CAP theorem, consensus algorithms like Raft and Paxos, and when to use synchronous vs asynchronous replication are all crucial skills.",
-		"\n\nWe'll look at practical applications of AI in everyday software: smart search, personalized recommendations, automated moderation, and predictive analytics.",
-		"\n\nEach principle comes with code examples showing both violations and correct implementations. You'll walk away with practical patterns you can use immediately.",
-		"\n\nKey lessons: start with a well-defined bounded context, invest in observability early, and never underestimate the complexity of data consistency across services.",
-		"\n\nWe'll implement several classic recursive algorithms and analyze their space/time complexity. You'll see how recursion maps naturally to certain problem domains.",
-		"\n\nPractical steps to build a DevOps culture: automate everything, blameless retrospectives, shared ownership of production, and continuous learning.",
-	}
+	postCreatedAt := make(map[string]time.Time, len(seeddata.Posts))
 
-	for i := 0; i < 30; i++ {
+	insertPost := func(p seeddata.Post) error {
+		authorID, err := userID(p.Author)
+		if err != nil {
+			return err
+		}
+
+		createdAt := now.Add(-time.Duration(p.AgeHours * float64(time.Hour)))
+
+		status := p.Status
+		if status == "" {
+			status = "public"
+		}
+
+		var communityID any
+		if p.Community != "" {
+			id, ok := state.CommunityIDByKey[p.Community]
+			if !ok {
+				return fmt.Errorf("social: post %s references unknown community %q", p.Key, p.Community)
+			}
+			communityID = id
+		}
+
+		var pinnedAt any
+		if p.Pinned {
+			pinnedAt = createdAt
+		}
+
 		postID := internal.UUID()
-		userID := state.UserIDs[internal.ContentIndex(i)]
-		title := postTitles[i%len(postTitles)]
-		body := postContents[i%len(postContents)]
-		extra := postBodies[i%len(postBodies)]
-		views := randRange(10, 5000)
 
-		status := "public"
-		if i%15 == 7 {
-			status = "hidden"
+		title := p.Title
+		content := p.Content
+		var shareContent any
+		var sharedFrom any
+
+		if p.ShareOf != "" {
+			originalID, ok := state.PostIDByKey[p.ShareOf]
+			if !ok {
+				return fmt.Errorf("social: repost %s references unknown post %q", p.Key, p.ShareOf)
+			}
+			// Repost giống service thật: không tiêu đề, không nội dung gốc,
+			// chỉ có share_content + shared_from_post_id.
+			title = ""
+			content = ""
+			sharedFrom = originalID
+			if p.ShareText != "" {
+				shareContent = p.ShareText
+			}
 		}
-
-		createdAt := now.Add(-time.Duration(randRange(1, 720)) * time.Hour)
 
 		if err := internal.Exec(database,
-			`INSERT INTO posts (id, user_id, title, content, views_count, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-			postID, userID, title, body+extra, views, status, createdAt,
+			`INSERT INTO posts (id, user_id, community_id, title, content, share_content, shared_from_post_id,
+				views_count, status, is_pinned, pinned_at, comments_enabled, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL)`,
+			postID, authorID, communityID, title, content, shareContent, sharedFrom,
+			p.Views, status, boolToInt(p.Pinned), pinnedAt, createdAt,
 		); err != nil {
-			return fmt.Errorf("social: insert post %d: %w", i, err)
+			return fmt.Errorf("social: insert post %s: %w", p.Key, err)
 		}
+
 		state.PostIDs = append(state.PostIDs, postID)
+		state.PostIDByKey[p.Key] = postID
+		postCreatedAt[p.Key] = createdAt
+
+		// Media của bài — luôn ở trạng thái approved để feed hiển thị.
+		for _, m := range p.Media {
+			mediaID := internal.UUID()
+			if err := internal.Exec(database,
+				`INSERT INTO media (id, user_id, post_id, file_uri, file_type, file_size, duration_seconds, status, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?)`,
+				mediaID, authorID, postID, m.URI, m.Type, m.Size, m.Duration, createdAt,
+			); err != nil {
+				return fmt.Errorf("social: insert media for %s: %w", p.Key, err)
+			}
+			state.MediaIDs = append(state.MediaIDs, mediaID)
+		}
+
+		// Ảnh/video có thể là media của post gốc; repost không có media riêng.
+
+		// Cảm xúc: rải đều vài phút sau khi đăng, không vượt quá hiện tại.
+		reactionSeen := make(map[string]bool, len(p.Reactions))
+		for i, r := range p.Reactions {
+			reactorID, err := userID(r.User)
+			if err != nil {
+				return err
+			}
+			emojiID, ok := state.EmojiIDByCode[":"+r.Emoji+":"]
+			if !ok {
+				return fmt.Errorf("social: unknown reaction emoji %q on post %s", r.Emoji, p.Key)
+			}
+			dupKey := reactorID + "|" + emojiID
+			if reactionSeen[dupKey] {
+				continue
+			}
+			reactionSeen[dupKey] = true
+
+			reactedAt := createdAt.Add(time.Duration(i+1) * time.Minute)
+			if reactedAt.After(now) {
+				reactedAt = now.Add(-time.Minute)
+			}
+
+			if err := internal.Exec(database,
+				`INSERT INTO post_reactions (id, user_id, post_id, emoji_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+				internal.UUID(), reactorID, postID, emojiID, reactedAt,
+			); err != nil {
+				return fmt.Errorf("social: insert reaction on %s: %w", p.Key, err)
+			}
+		}
+
+		// Hashtag + mention của bài (và của lời chia sẻ nếu là repost).
+		tagSource := content
+		if t, ok := shareContent.(string); ok {
+			tagSource += " " + t
+		}
+		if err := insertTags(database, postID, nil, tagSource, state); err != nil {
+			return fmt.Errorf("social: tags for post %s: %w", p.Key, err)
+		}
+
+		// Bình luận: cha trước, trả lời sau.
+		var insertComment func(c seeddata.Comment, parentID *string, parentAt time.Time) error
+		insertComment = func(c seeddata.Comment, parentID *string, parentAt time.Time) error {
+			authorID, err := userID(c.Author)
+			if err != nil {
+				return err
+			}
+
+			createdAt := now.Add(-time.Duration(c.AgeMin) * time.Minute)
+			minAt := postCreatedAt[p.Key].Add(time.Minute)
+			if parentID != nil {
+				minAt = parentAt.Add(time.Minute)
+			}
+			if createdAt.Before(minAt) {
+				createdAt = minAt
+			}
+			if createdAt.After(now) {
+				createdAt = now.Add(-time.Minute)
+			}
+
+			commentID := internal.UUID()
+			if err := internal.Exec(database,
+				`INSERT INTO comments (id, user_id, post_id, parent_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+				commentID, authorID, postID, parentID, c.Text, createdAt,
+			); err != nil {
+				return fmt.Errorf("insert comment: %w", err)
+			}
+			state.CommentIDs = append(state.CommentIDs, commentID)
+
+			if err := insertTags(database, postID, internal.Ptr(commentID), c.Text, state); err != nil {
+				return fmt.Errorf("tags for comment: %w", err)
+			}
+
+			for _, reply := range c.Replies {
+				if err := insertComment(reply, internal.Ptr(commentID), createdAt); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
+		for _, c := range p.Comments {
+			if err := insertComment(c, nil, time.Time{}); err != nil {
+				return fmt.Errorf("social: comment on %s: %w", p.Key, err)
+			}
+		}
+
+		// Lượt chia sẻ: repost luôn có một dòng post_shares để đếm.
+		if p.ShareOf != "" {
+			originalID := state.PostIDByKey[p.ShareOf]
+			if err := internal.Exec(database,
+				`INSERT INTO post_shares (id, post_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
+				internal.UUID(), originalID, authorID, p.ShareText, createdAt,
+			); err != nil {
+				return fmt.Errorf("social: insert share row for %s: %w", p.Key, err)
+			}
+		}
+
+		return nil
 	}
 
-	commentTexts := []string{
-		"Great post! Really insightful.",
-		"I completely agree with your points.",
-		"Thanks for sharing this, very helpful.",
-		"Have you considered the alternative approach?",
-		"This changed my perspective, thank you!",
-		"Can you elaborate more on this topic?",
-		"Saved for later reading. Excellent content!",
-		"I've been using this technique and it works great.",
-		"Bookmarked! This is exactly what I needed.",
-		"Interesting take, but I have a different opinion.",
-		"Could you share some code examples?",
-		"This is underrated, should have more visibility.",
-		"Well written and easy to follow.",
-		"I ran into this issue last week, perfect timing!",
-		"Adding this to my learning roadmap.",
-	}
-
-	for i := 0; i < 60; i++ {
-		commentID := internal.UUID()
-		userID := state.UserIDs[internal.ContentIndex(i)]
-		postID := state.PostIDs[i%len(state.PostIDs)]
-		var parentID *string
-		if i >= 30 && i%3 == 0 {
-			parentID = internal.Ptr(state.CommentIDs[i%len(state.CommentIDs)])
-		}
-
-		createdAt := now.Add(-time.Duration(randRange(1, 360)) * time.Hour)
-		content := pick(commentTexts)
-		if parentID != nil {
-			content = "Reply: " + content
-		}
-
-		if err := internal.Exec(database,
-			`INSERT INTO comments (id, user_id, post_id, parent_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			commentID, userID, postID, parentID, content, createdAt,
-		); err != nil {
-			return fmt.Errorf("social: insert comment %d: %w", i, err)
-		}
-		state.CommentIDs = append(state.CommentIDs, commentID)
-	}
-
-	for i := 0; i < 50; i++ {
-		postID := state.PostIDs[i%len(state.PostIDs)]
-		hashTags := []string{"golang", "programming", "devops", "cloud", "ai", "webdev", "security", "database", "microservices", "career"}
-		tagType := "hashtag"
-		var commentID *string
-		targetUserID := (*string)(nil)
-		name := pick(hashTags)
-
-		if i >= 25 {
-			tagType = "mention"
-			commentID = internal.Ptr(state.CommentIDs[i%len(state.CommentIDs)])
-			mentionIdx := internal.ContentIndex(i)
-			targetUserID = internal.Ptr(state.UserIDs[mentionIdx])
-			name = "@" + internal.SeedUsers[mentionIdx].Username
-		}
-
-		if err := internal.Exec(database,
-			`INSERT INTO tags (id, post_id, comment_id, tag_type, target_user_id, name) VALUES (?, ?, ?, ?, ?, ?)`,
-			internal.UUID(), postID, commentID, tagType, targetUserID, name,
-		); err != nil {
-			return fmt.Errorf("social: insert tag %d: %w", i, err)
-		}
-	}
-
-	reactionSeen := map[string]bool{}
-	for i := 0; i < 80; i++ {
-		userID := state.UserIDs[randRange(2, len(state.UserIDs)-1)]
-		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
-		// Chỉ random trong 10 reaction legacy — random cả 3.6k emoji sẽ ra
-		// reaction lạ, không giống hành vi người dùng thật.
-		emojiID := state.ReactionEmojiIDs[randRange(0, len(state.ReactionEmojiIDs)-1)]
-		key := userID + "|" + postID + "|" + emojiID
-		if reactionSeen[key] {
+	// Lượt 1: bài gốc.
+	for _, p := range seeddata.Posts {
+		if p.ShareOf != "" {
 			continue
 		}
-		reactionSeen[key] = true
-
-		if err := internal.Exec(database,
-			`INSERT INTO post_reactions (id, user_id, post_id, emoji_id, created_at) VALUES (?, ?, ?, ?, ?)`,
-			internal.UUID(), userID, postID, emojiID, now.Add(-time.Duration(randRange(1, 168))*time.Hour),
-		); err != nil {
-			return fmt.Errorf("social: insert reaction %d: %w", i, err)
+		if err := insertPost(p); err != nil {
+			return err
 		}
 	}
 
-	followSeen := map[string]bool{}
-	for i := 0; i < 40; i++ {
-		followerIdx := randRange(2, len(state.UserIDs)-1)
-		// Cả follower lẫn following đều là user thường — không ai trong hệ thống role (superadmin/admin)
-		followingIdx := randRange(2, len(state.UserIDs)-1)
-		if followerIdx == followingIdx {
+	// Lượt 2: repost (đã có bài gốc để tham chiếu).
+	for _, p := range seeddata.Posts {
+		if p.ShareOf == "" {
 			continue
 		}
-		key := state.UserIDs[followerIdx] + "|" + state.UserIDs[followingIdx]
-		if followSeen[key] {
-			continue
+		if err := insertPost(p); err != nil {
+			return err
 		}
-		followSeen[key] = true
+	}
 
+	// Lượt chia sẻ bổ sung (không tạo bài repost).
+	for _, s := range seeddata.Shares {
+		sharerID, err := userID(s.User)
+		if err != nil {
+			return err
+		}
+		postID, ok := state.PostIDByKey[s.Post]
+		if !ok {
+			return fmt.Errorf("social: share references unknown post %q", s.Post)
+		}
+		createdAt := now.Add(-time.Duration(s.AgeMin) * time.Minute)
+		if err := internal.Exec(database,
+			`INSERT INTO post_shares (id, post_id, user_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
+			internal.UUID(), postID, sharerID, s.Text, createdAt,
+		); err != nil {
+			return fmt.Errorf("social: insert extra share %s→%s: %w", s.User, s.Post, err)
+		}
+	}
+
+	// Theo dõi.
+	for i, f := range seeddata.Follows {
+		followerID, err := userID(f.Follower)
+		if err != nil {
+			return err
+		}
+		followingID, err := userID(f.Following)
+		if err != nil {
+			return err
+		}
+		createdAt := now.Add(-time.Duration(10+i*3) * 24 * time.Hour)
 		if err := internal.Exec(database,
 			`INSERT INTO follows (id, follower_id, following_id, created_at) VALUES (?, ?, ?, ?)`,
-			internal.UUID(), state.UserIDs[followerIdx], state.UserIDs[followingIdx], now.Add(-time.Duration(randRange(1, 720))*time.Hour),
+			internal.UUID(), followerID, followingID, createdAt,
 		); err != nil {
-			return fmt.Errorf("social: insert follow %d: %w", i, err)
+			return fmt.Errorf("social: insert follow %s→%s: %w", f.Follower, f.Following, err)
 		}
 	}
 
-	friendStatuses := []string{"pending", "accepted", "accepted", "accepted", "rejected"}
-	friendSeen := map[string]bool{}
-	for i := 0; i < 15; i++ {
-		senderIdx := randRange(2, len(state.UserIDs)-1)
-		receiverIdx := randRange(2, len(state.UserIDs)-1)
-		if senderIdx == receiverIdx {
-			continue
+	// Bạn bè (mỗi cặp một dòng; accepted là đã kết bạn).
+	for _, f := range seeddata.Friends {
+		senderID, err := userID(f.Sender)
+		if err != nil {
+			return err
 		}
-		key := state.UserIDs[senderIdx] + "|" + state.UserIDs[receiverIdx]
-		if friendSeen[key] {
-			continue
+		receiverID, err := userID(f.Receiver)
+		if err != nil {
+			return err
 		}
-		friendSeen[key] = true
-
+		createdAt := now.Add(-time.Duration(f.AgeDays) * 24 * time.Hour)
 		if err := internal.Exec(database,
 			`INSERT INTO friends (id, sender_id, receiver_id, status, created_at) VALUES (?, ?, ?, ?, ?)`,
-			internal.UUID(), state.UserIDs[senderIdx], state.UserIDs[receiverIdx], pick(friendStatuses), now.Add(-time.Duration(randRange(1, 720))*time.Hour),
+			internal.UUID(), senderID, receiverID, f.Status, createdAt,
 		); err != nil {
-			return fmt.Errorf("social: insert friend %d: %w", i, err)
+			return fmt.Errorf("social: insert friend %s→%s: %w", f.Sender, f.Receiver, err)
 		}
 	}
 
-	blockSeen := map[string]bool{}
-	for i := 0; i < 5; i++ {
-		userIdx := randRange(2, len(state.UserIDs)-1)
-		blockedIdx := randRange(2, len(state.UserIDs)-1)
-		if userIdx == blockedIdx {
-			continue
+	// Chặn.
+	for _, b := range seeddata.Blocks {
+		blockerID, err := userID(b.User)
+		if err != nil {
+			return err
 		}
-		key := state.UserIDs[userIdx] + "|" + state.UserIDs[blockedIdx]
-		if blockSeen[key] {
-			continue
+		blockedID, err := userID(b.Blocked)
+		if err != nil {
+			return err
 		}
-		blockSeen[key] = true
-
+		createdAt := now.Add(-time.Duration(b.AgeDays) * 24 * time.Hour)
 		if err := internal.Exec(database,
 			`INSERT INTO blocks (id, user_id, blocked_user_id, created_at) VALUES (?, ?, ?, ?)`,
-			internal.UUID(), state.UserIDs[userIdx], state.UserIDs[blockedIdx], now.Add(-time.Duration(randRange(1, 720))*time.Hour),
+			internal.UUID(), blockerID, blockedID, createdAt,
 		); err != nil {
-			return fmt.Errorf("social: insert block %d: %w", i, err)
+			return fmt.Errorf("social: insert block %s→%s: %w", b.User, b.Blocked, err)
 		}
 	}
 
-	bookmarkSeen := map[string]bool{}
-	for i := 0; i < 20; i++ {
-		userID := state.UserIDs[randRange(2, len(state.UserIDs)-1)]
-		postID := state.PostIDs[randRange(0, len(state.PostIDs)-1)]
-		key := userID + "|" + postID
-		if bookmarkSeen[key] {
-			continue
+	// Bài đã lưu.
+	for _, b := range seeddata.Bookmarks {
+		bookmarkerID, err := userID(b.User)
+		if err != nil {
+			return err
 		}
-		bookmarkSeen[key] = true
-
+		postID, ok := state.PostIDByKey[b.Post]
+		if !ok {
+			return fmt.Errorf("social: bookmark references unknown post %q", b.Post)
+		}
+		createdAt := now.Add(-time.Duration(b.AgeDays) * 24 * time.Hour)
 		if err := internal.Exec(database,
 			`INSERT INTO bookmarks (id, user_id, post_id, created_at) VALUES (?, ?, ?, ?)`,
-			internal.UUID(), userID, postID, now.Add(-time.Duration(randRange(1, 168))*time.Hour),
+			internal.UUID(), bookmarkerID, postID, createdAt,
 		); err != nil {
-			return fmt.Errorf("social: insert bookmark %d: %w", i, err)
+			return fmt.Errorf("social: insert bookmark %s→%s: %w", b.User, b.Post, err)
 		}
 	}
 
 	return nil
+}
+
+// insertTags chèn hashtag và mention của một nội dung. commentID nil nghĩa là
+// tag gắn ở cấp bài viết.
+func insertTags(database *sql.DB, postID string, commentID *string, content string, state *internal.SeedState) error {
+	for _, name := range utils.ExtractHashtags(content) {
+		if err := internal.Exec(database,
+			`INSERT INTO tags (id, post_id, comment_id, tag_type, target_user_id, name) VALUES (?, ?, ?, 'hashtag', NULL, ?)`,
+			internal.UUID(), postID, commentID, name,
+		); err != nil {
+			return fmt.Errorf("insert hashtag %q: %w", name, err)
+		}
+	}
+
+	for _, mention := range utils.ExtractMentions(content) {
+		targetID, ok := state.UserIDByUsername[mention]
+		if !ok {
+			continue
+		}
+		if err := internal.Exec(database,
+			`INSERT INTO tags (id, post_id, comment_id, tag_type, target_user_id, name) VALUES (?, ?, ?, 'mention', ?, ?)`,
+			internal.UUID(), postID, commentID, targetID, "@"+mention,
+		); err != nil {
+			return fmt.Errorf("insert mention %q: %w", mention, err)
+		}
+	}
+	return nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
