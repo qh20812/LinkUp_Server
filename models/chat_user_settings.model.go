@@ -19,6 +19,10 @@ type ChatUserSettings struct {
     // Overlay strength percent applied on top of the adaptive readability
     // overlay (30–150, 100 = as designed). Per chat per user.
     OverlayStrength int            `json:"overlay_strength" gorm:"column:overlay_strength"`
+    // HiddenAt ẩn hội thoại ở phía RIÊNG người dùng này (xóa cục bộ). Tin nhắn,
+    // khóa E2E và hội thoại của đối phương giữ nguyên; hội thoại xuất hiện lại
+    // khi có tin nhắn mới hơn mốc này.
+    HiddenAt        *time.Time     `json:"hidden_at,omitempty" gorm:"column:hidden_at"`
     CreatedAt       time.Time      `json:"created_at"`
     UpdatedAt       time.Time      `json:"updated_at"`
 }

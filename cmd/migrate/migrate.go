@@ -252,6 +252,7 @@ func Run(db *gorm.DB) {
 			background_type VARCHAR(20) NULL,
 			background_value VARCHAR(500) NULL,
 			overlay_strength INT NOT NULL DEFAULT 100,
+			hidden_at DATETIME NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			PRIMARY KEY (chat_id, user_id),
@@ -262,6 +263,7 @@ func Run(db *gorm.DB) {
 		}
 	}
 	ensureColumn(db, "chat_user_settings", "overlay_strength", "INT NOT NULL DEFAULT 100")
+	ensureColumn(db, "chat_user_settings", "hidden_at", "DATETIME NULL")
 	ensureForeignKey(db, "chat_user_settings", "fk_cus_chat", "chat_id", "chats", "id")
 	ensureForeignKey(db, "chat_user_settings", "fk_cus_user", "user_id", "users", "id")
 

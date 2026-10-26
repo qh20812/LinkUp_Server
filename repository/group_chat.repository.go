@@ -469,6 +469,9 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeGroup).
+		// Xóa hội thoại là cục bộ: chỉ ẩn ở phía người dùng này, nhóm của các
+		// thành viên khác không đổi; hiện lại khi có tin nhắn mới hơn hidden_at.
+		Where("(cus.hidden_at IS NULL OR COALESCE(lm.created_at, chats.created_at) > cus.hidden_at)").
 		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value, cus.overlay_strength").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error

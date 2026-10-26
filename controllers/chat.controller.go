@@ -221,7 +221,7 @@ func (ctrl *ChatController) DeleteChat(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"error": "Xóa phòng chat thành công"})
+	c.JSON(http.StatusOK, gin.H{"error": "Đã xóa hội thoại khỏi danh sách"})
 }
 
 type SharePostInput struct {
