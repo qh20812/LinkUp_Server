@@ -34,7 +34,7 @@ type Community struct {
 	Avatar       string
 	Background   string
 	Creator      string
-	Privacy      string // public | private
+	Privacy      string // public | invitation_only (khớp models.CommunityPrivacy)
 	AutoApprove  bool
 	Members      []CommunityMember
 	Rules        []Rule
@@ -173,7 +173,7 @@ var Communities = []Community{
 		Key: "review-phim-sach", Name: "Review Phim & Sách",
 		Description: "Cộng đồng nhỏ, review có tâm. Spoiler phải có cảnh báo. Không review phim chưa xem hết.",
 		Avatar:      ImgBooks2, Background: ImgHue1,
-		Creator: "bichha_to", Privacy: "private", AutoApprove: false,
+		Creator: "bichha_to", Privacy: "invitation_only", AutoApprove: false,
 		Members: []CommunityMember{
 			{User: "bichha_to", Points: 3240},
 			{User: "thutrang_le", Points: 2680},

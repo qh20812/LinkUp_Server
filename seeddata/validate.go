@@ -72,6 +72,14 @@ func Validate() error {
 		if err := requireUser("cộng đồng "+c.Key+" creator", c.Creator); err != nil {
 			return err
 		}
+		// Cột communities.privacy là varchar(20) nên DB nhận mọi chuỗi; web lại
+		// index map theo đúng 2 giá trị của models.CommunityPrivacy. Một giá trị
+		// lạ từng làm sập cả trang /communities (t(undefined)), nên chặn từ đây.
+		switch c.Privacy {
+		case "public", "invitation_only":
+		default:
+			return fmt.Errorf("seeddata: cộng đồng %q có privacy %q không hợp lệ (chỉ nhận public | invitation_only)", c.Key, c.Privacy)
+		}
 		if len(c.Members) == 0 {
 			return fmt.Errorf("seeddata: cộng đồng %q không có thành viên", c.Key)
 		}
