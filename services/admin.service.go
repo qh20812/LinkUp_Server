@@ -1435,6 +1435,9 @@ func (s *AdminService) GetFeedMetrics(ctx context.Context, adminID string, days 
 		SmallAuthorsSurfaced: m.SmallAuthorsSurfaced,
 		PostReports:          m.PostReports,
 		SmallAuthorThreshold: threshold,
+		ImpressionsTotal:     m.ImpressionsTotal,
+		HiddenPosts:          m.HiddenPosts,
+		TopSlotVariety:       m.TopSlotVariety,
 	}
 	if m.FeedViews > 0 {
 		resp.DetailCTR = float64(m.DetailViews) / float64(m.FeedViews)

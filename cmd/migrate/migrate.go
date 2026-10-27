@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"linkup/config"
 	"linkup/models"
 	"linkup/seeddata"
 	"linkup/utils"
@@ -43,6 +44,11 @@ func Run(db *gorm.DB) {
 	if err != nil {
 		log.Printf("Warning: Migration failed: %v", err)
 	}
+
+	// Bảng của feed rank v2.1 tạo bằng SQL thuần và chạy TRƯỚC mọi bước khác,
+	// vì AutoMigrate ở trên có thể abort sớm (comment_reactions lỗi 1170) và
+	// khi đó rank v2 sẽ 500 do thiếu post_hidden / feed_hero_state.
+	ensureFeedRankTables(db)
 
 	// Thêm cột messages.e2e_version (0 = legacy server-encrypted, 1 = E2E)
 	// idempotent, không làm mất dữ liệu khi chạy lại.
@@ -489,5 +495,59 @@ func ensureIndex(db *gorm.DB, table, indexName, columns string) {
 	}
 	if err := db.Exec("CREATE INDEX " + indexName + " ON " + table + " (" + columns + ")").Error; err != nil {
 		log.Printf("Warning: ensure index %s: %v", indexName, err)
+	}
+}
+
+// ensureFeedRankTables tạo 3 bảng của feed rank v2.1 bằng SQL thuần:
+//   - feed_hero_state: vòng xoay slot #1 của từng user (bài không đứng đầu mãi)
+//   - post_hidden:     tín hiệu âm "Không quan tâm"
+//   - feed_impressions: vị trí/điểm của trang 1, không dedup theo ngày
+//
+// Đặt riêng khỏi AutoMigrate vì AutoMigrate có thể abort ở comment_reactions
+// (Error 1170) trên DB cũ; khi đó rank v2 sẽ 500 ngay ở câu query đầu tiên.
+func ensureFeedRankTables(db *gorm.DB) {
+	if !db.Migrator().HasTable("feed_hero_state") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS feed_hero_state (
+			user_id CHAR(36) NOT NULL PRIMARY KEY,
+			hero_round INT NOT NULL DEFAULT 0,
+			updated_at DATETIME(3) NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create feed_hero_state table: %v", err)
+		}
+	}
+	if !db.Migrator().HasTable("post_hidden") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS post_hidden (
+			user_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			reason VARCHAR(32) NOT NULL DEFAULT 'not_interested',
+			created_at DATETIME(3) NOT NULL,
+			PRIMARY KEY (user_id, post_id),
+			INDEX idx_post_hidden_post (post_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create post_hidden table: %v", err)
+		}
+	}
+	if !db.Migrator().HasTable("feed_impressions") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS feed_impressions (
+			id CHAR(36) NOT NULL PRIMARY KEY,
+			request_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			viewer_id CHAR(36) NOT NULL,
+			position INT NOT NULL,
+			score DOUBLE NOT NULL,
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_feed_impressions_viewer_created (viewer_id, created_at),
+			INDEX idx_feed_impressions_post_viewer (post_id, viewer_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create feed_impressions table: %v", err)
+		}
+	}
+
+	// Một lần: kéo các điểm interest cũ vượt trần về đúng trần mới.
+	if db.Migrator().HasTable("user_interests") {
+		cap := config.DefaultFeedRankV2.InterestScoreCap
+		if err := db.Exec("UPDATE user_interests SET score = ? WHERE score > ?", cap, cap).Error; err != nil {
+			log.Printf("Warning: clamp user_interests: %v", err)
+		}
 	}
 }

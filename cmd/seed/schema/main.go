@@ -1053,6 +1053,36 @@ func Run(env config.Env) error {
 			updated_at DATETIME(3) NULL,
 			PRIMARY KEY (chat_id, user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 52. feed_hero_state — vòng xoay slot #1 của feed rank v2.1.
+		`CREATE TABLE IF NOT EXISTS feed_hero_state (
+			user_id CHAR(36) NOT NULL PRIMARY KEY,
+			hero_round INT NOT NULL DEFAULT 0,
+			updated_at DATETIME(3) NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 53. post_hidden — tín hiệu "Không quan tâm" (loại khỏi feed).
+		`CREATE TABLE IF NOT EXISTS post_hidden (
+			user_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			reason VARCHAR(32) NOT NULL DEFAULT 'not_interested',
+			created_at DATETIME(3) NOT NULL,
+			PRIMARY KEY (user_id, post_id),
+			INDEX idx_post_hidden_post (post_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 54. feed_impressions — vị trí/điểm của trang 1, KHÔNG dedup theo ngày.
+		`CREATE TABLE IF NOT EXISTS feed_impressions (
+			id CHAR(36) NOT NULL PRIMARY KEY,
+			request_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			viewer_id CHAR(36) NOT NULL,
+			position INT NOT NULL,
+			score DOUBLE NOT NULL,
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_feed_impressions_viewer_created (viewer_id, created_at),
+			INDEX idx_feed_impressions_post_viewer (post_id, viewer_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
 
 	for _, stmt := range statements {

@@ -38,6 +38,40 @@ func ValidateCreateAd(title, content, targetURL, format string, budget float64) 
 	return nil
 }
 
+// ValidateUpdateAd chỉ kiểm tra những trường client thực sự gửi lên (PATCH bán
+// phần), để trường vắng mặt không bị coi là "để trống".
+func ValidateUpdateAd(title, content, targetURL string, budget float64) error {
+	if title != "" {
+		trimmed := strings.TrimSpace(title)
+		if trimmed == "" {
+			return errors.New("tiêu đề không được để trống")
+		}
+		if len(trimmed) > 100 {
+			return errors.New("tiêu đề không được vượt quá 100 ký tự")
+		}
+	}
+
+	if content != "" {
+		trimmed := strings.TrimSpace(content)
+		if trimmed == "" {
+			return errors.New("nội dung không được để trống")
+		}
+		if len(trimmed) > 2000 {
+			return errors.New("nội dung không được vượt quá 2000 ký tự")
+		}
+	}
+
+	if targetURL != "" && strings.TrimSpace(targetURL) == "" {
+		return errors.New("link đích không được để trống")
+	}
+
+	if budget < 0 {
+		return errors.New("ngân sách phải lớn hơn 0")
+	}
+
+	return nil
+}
+
 func ValidateTargeting(gender string, ageMin, ageMax int) error {
 	if gender != "" && gender != "all" && gender != "male" && gender != "female" {
 		return errors.New("target_gender phải là all, male hoặc female")

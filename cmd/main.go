@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
@@ -362,8 +367,67 @@ func main() {
 
 	// 7. Khởi chạy toàn bộ hệ thống HTTP Server
 	addr := ":" + port
-	fmt.Printf("Server listening on http://localhost%s\n", addr)
-	if err := router.Run(addr); err != nil {
+	ln, err := listenWithRetry(addr, 10, 500*time.Millisecond)
+	if err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
+	// Chỉ in sau khi đã bind được cổng: trước đây dòng "Server listening" hiện
+	// ra cả khi bind thất bại (instance khác đang giữ cổng), khiến người đọc
+	// tưởng server tự dừng ngay sau khi khởi động.
+	fmt.Printf("Server listening on http://localhost%s\n", addr)
+	if err := http.Serve(ln, router); err != nil {
+		log.Fatalf("server stopped: %v", err)
+	}
+}
+
+// isAddrInUse nhận diện lỗi "cổng đã bị tiến trình khác chiếm".
+func isAddrInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		// Trên Windows, net.Listen trả errno Winsock (WSAEADDRINUSE = 10048)
+		// chứ không phải syscall.EADDRINUSE, nên errors.Is ở trên không khớp.
+		const wsaEADDRINUSE = 10048
+		return runtime.GOOS == "windows" && uintptr(errno) == wsaEADDRINUSE
+	}
+	return false
+}
+
+// listenWithRetry mở cổng, thử lại khi cổng còn bận.
+//
+// air giết tiến trình cũ rồi chạy binary mới gần như tức thì. Trên Windows cổng
+// có thể chưa kịp nhả, làm tiến trình mới chết với "Only one usage of each socket
+// address" và server dừng hẳn cho tới lần sửa file sau. Retry ngắn ở đây hấp thụ
+// khoảng trễ đó; nếu vẫn bận thì trả lỗi nói rõ phải tắt instance đang chạy.
+func listenWithRetry(addr string, attempts int, delay time.Duration) (net.Listener, error) {
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			return ln, nil
+		}
+		lastErr = err
+
+		if !isAddrInUse(err) {
+			return nil, err
+		}
+		if attempt < attempts {
+			time.Sleep(delay)
+		}
+	}
+
+	return nil, fmt.Errorf(
+		"cổng %s đang được tiến trình khác sử dụng — tắt instance đang chạy rồi thử lại (chi tiết: %w)",
+		addr, lastErr,
+	)
 }

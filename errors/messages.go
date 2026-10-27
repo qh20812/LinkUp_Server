@@ -82,6 +82,7 @@ var Messages = map[string]string{
 	"post.ALREADY_SHARED":                "Bạn đã chia sẻ bài viết này rồi",
 	"post.CANNOT_SAVE_OWN":               "Bạn không thể lưu bài viết của chính mình",
 	"post.CANNOT_DELETE_OTHERS":          "Bạn không có quyền xóa bài viết của người khác",
+	"post.CANNOT_HIDE_OWN":               "Bạn không thể ẩn bài viết của chính mình",
 	"post.CONTRIBUTION_SERVICE_NOT_INIT": "Dịch vụ contribution chưa được khởi tạo",
 
 	// Post - Comment

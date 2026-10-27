@@ -20,6 +20,8 @@ func RegisterPostRoutes(router *gin.Engine, ctrl *controllers.PostController, en
 		apiGroup.GET("/posts/user/:userID", middlewares.AuthMiddleware(env, db), ctrl.GetUserPosts)
 		apiGroup.GET("/posts/:id", middlewares.OptionalAuth(env, db), ctrl.ViewPostDetail)
 		apiGroup.POST("/posts/:id/view", middlewares.AuthMiddleware(env, db), ctrl.TrackPostView)
+		apiGroup.POST("/posts/:id/hide", middlewares.AuthMiddleware(env, db), ctrl.HidePost)
+		apiGroup.DELETE("/posts/:id/hide", middlewares.AuthMiddleware(env, db), ctrl.UnhidePost)
 		apiGroup.POST("/posts", middlewares.AuthMiddleware(env, db), ctrl.CreatePost)
 		apiGroup.DELETE("/posts/:id", middlewares.AuthMiddleware(env, db), ctrl.DeletePost)
 		apiGroup.POST("/posts/:id/react", middlewares.AuthMiddleware(env, db), ctrl.ReactPost)

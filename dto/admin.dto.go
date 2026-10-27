@@ -544,4 +544,10 @@ type AdminFeedMetricsResponse struct {
 	SmallAuthorsSurfaced   int64   `json:"small_authors_surfaced"`
 	PostReports            int64   `json:"post_reports"`
 	SmallAuthorThreshold   int     `json:"small_author_threshold"`
+
+	// Từ v2.1: đo vòng xoay top slot và tín hiệu âm.
+	ImpressionsTotal int64 `json:"impressions_total"`
+	HiddenPosts      int64 `json:"hidden_posts"`
+	// TopSlotVariety ~1 nghĩa là bài #1 đứng im; càng cao càng xoay.
+	TopSlotVariety float64 `json:"top_slot_variety"`
 }

@@ -90,20 +90,26 @@ func (s *AdminSettingsService) UpdateSettings(ctx context.Context, adminID strin
 }
 
 func (s *AdminSettingsService) ensureSuperAdmin(ctx context.Context, adminID string) error {
-	var roleName string
+	// Một user có thể có nhiều role nền tảng (vd. SUPER_ADMIN + USER), nên phải
+	// đọc hết rồi kiểm tra có SUPER_ADMIN hay không thay vì lấy một dòng.
+	var roleNames []string
 	err := s.repo.DB().WithContext(ctx).Table("roles").
-		Select("roles.name").
 		Joins("JOIN user_roles ON user_roles.role_id = roles.id").
 		Where("user_roles.user_id = ?", adminID).
 		Where("user_roles.scope_id IS NULL").
-		Scan(&roleName).Error
-	if err != nil || roleName == "" {
+		Pluck("roles.name", &roleNames).Error
+	if err != nil {
 		return errors.Wrap(errors.ErrCodeAdminNoAccess, err)
 	}
-	if roleName != string(models.RoleSuperAdmin) {
-		return errors.New(errors.ErrCodeAdminNotSuperadmin)
+	if len(roleNames) == 0 {
+		return errors.New(errors.ErrCodeAdminNoAccess)
 	}
-	return nil
+	for _, roleName := range roleNames {
+		if roleName == string(models.RoleSuperAdmin) {
+			return nil
+		}
+	}
+	return errors.New(errors.ErrCodeAdminNotSuperadmin)
 }
 
 func validateSettingValue(key, value, expectedType string) error {

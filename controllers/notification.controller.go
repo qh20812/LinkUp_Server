@@ -36,13 +36,16 @@ type UpdatePreferencesInput struct {
 }
 
 func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	unreadOnly, _ := strconv.ParseBool(c.DefaultQuery("unreadOnly", "false"))
 
-	notifications, total, err := ctrl.service.GetList(c.Request.Context(), userID.(string), page, pageSize, unreadOnly)
+	notifications, total, err := ctrl.service.GetList(c.Request.Context(), userID, page, pageSize, unreadOnly)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -56,10 +59,13 @@ func (ctrl *NotificationController) GetNotifications(c *gin.Context) {
 }
 
 func (ctrl *NotificationController) MarkAsRead(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 	notifID := c.Param("id")
 
-	if err := ctrl.service.MarkAsRead(c.Request.Context(), userID.(string), notifID); err != nil {
+	if err := ctrl.service.MarkAsRead(c.Request.Context(), userID, notifID); err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -68,9 +74,12 @@ func (ctrl *NotificationController) MarkAsRead(c *gin.Context) {
 }
 
 func (ctrl *NotificationController) MarkAllAsRead(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 
-	if err := ctrl.service.MarkAllAsRead(c.Request.Context(), userID.(string)); err != nil {
+	if err := ctrl.service.MarkAllAsRead(c.Request.Context(), userID); err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -79,9 +88,12 @@ func (ctrl *NotificationController) MarkAllAsRead(c *gin.Context) {
 }
 
 func (ctrl *NotificationController) GetUnreadCount(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 
-	count, err := ctrl.service.GetUnreadCount(c.Request.Context(), userID.(string))
+	count, err := ctrl.service.GetUnreadCount(c.Request.Context(), userID)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -93,16 +105,19 @@ func (ctrl *NotificationController) GetUnreadCount(c *gin.Context) {
 // GetSummary gộp unread-count + 5 thông báo mới nhất cho dropdown poll:
 // 1 round-trip thay vì 2, chung 1 lần auth middleware.
 func (ctrl *NotificationController) GetSummary(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 	ctx := c.Request.Context()
 
-	count, err := ctrl.service.GetUnreadCount(ctx, userID.(string))
+	count, err := ctrl.service.GetUnreadCount(ctx, userID)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	preview, _, err := ctrl.service.GetList(ctx, userID.(string), 1, 5, false)
+	preview, _, err := ctrl.service.GetList(ctx, userID, 1, 5, false)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -115,9 +130,12 @@ func (ctrl *NotificationController) GetSummary(c *gin.Context) {
 }
 
 func (ctrl *NotificationController) GetPreferences(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 
-	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID.(string))
+	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -127,7 +145,10 @@ func (ctrl *NotificationController) GetPreferences(c *gin.Context) {
 }
 
 func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 
 	var input UpdatePreferencesInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -140,7 +161,7 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 		return
 	}
 
-	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID.(string))
+	pref, err := ctrl.service.GetPreferences(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -148,7 +169,7 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 	if pref == nil {
 		// No row yet = all types enabled (matches Create's nil-pref behavior).
 		pref = &models.NotificationPreference{
-			UserID:               userID.(string),
+			UserID:               userID,
 			LikeEnabled:          true,
 			CommentEnabled:       true,
 			FollowEnabled:        true,
@@ -201,7 +222,10 @@ func (ctrl *NotificationController) UpdatePreferences(c *gin.Context) {
 }
 
 func (ctrl *NotificationController) RegisterPushToken(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 
 	var input struct {
 		PushToken string `json:"push_token" binding:"required"`
@@ -214,7 +238,7 @@ func (ctrl *NotificationController) RegisterPushToken(c *gin.Context) {
 	now := time.Now().UTC()
 	token := &models.PushToken{
 		ID:        utils.GenerateUUID(),
-		UserID:    userID.(string),
+		UserID:    userID,
 		PushToken: input.PushToken,
 		Platform:  "expo",
 		CreatedAt: now,

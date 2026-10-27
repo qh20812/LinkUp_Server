@@ -101,6 +101,11 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 		return
 	}
 
+	// ?debug=1 chỉ có tác dụng khi server bật FEED_DEBUG (mặc định tắt).
+	if useV2 && userIDStr != "" && c.Query("debug") == "1" && config.FeedDebugEnabled() {
+		ctrl.service.AttachFeedDebug(c.Request.Context(), userIDStr, posts)
+	}
+
 	var nc *string
 	if nextCursor != "" {
 		nc = &nextCursor
@@ -237,6 +242,52 @@ func (ctrl *PostController) TrackPostView(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"counted": counted})
+}
+
+// HidePost lưu tín hiệu "Không quan tâm". Bài bị loại khỏi mọi stream feed
+// của chính user (idempotent — ẩn lại không lỗi).
+func (ctrl *PostController) HidePost(c *gin.Context) {
+	postID := c.Param("id")
+	if postID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
+		return
+	}
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	if err := ctrl.service.HidePost(c.Request.Context(), userID, postID); err != nil {
+		respondPostServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hidden": true})
+}
+
+// UnhidePost bỏ tín hiệu "Không quan tâm" (Hoàn tác trên web).
+func (ctrl *PostController) UnhidePost(c *gin.Context) {
+	postID := c.Param("id")
+	if postID == "" {
+		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodePostIDRequired))
+		return
+	}
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	if err := ctrl.service.UnhidePost(c.Request.Context(), userID, postID); err != nil {
+		respondPostServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hidden": false})
+}
+
+// respondPostServiceError map AppError sang status code tương ứng, còn lại 500.
+func respondPostServiceError(c *gin.Context, err error) {
+	if appErr, ok := errorsapp.IsAppError(err); ok {
+		errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		return
+	}
+	errorsapp.Respond(c, http.StatusInternalServerError, err)
 }
 
 func (ctrl *PostController) ReactPost(c *gin.Context) {

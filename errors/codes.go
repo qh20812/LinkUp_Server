@@ -30,6 +30,7 @@ const (
 	ErrCodePostAlreadyShared       = "post.ALREADY_SHARED"
 	ErrCodePostCannotSaveOwn       = "post.CANNOT_SAVE_OWN"
 	ErrCodePostCannotDeleteOthers  = "post.CANNOT_DELETE_OTHERS"
+	ErrCodePostCannotHideOwn       = "post.CANNOT_HIDE_OWN"
 	ErrCodePostContributionNotInit = "post.CONTRIBUTION_SERVICE_NOT_INIT"
 
 	// Post - Comment

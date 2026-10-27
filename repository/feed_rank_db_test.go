@@ -36,10 +36,16 @@ func connectAndMigrateFeedRank(t *testing.T) *gorm.DB {
 		&models.Friend{},
 		&models.Block{},
 		&models.Media{},
+		&models.FeedHeroState{},
+		&models.PostHidden{},
+		&models.FeedImpression{},
 	); err != nil {
 		t.Fatalf("auto-migrate: %v", err)
 	}
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM feed_impressions")
+		db.Exec("DELETE FROM post_hidden")
+		db.Exec("DELETE FROM feed_hero_state")
 		db.Exec("DELETE FROM user_interests")
 		db.Exec("DELETE FROM tags")
 		db.Exec("DELETE FROM post_views")
@@ -116,7 +122,7 @@ func TestFetchPersonalized_VisibilityAndExplore(t *testing.T) {
 	}
 	friendPost := seedRankPost(t, db, friendAuthor, "friend", now.Add(-2*time.Hour))
 
-	merged, next, hasMore, err := repo.FetchPersonalized(ctx, viewer, 10, PersonalCursor{}, now, false)
+	merged, next, hasMore, err := repo.FetchPersonalized(ctx, viewer, 10, PersonalCursor{}, now, false, 0)
 	if err != nil {
 		t.Fatalf("FetchPersonalized: %v", err)
 	}
@@ -151,7 +157,7 @@ func TestFetchPersonalized_VisibilityAndExplore(t *testing.T) {
 		if !ok {
 			t.Fatalf("cannot re-parse emitted cursor %q", cursorStr)
 		}
-		page2, _, _, err := repo.FetchPersonalized(ctx, viewer, 10, parsed, now, false)
+		page2, _, _, err := repo.FetchPersonalized(ctx, viewer, 10, parsed, now, false, 0)
 		if err != nil {
 			t.Fatalf("page 2: %v", err)
 		}
