@@ -9,10 +9,11 @@ import (
 type ViolationApplicable string
 
 const (
-	ViolationApplicableAll     ViolationApplicable = "all"
-	ViolationApplicablePost    ViolationApplicable = "post"
-	ViolationApplicableComment ViolationApplicable = "comment"
-	ViolationApplicableUser    ViolationApplicable = "user"
+	ViolationApplicableAll       ViolationApplicable = "all"
+	ViolationApplicablePost      ViolationApplicable = "post"
+	ViolationApplicableComment   ViolationApplicable = "comment"
+	ViolationApplicableUser      ViolationApplicable = "user"
+	ViolationApplicableCommunity ViolationApplicable = "community"
 )
 
 // Severity: mức độ nghiêm trọng để admin ưu tiên duyệt.
@@ -66,6 +67,8 @@ func ParseViolationApplicable(value string) ViolationApplicable {
 		return ViolationApplicableComment
 	case ViolationApplicableUser:
 		return ViolationApplicableUser
+	case ViolationApplicableCommunity:
+		return ViolationApplicableCommunity
 	default:
 		return ViolationApplicableAll
 	}

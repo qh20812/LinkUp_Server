@@ -114,9 +114,8 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 		totalGroups       int64
 		totalCommunities  int64
 		activeBanCount    int64
-		pendingReports    int64
-		flaggedMediaCount int64
-		activeUsersToday  int64
+		pendingReports   int64
+		activeUsersToday int64
 		totalLikes        int64
 		totalShares       int64
 		topUsers          []dto.TopActiveUser
@@ -146,7 +145,6 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 	run(func() { totalCommunities, _ = s.adminRepo.GetTotalCommunities() })
 	run(func() { activeBanCount, _ = s.adminRepo.GetActiveBanCount() })
 	run(func() { pendingReports, _ = s.adminRepo.GetPendingReportCount() })
-	run(func() { flaggedMediaCount, _ = s.adminRepo.GetFlaggedMediaCount() })
 	run(func() { activeUsersToday, _ = s.adminRepo.GetActiveUsersToday() })
 	run(func() { totalLikes, _ = s.adminRepo.GetTotalLikes() })
 	run(func() { totalShares, _ = s.adminRepo.GetTotalShares() })
@@ -183,7 +181,6 @@ func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string
 		TotalCommunities:         totalCommunities,
 		TotalActiveBans:          activeBanCount,
 		PendingReports:           pendingReports,
-		FlaggedMediaCount:        flaggedMediaCount,
 		ActiveUsersToday:         activeUsersToday,
 		TotalLikes:               totalLikes,
 		TotalShares:              totalShares,
@@ -881,10 +878,11 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 		ReporterID:       report.ReporterID,
 		ReporterUsername: reporter.Username,
 		ReporterEmail:    reporter.Email,
-		TargetType:       "unknown",
-		TargetUserID:     report.TargetUserID,
-		TargetPostID:     report.TargetPostID,
-		TargetCommentID:  report.TargetCommentID,
+		TargetType:        "unknown",
+		TargetUserID:      report.TargetUserID,
+		TargetPostID:      report.TargetPostID,
+		TargetCommentID:   report.TargetCommentID,
+		TargetCommunityID: report.TargetCommunityID,
 		ReportType:       report.ReportType,
 		ViolationRuleID:  report.ViolationRuleID,
 		ReasonDetail:     report.ReasonDetail,
@@ -965,6 +963,28 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 		} else {
 			detail.TargetType = "comment"
 		}
+	} else if report.TargetCommunityID != nil {
+		community, err := s.communityRepo.FindByID(ctx, *report.TargetCommunityID)
+		if err == nil {
+			detail.TargetType = "community"
+			username, displayName, avatarURI, _ := s.resolveReportUserInfo(ctx, community.CreatorID)
+			detail.TargetCommunity = &dto.AdminReportTargetCommunity{
+				CommunityID:      community.ID,
+				Name:             community.Name,
+				Description:      community.Description,
+				AvatarURI:        community.AvatarURI,
+				BackgroundURI:    community.BackgroundURI,
+				OwnerID:          community.CreatorID,
+				OwnerUsername:    username,
+				OwnerDisplayName: displayName,
+				OwnerAvatarURI:   avatarURI,
+				Status:           string(community.Status),
+				Privacy:          string(community.Privacy),
+				CreatedAt:        community.CreatedAt,
+			}
+		} else {
+			detail.TargetType = "community"
+		}
 	}
 
 	return detail, nil
@@ -996,13 +1016,19 @@ func excerptRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID string, input dto.AdminReportReviewInput) error {
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID string, input dto.AdminReportReviewInput) error {
+	report, err := s.reportRepo.FindByID(ctx, reportID)
+	if err != nil {
 		return err
 	}
 
-	report, err := s.reportRepo.FindByID(ctx, reportID)
-	if err != nil {
+	// Report cộng đồng do ADMIN thường xử lý (khớp với các action ẩn/đình chỉ/gỡ
+	// ảnh cộng đồng). Target khác vẫn cần SUPER_ADMIN vì tác động toàn hệ thống.
+	if report.TargetCommunityID != nil {
+		if err := s.ensureAdmin(ctx, adminID); err != nil {
+			return err
+		}
+	} else if err := s.ensureSuperAdmin(ctx, adminID); err != nil {
 		return err
 	}
 
@@ -1011,11 +1037,18 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 	}
 
 	action := strings.TrimSpace(strings.ToLower(input.Action))
-	if action != "cancel" && action != "hide" && action != "ban" {
+	switch action {
+	case "cancel", "hide", "ban":
+	case "remove_avatar", "remove_background":
+		// Gỡ riêng ảnh cộng đồng — chỉ áp dụng cho report nhắm vào cộng đồng.
+		if report.TargetCommunityID == nil {
+			return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
+		}
+	default:
 		return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 	}
 
-	if (action == "hide" || action == "ban") && strings.TrimSpace(input.Reason) == "" {
+	if (action == "hide" || action == "ban" || action == "remove_avatar" || action == "remove_background") && strings.TrimSpace(input.Reason) == "" {
 		return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
 	}
 
@@ -1027,7 +1060,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 			}
 			status = models.ReportStatusResolved
 
-			moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetPost, *report.TargetPostID, input.Reason)
+			moderation := models.NewModerationLog(adminID, models.ModerationActionDelete, models.ModerationTargetPost, *report.TargetPostID, input.Reason)
 			moderation.ID = utils.GenerateUUID()
 			moderation.CreatedAt = time.Now().UTC()
 			if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
@@ -1048,15 +1081,39 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 			}
 			status = models.ReportStatusResolved
 
-			moderation := models.NewModerationLog(superAdminID, models.ModerationActionDelete, models.ModerationTargetComment, *report.TargetCommentID, input.Reason)
+			moderation := models.NewModerationLog(adminID, models.ModerationActionDelete, models.ModerationTargetComment, *report.TargetCommentID, input.Reason)
 			moderation.ID = utils.GenerateUUID()
 			moderation.CreatedAt = time.Now().UTC()
 			if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
 				return fmt.Errorf("create moderation log: %w", err)
 			}
+		} else if report.TargetCommunityID != nil {
+			// Ẩn cộng đồng: dùng lại helper moderateCommunity để thống nhất
+			// moderation log + thông báo cho chủ cộng đồng.
+			if err := s.moderateCommunity(ctx, adminID, *report.TargetCommunityID,
+				models.ModerationActionHide, models.ModerationActionHide,
+				models.CommunityStatusHidden, "ẩn", input.Reason); err != nil {
+				return err
+			}
+			status = models.ReportStatusResolved
 		} else {
 			return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
 		}
+	}
+
+	// Gỡ riêng ảnh cộng đồng bị báo cáo, không ẩn cả cộng đồng.
+	if action == "remove_avatar" || action == "remove_background" {
+		target := "avatar"
+		if action == "remove_background" {
+			target = "background"
+		}
+		if err := s.RemoveCommunityMedia(ctx, adminID, *report.TargetCommunityID, dto.AdminCommunityMediaRemoveInput{
+			Target: target,
+			Reason: input.Reason,
+		}); err != nil {
+			return err
+		}
+		status = models.ReportStatusResolved
 	}
 
 	if action == "ban" {
@@ -1074,7 +1131,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		}
 		utils.InvalidateAuthCache(*report.TargetUserID)
 
-		ban := models.NewBan(*report.TargetUserID, superAdminID, input.Reason, expiresAt)
+		ban := models.NewBan(*report.TargetUserID, adminID, input.Reason, expiresAt)
 		ban.ID = utils.GenerateUUID()
 		ban.CreatedAt = time.Now().UTC()
 
@@ -1084,7 +1141,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 
 		status = models.ReportStatusResolved
 
-		moderation := models.NewModerationLog(superAdminID, models.ModerationActionBan, models.ModerationTargetUser, *report.TargetUserID, input.Reason)
+		moderation := models.NewModerationLog(adminID, models.ModerationActionBan, models.ModerationTargetUser, *report.TargetUserID, input.Reason)
 		moderation.ID = utils.GenerateUUID()
 		moderation.CreatedAt = time.Now().UTC()
 
@@ -1129,12 +1186,24 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 		} else {
 			descriptor = fmt.Sprintf("người dùng @%s", targetUsername)
 		}
+	} else if report.TargetCommunityID != nil {
+		if community, err := s.communityRepo.FindByID(ctx, *report.TargetCommunityID); err == nil {
+			descriptor = fmt.Sprintf("cộng đồng %q", excerptRunes(community.Name, 60))
+		} else {
+			descriptor = "cộng đồng bạn đã báo cáo"
+		}
 	}
 
 	var reporterMessage string
 	switch action {
 	case "hide":
-		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: nội dung đã bị ẩn. Lý do: %s", descriptor, input.Reason)
+		if report.TargetCommunityID != nil {
+			reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: cộng đồng đã bị ẩn. Lý do: %s", descriptor, input.Reason)
+		} else {
+			reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: nội dung đã bị ẩn. Lý do: %s", descriptor, input.Reason)
+		}
+	case "remove_avatar", "remove_background":
+		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: ảnh vi phạm đã bị gỡ. Lý do: %s", descriptor, input.Reason)
 	case "ban":
 		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xử lý: tài khoản đã bị cấm. Lý do: %s", descriptor, input.Reason)
 	default:
@@ -1190,11 +1259,6 @@ func (s *AdminService) ReviewReport(ctx context.Context, superAdminID, reportID 
 }
 
 // ── Admin Media Management ──
-
-// mediaReviewTransitions defines valid status transitions for admin review.
-var mediaReviewTransitions = map[models.MediaStatus][]models.MediaStatus{
-	models.MediaStatusFlagged: {models.MediaStatusApproved, models.MediaStatusRejected},
-}
 
 func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, input dto.AdminMediaFilterInput) (dto.AdminMediaListResponse, error) {
 	if err := s.ensureAdmin(ctx, adminID); err != nil {
@@ -1260,102 +1324,6 @@ func (s *AdminService) ListFlaggedMedia(ctx context.Context, adminID string, inp
 		Total: total,
 		Page:  page,
 	}, nil
-}
-
-func (s *AdminService) ReviewMedia(ctx context.Context, adminID, mediaID string, input dto.AdminReviewMediaInput) error {
-	if err := s.ensureAdmin(ctx, adminID); err != nil {
-		return err
-	}
-
-	media, err := s.mediaRepo.GetByID(ctx, mediaID)
-	if err != nil {
-		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
-	}
-
-	var newStatus models.MediaStatus
-	var notificationMsg string
-
-	switch input.Action {
-	case "approve":
-		newStatus = models.MediaStatusApproved
-		notificationMsg = "Ảnh/video của bạn đã được admin phê duyệt."
-	case "reject":
-		newStatus = models.MediaStatusRejected
-		notificationMsg = "Ảnh/video của bạn đã bị admin từ chối: " + input.Reason
-	default:
-		return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
-	}
-
-	allowed, ok := mediaReviewTransitions[media.Status]
-	if !ok {
-		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
-	}
-	validTransition := false
-	for _, s := range allowed {
-		if s == newStatus {
-			validTransition = true
-			break
-		}
-	}
-	if !validTransition {
-		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
-	}
-
-	if err := s.mediaRepo.UpdateStatusAndReview(ctx, mediaID, newStatus, input.Reason); err != nil {
-		return fmt.Errorf("cập nhật trạng thái media thất bại: %w", err)
-	}
-
-	moderation := models.NewModerationLog(adminID, models.ModerationActionUpdate,
-		models.ModerationTargetMedia, mediaID, input.Reason)
-	moderation.ID = utils.GenerateUUID()
-	moderation.CreatedAt = time.Now().UTC()
-	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
-		return fmt.Errorf("ghi log kiểm duyệt thất bại: %w", err)
-	}
-
-	var notifType models.NotificationType
-	switch newStatus {
-	case models.MediaStatusApproved:
-		notifType = models.NotificationTypeMediaApproved
-	case models.MediaStatusRejected:
-		notifType = models.NotificationTypeMediaRejected
-	case models.MediaStatusFlagged:
-		notifType = models.NotificationTypeMediaFlagged
-	default:
-		notifType = models.NotificationTypeMessage
-	}
-
-	if _, err := s.notificationService.Create(ctx, media.UserID, nil,
-		notifType, notificationMsg, media.PostID, nil, nil); err != nil {
-		return fmt.Errorf("gửi thông báo thất bại: %w", err)
-	}
-
-	// Nếu admin reject, xoá file khỏi Cloudinary để tiết kiệm storage.
-	// Không xoá ở AI reject vì admin có thể manual override.
-	// Side effect — không block response (admin đã reject, DB đã update).
-	if newStatus == models.MediaStatusRejected {
-		if s.cloudinary == nil {
-			log.Printf("[Admin] cảnh báo: Cloudinary chưa được cấu hình — không thể xoá media %s khỏi Cloudinary", mediaID)
-		} else {
-			publicID, resourceType, parseErr := parseCloudinaryPublicID(media.FileURI)
-			if parseErr == nil {
-				if _, err := s.cloudinary.Upload.Destroy(ctx, uploader.DestroyParams{
-					PublicID:     publicID,
-					ResourceType: resourceType,
-				}); err != nil {
-					return fmt.Errorf("xoá file khỏi Cloudinary thất bại: %w", err)
-				}
-				// Xoá URL khỏi DB để tránh record trỏ tới file không còn tồn tại.
-				if err := s.mediaRepo.ClearFileURI(ctx, mediaID); err != nil {
-					log.Printf("[Admin] không thể xoá FileURI của media %s: %v", mediaID, err)
-				}
-			} else {
-				log.Printf("[Admin] không thể xoá media %s khỏi Cloudinary — parse URL thất bại: %v", mediaID, parseErr)
-			}
-		}
-	}
-
-	return nil
 }
 
 // CleanupRejectedMedia xoá tất cả media bị AI reject quá 7 ngày
@@ -1467,6 +1435,9 @@ func (s *AdminService) GetFeedMetrics(ctx context.Context, adminID string, days 
 		SmallAuthorsSurfaced: m.SmallAuthorsSurfaced,
 		PostReports:          m.PostReports,
 		SmallAuthorThreshold: threshold,
+		ImpressionsTotal:     m.ImpressionsTotal,
+		HiddenPosts:          m.HiddenPosts,
+		TopSlotVariety:       m.TopSlotVariety,
 	}
 	if m.FeedViews > 0 {
 		resp.DetailCTR = float64(m.DetailViews) / float64(m.FeedViews)
@@ -1900,8 +1871,10 @@ func (s *AdminService) GetCommunityModerationLogs(ctx context.Context, userID, c
 	}, nil
 }
 
-func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, communityID string, action models.ModerationAction, logAction models.ModerationAction, newStatus models.CommunityStatus, actionLabel string, reason string) error {
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+// moderateCommunity: ẩn/đình chỉ cộng đồng. Cho phép cả ADMIN (không chỉ
+// SUPER_ADMIN) vì đây là công cụ xử lý report cộng đồng hậu kiểm.
+func (s *AdminService) moderateCommunity(ctx context.Context, adminID, communityID string, action models.ModerationAction, logAction models.ModerationAction, newStatus models.CommunityStatus, actionLabel string, reason string) error {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return err
 	}
 
@@ -1918,7 +1891,7 @@ func (s *AdminService) moderateCommunity(ctx context.Context, superAdminID, comm
 		return errorsapp.New(errorsapp.ErrCodeAdminAlreadyInStatus)
 	}
 
-	moderation := models.NewModerationLog(superAdminID, logAction, models.ModerationTargetCommunity, communityID, reason)
+	moderation := models.NewModerationLog(adminID, logAction, models.ModerationTargetCommunity, communityID, reason)
 	moderation.ID = utils.GenerateUUID()
 	moderation.CreatedAt = time.Now().UTC()
 	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
@@ -1951,8 +1924,10 @@ func (s *AdminService) UnarchiveCommunity(ctx context.Context, superAdminID, com
 	return s.moderateCommunity(ctx, superAdminID, communityID, models.ModerationActionUpdate, models.ModerationActionUpdate, models.CommunityStatusActive, "bỏ đình chỉ", "Bỏ đình chỉ cộng đồng")
 }
 
-func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communityID string, input dto.AdminWarnInput) error {
-	if err := s.ensureSuperAdmin(ctx, superAdminID); err != nil {
+// WarnCommunity: cảnh báo cộng đồng. Cho phép ADMIN xử lý (khớp với
+// moderateCommunity) — đây là bước nhẹ nhất trong luồng xử lý report.
+func (s *AdminService) WarnCommunity(ctx context.Context, adminID, communityID string, input dto.AdminWarnInput) error {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return err
 	}
 
@@ -1961,7 +1936,7 @@ func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communit
 		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
-	moderation := models.NewModerationLog(superAdminID, models.ModerationActionWarn, models.ModerationTargetCommunity, communityID, input.Reason)
+	moderation := models.NewModerationLog(adminID, models.ModerationActionWarn, models.ModerationTargetCommunity, communityID, input.Reason)
 	moderation.ID = utils.GenerateUUID()
 	moderation.CreatedAt = time.Now().UTC()
 	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
@@ -1972,6 +1947,88 @@ func (s *AdminService) WarnCommunity(ctx context.Context, superAdminID, communit
 	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
 
 	return nil
+}
+
+// RemoveCommunityMedia gỡ ảnh avatar/background của cộng đồng khi bị báo cáo
+// vi phạm. Khác moderateCommunity (ẩn/đình chỉ cả cộng đồng), action này chỉ gỡ
+// ảnh: xoá URI + media ID khỏi cộng đồng, xoá file Cloudinary + bản ghi media,
+// ghi moderation log và thông báo cho chủ sở hữu.
+func (s *AdminService) RemoveCommunityMedia(ctx context.Context, adminID, communityID string, input dto.AdminCommunityMediaRemoveInput) error {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return err
+	}
+
+	community, err := s.communityRepo.FindByID(ctx, communityID)
+	if err != nil {
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
+	}
+
+	var mediaID *string
+	var label, uri string
+	switch input.Target {
+	case "avatar":
+		mediaID, uri, label = community.AvatarMediaID, community.AvatarURI, "ảnh đại diện"
+	case "background":
+		mediaID, uri, label = community.BackgroundMediaID, community.BackgroundURI, "ảnh bìa"
+	default:
+		return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
+	}
+	if strings.TrimSpace(uri) == "" {
+		return errorsapp.New(errorsapp.ErrCodeAdminActionInvalid)
+	}
+
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		reason = "gỡ ảnh vi phạm"
+	}
+
+	// Gỡ khỏi cộng đồng trước để nội dung vi phạm không còn hiển thị ngay, kể
+	// cả khi bước xoá file Cloudinary phía sau thất bại.
+	if err := s.communityRepo.ClearMedia(ctx, communityID, input.Target); err != nil {
+		return fmt.Errorf("gỡ %s cộng đồng thất bại: %w", label, err)
+	}
+
+	s.deleteCommunityMedia(ctx, mediaID)
+
+	moderation := models.NewModerationLog(adminID, models.ModerationActionRemoveMedia,
+		models.ModerationTargetCommunity, communityID, fmt.Sprintf("Gỡ %s: %s", label, reason))
+	moderation.ID = utils.GenerateUUID()
+	moderation.CreatedAt = time.Now().UTC()
+	if err := s.moderationRepo.CreateLog(ctx, &moderation); err != nil {
+		return fmt.Errorf("ghi log kiểm duyệt thất bại: %w", err)
+	}
+
+	content := fmt.Sprintf("Cộng đồng '%s' đã bị quản trị viên gỡ %s. Lý do: %s", community.Name, label, reason)
+	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+
+	return nil
+}
+
+// deleteCommunityMedia xoá file Cloudinary + bản ghi media của ảnh cộng đồng.
+// Best-effort: lỗi chỉ log vì ảnh đã bị gỡ khỏi cộng đồng trước đó. Cộng đồng
+// tạo trước khi có media ID sẽ không xoá được file (chỉ gỡ khỏi cộng đồng).
+func (s *AdminService) deleteCommunityMedia(ctx context.Context, mediaID *string) {
+	if mediaID == nil || *mediaID == "" || s.mediaRepo == nil {
+		return
+	}
+	media, err := s.mediaRepo.GetByID(ctx, *mediaID)
+	if err != nil {
+		log.Printf("[Admin] không tìm thấy media %s để gỡ: %v", *mediaID, err)
+		return
+	}
+	if s.cloudinary != nil {
+		if publicID, resourceType, perr := parseCloudinaryPublicID(media.FileURI); perr == nil {
+			if _, derr := s.cloudinary.Upload.Destroy(ctx, uploader.DestroyParams{
+				PublicID:     publicID,
+				ResourceType: resourceType,
+			}); derr != nil {
+				log.Printf("[Admin] xoá media %s khỏi Cloudinary thất bại: %v", media.ID, derr)
+			}
+		}
+	}
+	if err := s.mediaRepo.DeleteWithStorageAdjustment(ctx, media.UserID, media); err != nil {
+		log.Printf("[Admin] xoá bản ghi media %s thất bại: %v", media.ID, err)
+	}
 }
 
 func (s *AdminService) ensureSuperAdmin(ctx context.Context, userID string) error {
@@ -1997,6 +2054,9 @@ func reportTargetType(report *models.Report) string {
 	}
 	if report.TargetCommentID != nil {
 		return "comment"
+	}
+	if report.TargetCommunityID != nil {
+		return "community"
 	}
 	return "unknown"
 }

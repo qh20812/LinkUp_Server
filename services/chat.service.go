@@ -419,6 +419,9 @@ func (s *ChatService) GetOrCreateDirectChat(ctx context.Context, userID, targetU
 func (s *ChatService) ensureDirectChat(ctx context.Context, userID, targetUserID string, requiredFriendship bool) (*models.Chat, bool, error) {
 	chat, err := s.chatRepo.FindDirectChat(ctx, userID, targetUserID)
 	if err == nil {
+		// Người dùng chủ động mở lại hội thoại đã "xóa" → bỏ mốc ẩn, để nó nằm
+		// lại trong danh sách ngay cả khi chưa có tin nhắn mới.
+		_ = s.chatUserSettingsRepo.UnhideChat(ctx, chat.ID, userID)
 		return chat, true, nil
 	}
 	if err != repository.ErrChatNotFound {
@@ -455,6 +458,7 @@ func (s *ChatService) ensureDirectChat(ctx context.Context, userID, targetUserID
 			if findErr != nil {
 				return nil, false, findErr
 			}
+			_ = s.chatUserSettingsRepo.UnhideChat(ctx, existing.ID, userID)
 			return existing, true, nil
 		}
 		return nil, false, err
@@ -786,7 +790,11 @@ func (s *ChatService) DeleteChat(ctx context.Context, userID, chatID string) err
 		return errorsapp.New(errorsapp.ErrCodeChatNotParticipant)
 	}
 
-	return s.chatRepo.DeleteChat(ctx, chatID)
+	// "Xóa hội thoại" chỉ ẩn ở phía người dùng này. Hard delete (messages +
+	// participants + chat) sẽ xóa luôn lịch sử của đối phương — với chat trực
+	// tiếp là mất dữ liệu của người kia, với group là phá cả nhóm. Dùng mốc
+	// hidden_at để hội thoại tự hiện lại khi có tin nhắn mới.
+	return s.chatUserSettingsRepo.HideChat(ctx, chatID, userID)
 }
 
 // ── Pin Message ────────────────────────────────────────────────────────────

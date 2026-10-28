@@ -447,6 +447,9 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeDirect).
+		// Hội thoại đã "xóa" ở phía người dùng này chỉ ẩn đi; nó tự hiện lại khi
+		// có tin nhắn mới hơn mốc hidden_at (deleted-for-me, không deleted-for-all).
+		Where("(cus.hidden_at IS NULL OR COALESCE(lm.created_at, chats.created_at) > cus.hidden_at)").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
 	if err != nil {

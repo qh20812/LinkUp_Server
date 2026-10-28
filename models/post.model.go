@@ -50,8 +50,31 @@ type Post struct {
 
 	FeedScore float64 `json:"-" gorm:"->"`
 
+	// FeedSource chỉ dùng trong bộ nhớ để rerank biết bài đến từ stream nào
+	// ("main" / "explore"). Không trả về client, không map cột DB.
+	FeedSource string `json:"-" gorm:"-"`
+
+	// FeedDebug chỉ được gắn khi bật FEED_DEBUG + ?debug=1.
+	FeedDebug *FeedDebugScore `json:"feed_debug,omitempty" gorm:"-"`
+
 	SavedAt    *time.Time `json:"saved_at,omitempty" gorm:"->"`
 	BookmarkID *string    `json:"bookmark_id,omitempty" gorm:"->"`
+}
+
+// FeedDebugScore là điểm từng thành phần của rank v2, dùng để trả lời
+// "vì sao bài này đứng đây". Các giá trị đã bao gồm dấu (phạt là số âm),
+// nên tổng của chúng xấp xỉ Final.
+type FeedDebugScore struct {
+	Final               float64 `json:"final"`
+	Recency             float64 `json:"recency"`
+	Engagement          float64 `json:"engagement"`
+	Affinity            float64 `json:"affinity"`
+	Interest            float64 `json:"interest"`
+	NewBoost            float64 `json:"new_boost"`
+	SmallBonus          float64 `json:"small_bonus"`
+	SeenPenalty         float64 `json:"seen_penalty"`
+	SeenPenalty24h      float64 `json:"seen_penalty_24h"`
+	HiddenAuthorPenalty float64 `json:"hidden_author_penalty"`
 }
 
 func NewPost(userID, title, content string, status PostStatus) Post {

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"linkup/config"
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
@@ -27,6 +28,9 @@ type PostService interface {
 	GetUserPosts(ctx context.Context, targetUserID, viewerID, cursor string, pageSize int) ([]models.Post, string, error)
 	GetPostDetail(ctx context.Context, postID string) (*models.Post, error)
 	TrackPostView(ctx context.Context, postID, viewerID string, source models.PostViewSource) (bool, error)
+	HidePost(ctx context.Context, userID, postID string) error
+	UnhidePost(ctx context.Context, userID, postID string) error
+	AttachFeedDebug(ctx context.Context, userID string, posts []models.Post)
 	ReactPost(ctx context.Context, userID, postID, emojiID string) (action string, emojiCode string, err error)
 	CreateComment(ctx context.Context, userID, postID string, parentID *string, content string) ([]models.Comment, error)
 	GetCommentList(ctx context.Context, postID string, page, pageSize int, sort string, userID *string) ([]models.Comment, int64, error)
@@ -72,8 +76,11 @@ func (s *postService) SetInterestRepository(repo *repository.InterestRepository)
 
 // Trọng số interest theo loại tương tác (Phase 1 ghi nhận; Phase 2 dùng để rank).
 const (
-	interestWeightFeedView   = 1.0
-	interestWeightDetailView = 2.0
+	// View là tín hiệu thụ động: chỉ cộng rất nhẹ. Trước đây 1.0/2.0 khiến
+	// chỉ cần lướt qua bài là hashtag đạt trần interest, tự đẩy bài đó lên
+	// đầu feed những lần sau (vòng lặp tự củng cố).
+	interestWeightFeedView   = 0.25
+	interestWeightDetailView = 0.5
 	interestWeightReact      = 3.0
 	interestWeightComment    = 4.0
 	interestWeightSave       = 5.0
@@ -307,17 +314,86 @@ func (s *postService) GetPostListV2(ctx context.Context, cursor string, pageSize
 		snapshotTime = time.Now()
 	}
 
-	posts, nextCursor, hasMore, err := s.repo.FetchPersonalized(ctx, userID, pageSize, personalCursor, snapshotTime, filterFollowing)
+	firstPage := cursor == ""
+
+	// Hero carousel: mỗi lần tải trang 1 lại xoay slot #1 trong top N.
+	// Chỉ áp cho feed chính (tab Following giữ nguyên thứ tự điểm).
+	heroRound := 0
+	if firstPage && !filterFollowing && config.DefaultFeedRankV2.HeroRotationOn {
+		if round, rerr := s.repo.NextHeroRound(ctx, userID); rerr == nil {
+			heroRound = round
+		} else {
+			log.Printf("GetPostListV2: hero round failed user=%s: %v", userID, rerr)
+		}
+	}
+
+	posts, nextCursor, hasMore, err := s.repo.FetchPersonalized(ctx, userID, pageSize, personalCursor, snapshotTime, filterFollowing, heroRound)
 	if err != nil {
 		return nil, "", err
 	}
 
 	s.enrichFeedPosts(ctx, posts, userID)
 
+	// Log impression trang 1 (không dedup) để đo vòng xoay top slot.
+	if firstPage && !filterFollowing && len(posts) > 0 {
+		s.logFeedImpressions(userID, posts, snapshotTime)
+	}
+
 	if !hasMore || len(posts) == 0 {
 		return posts, "", nil
 	}
 	return posts, nextCursor.Encode(snapshotTime), nil
+}
+
+// logFeedImpressions ghi 3 vị trí đầu của trang 1. Chạy nền + timeout riêng vì
+// context của request sẽ bị huỷ ngay sau khi response được ghi.
+func (s *postService) logFeedImpressions(userID string, posts []models.Post, snapshot time.Time) {
+	limit := 3
+	if len(posts) < limit {
+		limit = len(posts)
+	}
+	requestID := utils.GenerateUUID()
+	rows := make([]models.FeedImpression, 0, limit)
+	for i := 0; i < limit; i++ {
+		rows = append(rows, models.FeedImpression{
+			ID:        utils.GenerateUUID(),
+			RequestID: requestID,
+			PostID:    posts[i].ID,
+			ViewerID:  userID,
+			Position:  i + 1,
+			Score:     posts[i].FeedScore,
+			CreatedAt: snapshot,
+		})
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.repo.LogFeedImpressions(ctx, rows); err != nil {
+			log.Printf("GetPostListV2: log impressions failed user=%s: %v", userID, err)
+		}
+	}()
+}
+
+// AttachFeedDebug gắn điểm từng thành phần cho từng bài (chỉ khi bật
+// FEED_DEBUG + ?debug=1). Không ảnh hưởng đường chạy bình thường.
+func (s *postService) AttachFeedDebug(ctx context.Context, userID string, posts []models.Post) {
+	if len(posts) == 0 || userID == "" {
+		return
+	}
+	ids := make([]string, len(posts))
+	for i, p := range posts {
+		ids[i] = p.ID
+	}
+	breakdown, err := s.repo.DebugScoreBreakdown(ctx, userID, ids, time.Now())
+	if err != nil {
+		log.Printf("AttachFeedDebug: %v", err)
+		return
+	}
+	for i := range posts {
+		if d, ok := breakdown[posts[i].ID]; ok {
+			posts[i].FeedDebug = &d
+		}
+	}
 }
 
 // enrichFeedPosts nạp counts, trạng thái tương tác, media và shared-post
@@ -668,6 +744,23 @@ func (s *postService) TrackPostView(ctx context.Context, postID, viewerID string
 		log.Printf("TrackPostView: increment failed post=%s: %v", postID, err)
 	}
 	return true, nil
+}
+
+// HidePost lưu tín hiệu "Không quan tâm" cho bài của người khác.
+func (s *postService) HidePost(ctx context.Context, userID, postID string) error {
+	post, err := s.repo.FindByID(ctx, postID)
+	if err != nil || post == nil {
+		return errorsapp.New(errorsapp.ErrCodePostNotFound)
+	}
+	if post.UserID == userID {
+		return errorsapp.New(errorsapp.ErrCodePostCannotHideOwn)
+	}
+	return s.repo.HidePost(ctx, userID, postID, models.PostHiddenReasonNotInterested)
+}
+
+// UnhidePost bỏ tín hiệu "Không quan tâm" (dùng cho Hoàn tác trên web).
+func (s *postService) UnhidePost(ctx context.Context, userID, postID string) error {
+	return s.repo.UnhidePost(ctx, userID, postID)
 }
 
 func (s *postService) ReactPost(ctx context.Context, userID, postID, emojiID string) (string, string, error) {

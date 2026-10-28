@@ -112,7 +112,10 @@ func (r *adRepositoryImpl) ListByPartnerID(partnerID string, limit, offset int) 
 	var items []dto.PartnerAdListItem
 
 	query := `
-		SELECT a.id, a.title, a.status, a.budget, a.total_spent,
+		SELECT a.id, a.title, a.content, a.format, a.target_url, a.status,
+		       a.budget, a.daily_budget, a.cpm_price, a.cpc_price, a.max_impressions,
+		       a.total_spent, a.target_gender, a.target_age_min, a.target_age_max,
+		       COALESCE(NULLIF(a.target_locations, ''), JSON_ARRAY()) AS target_locations,
 		       a.started_at, a.expires_at, a.created_at, a.rejection_reason,
 		       COALESCE((SELECT am.url FROM ad_media am WHERE am.ad_id = a.id ORDER BY am.sort_order, am.created_at LIMIT 1), '') AS media_uri,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression') AS impressions,
@@ -365,7 +368,36 @@ func (r *adRepositoryImpl) FindRankedAdsForUser(now time.Time, gender string, ag
 
 	var ads []models.Ad
 	err := r.db.Raw(query, gender, age, now, now, gender, age, age, location, limit).Scan(&ads).Error
-	return ads, err
+	if err != nil {
+		return nil, err
+	}
+	if len(ads) == 0 {
+		return ads, nil
+	}
+
+	// Gắn media để quảng cáo trên feed có ảnh. Query gốc dùng SELECT a.* nên
+	// media_list luôn rỗng — trước đây card quảng cáo trong feed không có ảnh.
+	adIDs := make([]string, 0, len(ads))
+	for _, ad := range ads {
+		adIDs = append(adIDs, ad.ID)
+	}
+
+	var media []models.AdMedia
+	if err := r.db.Where("ad_id IN ?", adIDs).
+		Order("sort_order ASC, created_at ASC").
+		Find(&media).Error; err != nil {
+		return nil, err
+	}
+
+	mediaByAd := make(map[string][]models.AdMedia, len(ads))
+	for _, m := range media {
+		mediaByAd[m.AdID] = append(mediaByAd[m.AdID], m)
+	}
+	for i := range ads {
+		ads[i].MediaList = mediaByAd[ads[i].ID]
+	}
+
+	return ads, nil
 }
 
 // GetUserAdViewCount đếm số lần user đã thấy ad trong khoảng thời gian (mục 4.3)

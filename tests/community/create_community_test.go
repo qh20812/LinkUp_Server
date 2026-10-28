@@ -27,7 +27,7 @@ type fakeMediaService struct {
 	deleted  []string
 }
 
-func (f *fakeMediaService) UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
+func (f *fakeMediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
 	return f.uploadFn(ctx, userID, file)
 }
 
@@ -45,14 +45,14 @@ type fakeCommunityService struct {
 	called       bool
 	gotPrivacy   models.CommunityPrivacy
 	gotName      string
-	createFn     func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error)
+	createFn     func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error)
 }
 
-func (f *fakeCommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+func (f *fakeCommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 	f.called = true
 	f.gotName = name
 	f.gotPrivacy = privacy
-	return f.createFn(ctx, creatorID, name, description, avatarURI, backgroundURI, privacy, autoApprove)
+	return f.createFn(ctx, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID, privacy, autoApprove)
 }
 
 func okCommunityResult() (*services.CreateCommunityResult, error) {
@@ -117,13 +117,13 @@ func decodeBody(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 
 func TestCreateCommunity_Success201(t *testing.T) {
 	communitySvc := &fakeCommunityService{
-		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 			return okCommunityResult()
 		},
 	}
 	mediaSvc := &fakeMediaService{
 		uploadFn: func(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
-			t.Error("no files sent, UploadMedia must not be called")
+			t.Error("no files sent, AutoApproveUpload must not be called")
 			return nil, errors.New("unexpected upload")
 		},
 	}
@@ -159,7 +159,7 @@ func TestCreateCommunity_Success201(t *testing.T) {
 
 func TestCreateCommunity_PrivacyTypoRejected(t *testing.T) {
 	communitySvc := &fakeCommunityService{
-		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 			// Mirrors service validation: no silent fallback to public.
 			if privacy != "" && privacy != models.PrivacyPublic && privacy != models.PrivacyInvitationOnly {
 				return nil, errorsapp.New(errorsapp.ErrCodeCommunityPrivacyInvalid)
@@ -185,7 +185,7 @@ func TestCreateCommunity_PrivacyTypoRejected(t *testing.T) {
 
 func TestCreateCommunity_UploadErrorPreserved(t *testing.T) {
 	communitySvc := &fakeCommunityService{
-		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 			t.Error("upload failed, service must not be called")
 			return okCommunityResult()
 		},
@@ -213,7 +213,7 @@ func TestCreateCommunity_UploadErrorPreserved(t *testing.T) {
 
 func TestCreateCommunity_CleanupOnServiceFailure(t *testing.T) {
 	communitySvc := &fakeCommunityService{
-		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 			if avatarURI == "" || backgroundURI == "" {
 				t.Errorf("expected both URIs, got avatar=%q background=%q", avatarURI, backgroundURI)
 			}
@@ -240,7 +240,7 @@ func TestCreateCommunity_CleanupOnServiceFailure(t *testing.T) {
 
 func TestCreateCommunity_CleanupOnSecondUploadFailure(t *testing.T) {
 	communitySvc := &fakeCommunityService{
-		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 			t.Error("service must not be called when background upload fails")
 			return okCommunityResult()
 		},
@@ -270,7 +270,7 @@ func TestCreateCommunity_BodyTooLarge(t *testing.T) {
 	communitySvc := &fakeCommunityService{}
 	mediaSvc := &fakeMediaService{}
 
-	big := bytes.Repeat([]byte("x"), 16<<20)
+	big := bytes.Repeat([]byte("x"), 46<<20)
 	req := newCreateRequest(t, map[string]string{"name": "Crew"},
 		map[string][]byte{"avatar": big})
 	w := serveCreate(communitySvc, mediaSvc, req)
@@ -288,7 +288,7 @@ func TestCreateCommunity_BodyTooLarge(t *testing.T) {
 
 func TestCreateCommunity_PlainErrorNoLeak(t *testing.T) {
 	communitySvc := &fakeCommunityService{
-		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
+		createFn: func(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*services.CreateCommunityResult, error) {
 			return nil, errors.New("sql: connection exploded SECRET")
 		},
 	}

@@ -1,6 +1,11 @@
 package dto
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 type CreateAdInput struct {
 	Title           string     `json:"title"`
@@ -79,17 +84,72 @@ type TrackActionInput struct {
 type PartnerAdListItem struct {
 	ID              string     `json:"id"`
 	Title           string     `json:"title"`
+	Content         string     `json:"content"`
+	Format          string     `json:"format"`
+	TargetURL       string     `json:"target_url"`
 	Status          string     `json:"status"`
 	Budget          float64    `json:"budget"`
+	DailyBudget     float64    `json:"daily_budget"`
+	CPMPrice        float64    `json:"cpm_price"`
+	CPCPrice        float64    `json:"cpc_price"`
+	MaxImpressions  int        `json:"max_impressions"`
 	TotalSpent      float64    `json:"total_spent"`
 	Impressions     int64      `json:"impressions"`
 	Clicks          int64      `json:"clicks"`
 	CTR             float64    `json:"ctr"`
 	MediaURI        string     `json:"media_uri"`
+	TargetGender    string     `json:"target_gender"`
+	TargetAgeMin    int        `json:"target_age_min"`
+	TargetAgeMax    int        `json:"target_age_max"`
+	TargetLocations JSONStringList `json:"target_locations"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	RejectionReason *string    `json:"rejection_reason,omitempty"`
+}
+
+// JSONStringList đọc một cột JSON (mảng string) của MySQL vào []string.
+// Cần thiết vì target_locations lưu dạng JSON nhưng API trả về mảng.
+type JSONStringList []string
+
+func (l *JSONStringList) Scan(value any) error {
+	if value == nil {
+		*l = nil
+		return nil
+	}
+
+	var raw []byte
+	switch v := value.(type) {
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return fmt.Errorf("JSONStringList: không hỗ trợ kiểu %T", value)
+	}
+
+	if len(raw) == 0 {
+		*l = nil
+		return nil
+	}
+
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return fmt.Errorf("JSONStringList: JSON không hợp lệ: %w", err)
+	}
+	*l = out
+	return nil
+}
+
+func (l JSONStringList) Value() (driver.Value, error) {
+	if l == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal([]string(l))
+	if err != nil {
+		return nil, err
+	}
+	return string(raw), nil
 }
 
 type AdOverviewResponse struct {

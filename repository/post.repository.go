@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type PostRepository struct {
@@ -86,17 +87,19 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
 		viewer = *userID
 	}
 
-	ageH := "((UNIX_TIMESTAMP(?) - UNIX_TIMESTAMP(posts.created_at)) / 3600.0)"
+	ageH := ageHoursExpr
 
 	// Trừ điểm bài đã xem trong SeenWindowDays ngày (port từ rank v2):
 	// không có dòng này, bài top-1 đứng yên dù user đã xem (F5 mấy lần cũng vậy).
 	seenSub := fmt.Sprintf(`(SELECT COUNT(*) FROM post_views pv WHERE pv.post_id = posts.id AND pv.viewer_id = ? AND pv.created_at > DATE_SUB(?, INTERVAL %d DAY))`,
 		v2.SeenWindowDays)
 
-	// Cộng điểm bài do chính viewer đăng trong NewPostBoostHours giờ để sau
-	// share/F5 vẫn thấy bài mình ở đầu với chính mình (người khác không ảnh hưởng).
-	ownBoost := fmt.Sprintf(`CASE WHEN posts.user_id = ? AND (%s) < %f THEN %f * (1 - (%s) / %f) ELSE 0 END`,
-		ageH, v2.NewPostBoostHours, v2.NewPostBoost, ageH, v2.NewPostBoostHours)
+	// Cộng điểm bài do chính viewer đăng trong NewPostBoostHours giờ, nhưng
+	// KHÔNG áp cho repost: share vẫn hiện đầu ngay nhờ client prepend, còn sau
+	// khi F5 vị trí do rank tự nhiên quyết định (trước đây ownBoost giữ repost
+	// ở đầu suốt 6h nên reload bao nhiêu lần cũng không đổi).
+	ownBoost := boostCaseExpr("posts.user_id = ? AND posts.shared_from_post_id IS NULL",
+		ageH, v2.NewPostBoostHours, v2.NewPostBoost)
 
 	scoreExpr := fmt.Sprintf(`(? * EXP(-? * %s) +
 		 ? * (LOG(1 + COALESCE(lr.likes, 0)) * ? + LOG(1 + COALESCE(cr.comments, 0)) * ? + LOG(1 + COALESCE(sr.shares, 0)) * ?) / 20.0 +
@@ -137,7 +140,10 @@ func (r *PostRepository) FetchActive(ctx context.Context, limit int, userID *str
 			models.PostStatusPublic, models.PostStatusFriend, *userID, *userID, models.FriendStatusAccepted)
 		// Loại bài của người đã block / bị block (theo chuẩn story + follow-suggestion).
 		q = q.Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = ? AND blocked_user_id = posts.user_id)", *userID).
-			Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = posts.user_id AND blocked_user_id = ?)", *userID)
+			Where("NOT EXISTS (SELECT 1 FROM blocks WHERE user_id = posts.user_id AND blocked_user_id = ?)", *userID).
+			// "Không quan tâm" áp cho cả rank v1 (?rank=v1) để hoàn tác rollout
+			// không làm bài đã ẩn quay lại.
+			Where("NOT EXISTS (SELECT 1 FROM post_hidden ph WHERE ph.post_id = posts.id AND ph.user_id = ?)", *userID)
 	} else {
 		q = q.Where("posts.status = ?", models.PostStatusPublic)
 	}
@@ -482,6 +488,39 @@ func (r *PostRepository) CountUserPostViewsSince(ctx context.Context, postID, us
 // CreatePostView ghi log một lượt xem đã được tính.
 func (r *PostRepository) CreatePostView(ctx context.Context, view *models.PostView) error {
 	return r.db.WithContext(ctx).Create(view).Error
+}
+
+// HidePost lưu tín hiệu "Không quan tâm" (idempotent: ẩn lại không lỗi).
+func (r *PostRepository) HidePost(ctx context.Context, userID, postID, reason string) error {
+	if reason == "" {
+		reason = models.PostHiddenReasonNotInterested
+	}
+	row := models.PostHidden{
+		UserID:    userID,
+		PostID:    postID,
+		Reason:    reason,
+		CreatedAt: time.Now().UTC(),
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "post_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"reason"}),
+	}).Create(&row).Error
+}
+
+// UnhidePost bỏ tín hiệu "Không quan tâm".
+func (r *PostRepository) UnhidePost(ctx context.Context, userID, postID string) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ? AND post_id = ?", userID, postID).
+		Delete(&models.PostHidden{}).Error
+}
+
+// IsPostHidden kiểm tra user đã ẩn bài chưa.
+func (r *PostRepository) IsPostHidden(ctx context.Context, userID, postID string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&models.PostHidden{}).
+		Where("user_id = ? AND post_id = ?", userID, postID).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *PostRepository) CreateReaction(ctx context.Context, reaction models.PostReaction) error {

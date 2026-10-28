@@ -6,8 +6,11 @@ import (
 
 	"linkup/cmd/seed/internal"
 	"linkup/config"
+	"linkup/seeddata"
 )
 
+// Run chèn hồ sơ đầy đủ từ seeddata.Users (địa điểm, nghề nghiệp, học vấn,
+// giới tính, ảnh bìa) — mọi cột đều có trong schema seed.
 func Run(env config.Env, state *internal.SeedState) error {
 	database, err := internal.Connect(env)
 	if err != nil {
@@ -17,108 +20,48 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	now := time.Now().UTC()
 
-	phones := []string{
-		"0912345678",
-		"0987654321",
-		"0934567890",
-		"0901234567",
-		"0978912345",
-		"0967891234",
-		"0945678901",
-		"0923456789",
-		"0956789012",
-		"0891234567",
-		"0887654321",
-		"0876543210",
-		"0867891234",
-		"0854321098",
-		"0832109876",
-		"0823456789",
-		"0812345678",
-		"0798765432",
-		"0789012345",
-		"0776543210",
-	}
+	for _, u := range seeddata.Users {
+		userID, ok := state.UserIDByUsername[u.Username]
+		if !ok {
+			return fmt.Errorf("profiles: missing user id for %s", u.Username)
+		}
 
-	dobs := []string{
-		"1995-03-15",
-		"1998-07-22",
-		"2000-11-08",
-		"1993-05-30",
-		"1996-09-12",
-		"1999-01-25",
-		"1997-04-18",
-		"2001-08-03",
-		"1994-12-20",
-		"1992-06-14",
-		"1990-10-05",
-		"2002-02-28",
-		"1991-07-17",
-		"1998-03-09",
-		"1996-11-22",
-		"1993-08-15",
-		"1997-05-01",
-		"1999-10-19",
-		"1995-12-25",
-		"2000-04-07",
-	}
+		var dob any
+		if u.DOB != "" {
+			parsed, err := time.Parse("2006-01-02", u.DOB)
+			if err != nil {
+				return fmt.Errorf("profiles: invalid dob for %s: %w", u.Username, err)
+			}
+			dob = parsed
+		}
 
-	bios := []string{
-		"Software engineer & open source enthusiast",
-		"Digital artist and photographer",
-		"Full-stack developer by day, gamer by night",
-		"Building the future, one line at a time",
-		"Exploring the world through code",
-		"Data scientist & ML enthusiast",
-		"Product designer with a passion for UX",
-		"DevOps engineer keeping the servers running",
-		"Tech lead & mentor",
-		"Frontend wizard & CSS artist",
-		"Backend architect & API designer",
-		"Mobile developer crafting great experiences",
-		"Security researcher & ethical hacker",
-		"Cloud infrastructure specialist",
-		"Open source maintainer",
-		"AI researcher & NLP enthusiast",
-		"Game developer & 3D artist",
-		"Blockchain developer & Web3 explorer",
-		"Technical writer & content creator",
-		"Startup founder & entrepreneur",
-	}
+		allowStranger := 1
+		if u.IsPrivate {
+			allowStranger = 0
+		}
 
-	avatars := []string{
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user01",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user02",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user03",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user04",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user05",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user06",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user07",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user08",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user09",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user10",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user11",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user12",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user13",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user14",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user15",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user16",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user17",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user18",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user19",
-		"https://api.dicebear.com/7.x/avataaars/svg?seed=user20",
-	}
-
-	for i, uid := range state.UserIDs {
-		isPrivate := i >= 15
-		dob, _ := time.Parse("2006-01-02", dobs[i])
 		if err := internal.Exec(database,
-			`INSERT INTO profiles (id, user_id, display_name, phone_number, date_of_birth, avatar_uri, bio, is_private_profile, is_private_posts, allow_stranger_friend_request, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			internal.UUID(), uid, internal.SeedUsers[i].DisplayName, phones[i], dob, avatars[i], bios[i], isPrivate, false, true, now,
+			`INSERT INTO profiles (
+				id, user_id, display_name, phone_number, date_of_birth, avatar_uri, cover_uri,
+				location, hometown_province, current_province, current_ward,
+				work, education, work_other, website, bio, gender,
+				is_private_profile, is_private_posts, allow_stranger_friend_request, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
+			internal.UUID(), userID, u.DisplayName, u.Phone, dob, u.Avatar, u.Cover,
+			u.Location, u.HometownProv, u.CurrentProv, u.CurrentWard,
+			u.Work, u.Education, u.Website, u.Bio, u.Gender,
+			boolToInt(u.IsPrivate), boolToInt(u.IsPrivate), allowStranger, now,
 		); err != nil {
-			return fmt.Errorf("profiles: insert for user %s: %w", uid, err)
+			return fmt.Errorf("profiles: insert for %s: %w", u.Username, err)
 		}
 	}
 
 	return nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

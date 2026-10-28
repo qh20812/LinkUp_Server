@@ -109,75 +109,75 @@ func (r *ContributionRepository) UpsertContribution(ctx context.Context, contrib
 }
 
 func (r *ContributionRepository) GetLeaderboard(ctx context.Context, communityID string, offset, limit int) ([]dto.LeaderboardItem, error) {
-		type leaderboardRow struct {
-			UserID            string  `gorm:"column:user_id"`
-			DisplayName       string  `gorm:"column:display_name"`
-			AvatarURI         string  `gorm:"column:avatar_uri"`
-			ContributionScore int     `gorm:"column:contribution_score"`
-			BadgeType         *string `gorm:"column:badge_type"`
-		}
+	type leaderboardRow struct {
+		UserID            string  `gorm:"column:user_id"`
+		DisplayName       string  `gorm:"column:display_name"`
+		AvatarURI         string  `gorm:"column:avatar_uri"`
+		ContributionScore int     `gorm:"column:contribution_score"`
+		BadgeType         *string `gorm:"column:badge_type"`
+	}
 
-		if limit <= 0 {
-			limit = 10
-		}
-		if offset < 0 {
-			offset = 0
-		}
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
 
-		var rows []leaderboardRow
-		err := r.db.WithContext(ctx).
-			Table("member_contributions AS mc").
-			Select(`mc.user_id,
+	var rows []leaderboardRow
+	err := r.db.WithContext(ctx).
+		Table("member_contributions AS mc").
+		Select(`mc.user_id,
 				COALESCE(p.display_name, '') AS display_name,
 				COALESCE(p.avatar_uri, '') AS avatar_uri,
 				mc.contribution_score,
 				mc.badge_type`).
-			Joins("LEFT JOIN profiles p ON p.user_id = mc.user_id").
-			Where("mc.community_id = ?", communityID).
-			Order("mc.contribution_score DESC, mc.created_at ASC").
-			Offset(offset).
-			Limit(limit).
-			Find(&rows).Error
-		if err != nil {
-			return nil, err
-		}
-
-		items := make([]dto.LeaderboardItem, 0, len(rows))
-		for i, row := range rows {
-			items = append(items, dto.LeaderboardItem{
-				Rank:              offset + i + 1,
-				UserID:            row.UserID,
-				DisplayName:       row.DisplayName,
-				AvatarURI:         row.AvatarURI,
-				ContributionScore: row.ContributionScore,
-				BadgeType:         row.BadgeType,
-			})
-		}
-		return items, nil
+		Joins("LEFT JOIN profiles p ON p.user_id = mc.user_id").
+		Where("mc.community_id = ?", communityID).
+		Order("mc.contribution_score DESC, mc.created_at ASC").
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
 	}
 
+	items := make([]dto.LeaderboardItem, 0, len(rows))
+	for i, row := range rows {
+		items = append(items, dto.LeaderboardItem{
+			Rank:              offset + i + 1,
+			UserID:            row.UserID,
+			DisplayName:       row.DisplayName,
+			AvatarURI:         row.AvatarURI,
+			ContributionScore: row.ContributionScore,
+			BadgeType:         row.BadgeType,
+		})
+	}
+	return items, nil
+}
+
 func (r *ContributionRepository) GetCommunityMembers(ctx context.Context, communityID string, offset, limit int) ([]dto.CommunityMemberItem, error) {
-		type memberRow struct {
-			UserID            string    `gorm:"column:user_id"`
-			DisplayName       string    `gorm:"column:display_name"`
-			AvatarURI         string    `gorm:"column:avatar_uri"`
-			Role              string    `gorm:"column:role"`
-			JoinedAt          time.Time `gorm:"column:joined_at"`
-			ContributionScore int       `gorm:"column:contribution_score"`
-			BadgeType         *string   `gorm:"column:badge_type"`
-		}
+	type memberRow struct {
+		UserID            string    `gorm:"column:user_id"`
+		DisplayName       string    `gorm:"column:display_name"`
+		AvatarURI         string    `gorm:"column:avatar_uri"`
+		Role              string    `gorm:"column:role"`
+		JoinedAt          time.Time `gorm:"column:joined_at"`
+		ContributionScore int       `gorm:"column:contribution_score"`
+		BadgeType         *string   `gorm:"column:badge_type"`
+	}
 
-		if limit <= 0 {
-			limit = 10
-		}
-		if offset < 0 {
-			offset = 0
-		}
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
 
-		var rows []memberRow
-		err := r.db.WithContext(ctx).
-			Table("group_members AS gm").
-			Select(`gm.user_id,
+	var rows []memberRow
+	err := r.db.WithContext(ctx).
+		Table("group_members AS gm").
+		Select(`gm.user_id,
 				COALESCE(p.display_name, '') AS display_name,
 				COALESCE(p.avatar_uri, '') AS avatar_uri,
 				COALESCE((
@@ -197,31 +197,31 @@ func (r *ContributionRepository) GetCommunityMembers(ctx context.Context, commun
 				gm.joined_at,
 				COALESCE(mc.contribution_score, 0) AS contribution_score,
 				mc.badge_type`).
-			Joins("LEFT JOIN profiles p ON p.user_id = gm.user_id").
-			Joins("LEFT JOIN member_contributions mc ON mc.community_id = gm.community_id AND mc.user_id = gm.user_id").
-			Where("gm.community_id = ?", communityID).
-			Order("mc.contribution_score DESC, gm.joined_at ASC").
-			Offset(offset).
-			Limit(limit).
-			Find(&rows).Error
-		if err != nil {
-			return nil, err
-		}
-
-		items := make([]dto.CommunityMemberItem, 0, len(rows))
-		for _, row := range rows {
-			items = append(items, dto.CommunityMemberItem{
-				UserID:            row.UserID,
-				DisplayName:       row.DisplayName,
-				AvatarURI:         row.AvatarURI,
-				Role:              row.Role,
-				JoinedAt:          row.JoinedAt,
-				ContributionScore: row.ContributionScore,
-				BadgeType:         row.BadgeType,
-			})
-		}
-		return items, nil
+		Joins("LEFT JOIN profiles p ON p.user_id = gm.user_id").
+		Joins("LEFT JOIN member_contributions mc ON mc.community_id = gm.community_id AND mc.user_id = gm.user_id").
+		Where("gm.community_id = ?", communityID).
+		Order("mc.contribution_score DESC, gm.joined_at ASC").
+		Offset(offset).
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
 	}
+
+	items := make([]dto.CommunityMemberItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.CommunityMemberItem{
+			UserID:            row.UserID,
+			DisplayName:       row.DisplayName,
+			AvatarURI:         row.AvatarURI,
+			Role:              row.Role,
+			JoinedAt:          row.JoinedAt,
+			ContributionScore: row.ContributionScore,
+			BadgeType:         row.BadgeType,
+		})
+	}
+	return items, nil
+}
 
 // === Challenge ===
 func (r *ContributionRepository) CreateChallenge(ctx context.Context, challenge *models.CommunityChallenge) error {
@@ -255,6 +255,162 @@ func (r *ContributionRepository) GetActiveChallenges(ctx context.Context, commun
 		Order("end_date ASC, created_at DESC").
 		Find(&challenges).Error
 	return challenges, err
+}
+
+// GetChallengesByCommunity trả challenge của community.
+// includeEnded=false chỉ trả challenge còn hiệu lực (status active và chưa hết hạn).
+func (r *ContributionRepository) GetChallengesByCommunity(ctx context.Context, communityID string, includeEnded bool) ([]models.CommunityChallenge, error) {
+	query := r.db.WithContext(ctx).Where("community_id = ?", communityID)
+	if !includeEnded {
+		query = query.Where("status = ? AND end_date >= ?", models.ChallengeStatusActive, time.Now().UTC())
+	}
+	var challenges []models.CommunityChallenge
+	err := query.Order("start_date ASC, created_at DESC").Find(&challenges).Error
+	return challenges, err
+}
+
+// UpdateChallenge ghi đè toàn bộ field nghiệp vụ (kể cả giá trị zero/NULL).
+func (r *ContributionRepository) UpdateChallenge(ctx context.Context, challenge *models.CommunityChallenge) error {
+	var maxParticipants any
+	if challenge.MaxParticipants != nil {
+		maxParticipants = *challenge.MaxParticipants
+	}
+	return r.db.WithContext(ctx).
+		Model(&models.CommunityChallenge{}).
+		Where("id = ?", challenge.ID).
+		Updates(map[string]any{
+			"title":            challenge.Title,
+			"description":      challenge.Description,
+			"hashtag":          challenge.Hashtag,
+			"points_per_post":  challenge.PointsPerPost,
+			"start_date":       challenge.StartDate,
+			"end_date":         challenge.EndDate,
+			"max_participants": maxParticipants,
+			"status":           challenge.Status,
+		}).Error
+}
+
+// CountChallengeParticipantsByIDs đếm participant của nhiều challenge trong 1 query.
+func (r *ContributionRepository) CountChallengeParticipantsByIDs(ctx context.Context, challengeIDs []string) (map[string]int, error) {
+	counts := make(map[string]int, len(challengeIDs))
+	if len(challengeIDs) == 0 {
+		return counts, nil
+	}
+	type row struct {
+		ChallengeID string `gorm:"column:challenge_id"`
+		Total       int    `gorm:"column:total"`
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&models.ChallengeParticipant{}).
+		Select("challenge_id, COUNT(*) AS total").
+		Where("challenge_id IN ?", challengeIDs).
+		Group("challenge_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.ChallengeID] = row.Total
+	}
+	return counts, nil
+}
+
+// GetJoinedChallengeIDs trả về tập challenge mà user đã tham gia trong danh sách truyền vào.
+func (r *ContributionRepository) GetJoinedChallengeIDs(ctx context.Context, userID string, challengeIDs []string) (map[string]bool, error) {
+	joined := make(map[string]bool, len(challengeIDs))
+	if len(challengeIDs) == 0 {
+		return joined, nil
+	}
+	var ids []string
+	if err := r.db.WithContext(ctx).
+		Model(&models.ChallengeParticipant{}).
+		Where("user_id = ? AND challenge_id IN ?", userID, challengeIDs).
+		Pluck("challenge_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		joined[id] = true
+	}
+	return joined, nil
+}
+
+// IncrementChallengeDailyAward cộng 1 bài được tính điểm cho (challenge, user, ngày).
+// Trả về false khi đã chạm trần maxPosts trong ngày — bài đó không được cộng điểm,
+// nhằm chặn farm điểm bằng cách spam hashtag.
+// Khóa row bằng SELECT ... FOR UPDATE nên hai bài đồng thời không thể vượt trần.
+func (r *ContributionRepository) IncrementChallengeDailyAward(ctx context.Context, challengeID, userID string, awardDate time.Time, maxPosts, points int) (bool, error) {
+	if maxPosts <= 0 {
+		return false, nil
+	}
+
+	now := time.Now().UTC()
+	awarded := false
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Đảm bảo row tồn tại trước khi khóa; INSERT IGNORE tránh lỗi khi hai request
+		// đồng thời tạo row cho cùng ngày.
+		if err := tx.Exec(
+			`INSERT IGNORE INTO challenge_daily_awards
+				(id, challenge_id, user_id, award_date, posts_count, points_earned, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, 0, 0, ?, ?)`,
+			utils.GenerateUUID(), challengeID, userID, awardDate, now, now,
+		).Error; err != nil {
+			return err
+		}
+
+		var award models.ChallengeDailyAward
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("challenge_id = ? AND user_id = ? AND award_date = ?", challengeID, userID, awardDate).
+			First(&award).Error; err != nil {
+			return err
+		}
+
+		if award.PostsCount >= maxPosts {
+			return nil
+		}
+
+		if err := tx.Model(&models.ChallengeDailyAward{}).
+			Where("id = ?", award.ID).
+			Updates(map[string]any{
+				"posts_count":   award.PostsCount + 1,
+				"points_earned": award.PointsEarned + points,
+				"updated_at":    now,
+			}).Error; err != nil {
+			return err
+		}
+
+		awarded = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return awarded, nil
+}
+
+// GetChallengeDailyAwardCounts trả số bài đã được tính điểm hôm nay của user theo từng challenge.
+func (r *ContributionRepository) GetChallengeDailyAwardCounts(ctx context.Context, userID string, challengeIDs []string, awardDate time.Time) (map[string]int, error) {
+	counts := make(map[string]int, len(challengeIDs))
+	if len(challengeIDs) == 0 {
+		return counts, nil
+	}
+
+	type row struct {
+		ChallengeID string `gorm:"column:challenge_id"`
+		PostsCount  int    `gorm:"column:posts_count"`
+	}
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Model(&models.ChallengeDailyAward{}).
+		Select("challenge_id, posts_count").
+		Where("user_id = ? AND award_date = ? AND challenge_id IN ?", userID, awardDate, challengeIDs).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.ChallengeID] = row.PostsCount
+	}
+	return counts, nil
 }
 
 func (r *ContributionRepository) FindActiveChallengesByHashtag(ctx context.Context, communityID, hashtag string) ([]models.CommunityChallenge, error) {
@@ -355,13 +511,15 @@ func (r *ContributionRepository) JoinChallengeAtomic(ctx context.Context, partic
 	})
 }
 
-func (r *ContributionRepository) UpdateChallengeParticipant(ctx context.Context, challengeID, userID string, postsCount, points int) error {
+// IncrementChallengeParticipant cộng dồn posts_count và total_points_earned ngay trong
+// một câu UPDATE, tránh mất lượt cập nhật khi nhiều bài viết được xử lý song song.
+func (r *ContributionRepository) IncrementChallengeParticipant(ctx context.Context, challengeID, userID string, points int) error {
 	return r.db.WithContext(ctx).
 		Model(&models.ChallengeParticipant{}).
 		Where("challenge_id = ? AND user_id = ?", challengeID, userID).
 		Updates(map[string]interface{}{
-			"posts_count":         postsCount,
-			"total_points_earned": points,
+			"posts_count":         gorm.Expr("posts_count + 1"),
+			"total_points_earned": gorm.Expr("total_points_earned + ?", points),
 		}).Error
 }
 
@@ -459,8 +617,6 @@ func (r *ContributionRepository) GetRankedContributions(ctx context.Context, com
 		Find(&contributions).Error
 	return contributions, err
 }
-
-
 
 // AtomicIncrement atomically increments a counter column to prevent race conditions.
 // Only allows safe column names to prevent SQL injection.

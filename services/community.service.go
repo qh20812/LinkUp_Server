@@ -86,7 +86,7 @@ type CreateCommunityResult struct {
 	InviteCode string
 }
 
-func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI string, privacy models.CommunityPrivacy, autoApprove bool) (*CreateCommunityResult, error) {
+func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name, description, avatarURI, backgroundURI, avatarMediaID, backgroundMediaID string, privacy models.CommunityPrivacy, autoApprove bool) (*CreateCommunityResult, error) {
 	name = strings.TrimSpace(name)
 	description = strings.TrimSpace(description)
 	if err := s.validation.ValidateCreateCommunity(name, description, avatarURI, backgroundURI, privacy); err != nil {
@@ -139,6 +139,13 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 	community.ID = utils.GenerateUUID()
 	community.AutoApprove = autoApprove
 	community.CreatedAt = now
+	// Lưu media ID để admin có thể gỡ riêng ảnh vi phạm về sau (hậu kiểm).
+	if avatarMediaID != "" {
+		community.AvatarMediaID = &avatarMediaID
+	}
+	if backgroundMediaID != "" {
+		community.BackgroundMediaID = &backgroundMediaID
+	}
 
 	adminMember := models.NewGroupMember(community.ID, creatorID)
 	adminMember.ID = utils.GenerateUUID()
@@ -223,19 +230,19 @@ func (s *CommunityService) SetCommunityBackground(ctx context.Context, userID, c
 		return errorsapp.New(errorsapp.ErrCodeAccountInactive)
 	}
 
-	media, err := s.mediaService.UploadMedia(ctx, userID, file)
+	media, err := s.mediaService.AutoApproveUpload(ctx, userID, file)
 	if err != nil {
 		return errorsapp.New(errorsapp.ErrCodeBackgroundUploadFailed)
 	}
 
-	// UploadMedia stores status pending and moderates in background, so there
-	// is no synchronous rejected status to check here.
+	// Ảnh background đi theo đường auto-approve (không AI moderation, không
+	// chờ admin) — vi phạm xử lý hậu kiểm qua report system.
 
 	if err := s.validation.ValidateBackgroundURI(media.FileURI); err != nil {
 		return err
 	}
 
-	if err := s.repo.UpdateBackground(ctx, community.ID, media.FileURI); err != nil {
+	if err := s.repo.UpdateBackground(ctx, community.ID, media.FileURI, media.ID); err != nil {
 		// Update failed after upload → remove the orphan media best-effort so
 		// it does not linger on Cloudinary and consume storage quota.
 		if delErr := s.mediaService.DeleteMedia(context.WithoutCancel(ctx), userID, media.ID); delErr != nil {

@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"linkup/config"
 	"linkup/models"
 	"linkup/seeddata"
 	"linkup/utils"
@@ -43,6 +44,11 @@ func Run(db *gorm.DB) {
 	if err != nil {
 		log.Printf("Warning: Migration failed: %v", err)
 	}
+
+	// Bảng của feed rank v2.1 tạo bằng SQL thuần và chạy TRƯỚC mọi bước khác,
+	// vì AutoMigrate ở trên có thể abort sớm (comment_reactions lỗi 1170) và
+	// khi đó rank v2 sẽ 500 do thiếu post_hidden / feed_hero_state.
+	ensureFeedRankTables(db)
 
 	// Thêm cột messages.e2e_version (0 = legacy server-encrypted, 1 = E2E)
 	// idempotent, không làm mất dữ liệu khi chạy lại.
@@ -252,6 +258,7 @@ func Run(db *gorm.DB) {
 			background_type VARCHAR(20) NULL,
 			background_value VARCHAR(500) NULL,
 			overlay_strength INT NOT NULL DEFAULT 100,
+			hidden_at DATETIME NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
 			PRIMARY KEY (chat_id, user_id),
@@ -262,6 +269,7 @@ func Run(db *gorm.DB) {
 		}
 	}
 	ensureColumn(db, "chat_user_settings", "overlay_strength", "INT NOT NULL DEFAULT 100")
+	ensureColumn(db, "chat_user_settings", "hidden_at", "DATETIME NULL")
 	ensureForeignKey(db, "chat_user_settings", "fk_cus_chat", "chat_id", "chats", "id")
 	ensureForeignKey(db, "chat_user_settings", "fk_cus_user", "user_id", "users", "id")
 
@@ -281,6 +289,33 @@ func Run(db *gorm.DB) {
 	}
 	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_message", "message_id", "messages", "id")
 	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_user", "user_id", "users", "id")
+
+	// ===== Challenge daily awards (trần điểm/ngày chống farm) =====
+	if !db.Migrator().HasTable(&models.ChallengeDailyAward{}) {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS challenge_daily_awards (
+			id VARCHAR(36) PRIMARY KEY,
+			challenge_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			award_date DATE NOT NULL,
+			posts_count INT NOT NULL DEFAULT 0,
+			points_earned INT NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE INDEX idx_challenge_daily_awards_pair (challenge_id, user_id, award_date)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create challenge_daily_awards table: %v", err)
+		}
+	}
+	ensureForeignKey(db, "challenge_daily_awards", "fk_challenge_daily_awards_challenge", "challenge_id", "community_challenges", "id")
+	ensureForeignKey(db, "challenge_daily_awards", "fk_challenge_daily_awards_user", "user_id", "users", "id")
+
+	// ===== Cột media + status của communities =====
+	// DB cũ được seed trước khi các cột này tồn tại. GORM INSERT liệt kê đủ cột
+	// của model nên thiếu cột nào là Error 1054 (Unknown column ... in 'field
+	// list') ngay khi tạo cộng đồng. Idempotent, không mất dữ liệu.
+	ensureColumn(db, "communities", "status", "VARCHAR(20) NOT NULL DEFAULT 'active'")
+	ensureColumn(db, "communities", "avatar_media_id", "VARCHAR(36) NULL")
+	ensureColumn(db, "communities", "background_media_id", "VARCHAR(36) NULL")
 
 	// Seed dữ liệu mặc định cho các Gói Quảng Cáo
 	seedAdPackages(db)
@@ -430,8 +465,8 @@ func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn st
 	if err != nil || r.Count > 0 {
 		return
 	}
-	if err := db.Exec("ALTER TABLE "+table+" ADD CONSTRAINT "+fkName+
-		" FOREIGN KEY ("+column+") REFERENCES "+refTable+"("+refColumn+")").Error; err != nil {
+	if err := db.Exec("ALTER TABLE " + table + " ADD CONSTRAINT " + fkName +
+		" FOREIGN KEY (" + column + ") REFERENCES " + refTable + "(" + refColumn + ")").Error; err != nil {
 		log.Printf("Warning: ensure FK %s: %v", fkName, err)
 	}
 }
@@ -460,5 +495,59 @@ func ensureIndex(db *gorm.DB, table, indexName, columns string) {
 	}
 	if err := db.Exec("CREATE INDEX " + indexName + " ON " + table + " (" + columns + ")").Error; err != nil {
 		log.Printf("Warning: ensure index %s: %v", indexName, err)
+	}
+}
+
+// ensureFeedRankTables tạo 3 bảng của feed rank v2.1 bằng SQL thuần:
+//   - feed_hero_state: vòng xoay slot #1 của từng user (bài không đứng đầu mãi)
+//   - post_hidden:     tín hiệu âm "Không quan tâm"
+//   - feed_impressions: vị trí/điểm của trang 1, không dedup theo ngày
+//
+// Đặt riêng khỏi AutoMigrate vì AutoMigrate có thể abort ở comment_reactions
+// (Error 1170) trên DB cũ; khi đó rank v2 sẽ 500 ngay ở câu query đầu tiên.
+func ensureFeedRankTables(db *gorm.DB) {
+	if !db.Migrator().HasTable("feed_hero_state") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS feed_hero_state (
+			user_id CHAR(36) NOT NULL PRIMARY KEY,
+			hero_round INT NOT NULL DEFAULT 0,
+			updated_at DATETIME(3) NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create feed_hero_state table: %v", err)
+		}
+	}
+	if !db.Migrator().HasTable("post_hidden") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS post_hidden (
+			user_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			reason VARCHAR(32) NOT NULL DEFAULT 'not_interested',
+			created_at DATETIME(3) NOT NULL,
+			PRIMARY KEY (user_id, post_id),
+			INDEX idx_post_hidden_post (post_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create post_hidden table: %v", err)
+		}
+	}
+	if !db.Migrator().HasTable("feed_impressions") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS feed_impressions (
+			id CHAR(36) NOT NULL PRIMARY KEY,
+			request_id CHAR(36) NOT NULL,
+			post_id CHAR(36) NOT NULL,
+			viewer_id CHAR(36) NOT NULL,
+			position INT NOT NULL,
+			score DOUBLE NOT NULL,
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_feed_impressions_viewer_created (viewer_id, created_at),
+			INDEX idx_feed_impressions_post_viewer (post_id, viewer_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create feed_impressions table: %v", err)
+		}
+	}
+
+	// Một lần: kéo các điểm interest cũ vượt trần về đúng trần mới.
+	if db.Migrator().HasTable("user_interests") {
+		cap := config.DefaultFeedRankV2.InterestScoreCap
+		if err := db.Exec("UPDATE user_interests SET score = ? WHERE score > ?", cap, cap).Error; err != nil {
+			log.Printf("Warning: clamp user_interests: %v", err)
+		}
 	}
 }

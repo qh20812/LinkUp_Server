@@ -2,14 +2,18 @@ package controllers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/services"
 	"linkup/validations"
+	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,80 +28,203 @@ func NewAdController(service services.AdService, profileRepo *repository.Profile
 	return &AdController{service: service, profileRepo: profileRepo}
 }
 
-func (ctrl *AdController) CreateAd(c *gin.Context) {
-	err := c.Request.ParseMultipartForm(500 << 20)
-	if err != nil {
-		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
-		return
+// adMaxMultipartMemory giới hạn bộ nhớ cho media quảng cáo (500MB).
+const adMaxMultipartMemory = 500 << 20
+
+// adTimeLayouts: input datetime-local của trình duyệt gửi "2006-01-02T15:04"
+// (không kèm timezone) nên time.RFC3339 không parse được. Trước đây lỗi bị bỏ
+// qua im lặng, khiến ngày bắt đầu/kết thúc người dùng chọn bị mất.
+var adTimeLayouts = []string{
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02T15:04",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+}
+
+// parseAdTime chuẩn hoá một giá trị thời gian từ client.
+// Chuỗi rỗng trả (nil, nil) — trường không được gửi lên.
+func parseAdTime(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	for _, layout := range adTimeLayouts {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("thời gian %q không hợp lệ (định dạng mong đợi: YYYY-MM-DDTHH:mm)", raw)
+}
+
+// adPayload là dạng trung gian cho mọi kiểu payload: tất cả giá trị đều phẳng
+// và thời gian là string để parseAdTime xử lý thống nhất.
+type adPayload struct {
+	Title           string   `json:"title"`
+	Content         string   `json:"content"`
+	Format          string   `json:"format"`
+	TargetURL       string   `json:"target_url"`
+	Budget          float64  `json:"budget"`
+	DailyBudget     float64  `json:"daily_budget"`
+	CPMPrice        float64  `json:"cpm_price"`
+	CPCPrice        float64  `json:"cpc_price"`
+	MaxImpressions  int      `json:"max_impressions"`
+	StartedAt       string   `json:"started_at"`
+	ExpiresAt       string   `json:"expires_at"`
+	TargetGender    string   `json:"target_gender"`
+	TargetAgeMin    int      `json:"target_age_min"`
+	TargetAgeMax    int      `json:"target_age_max"`
+	TargetLocations []string `json:"target_locations"`
+}
+
+// decodeAdPayload nhận 3 kiểu payload đang tồn tại trên thực tế:
+//  1. JSON thuần (application/json)
+//  2. multipart/form-data với một field `data` = JSON (web hiện tại)
+//  3. multipart/form-data với từng field phẳng (client cũ / mobile)
+func decodeAdPayload(c *gin.Context) (adPayload, error) {
+	var p adPayload
+
+	if strings.Contains(c.ContentType(), "application/json") {
+		if err := c.ShouldBindJSON(&p); err != nil {
+			return p, err
+		}
+		return p, nil
 	}
 
-	title := c.PostForm("title")
-	content := c.PostForm("content")
-	targetURL := c.PostForm("target_url")
-	format := c.PostForm("format")
+	// Body không phải multipart vẫn cho đi tiếp: PostForm sẽ trả chuỗi rỗng và
+	// phần validate phía dưới báo lỗi trường thiếu, dễ hiểu hơn lỗi parse.
+	if err := c.Request.ParseMultipartForm(adMaxMultipartMemory); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		return p, err
+	}
+
+	if raw := c.PostForm("data"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			return p, fmt.Errorf("dữ liệu quảng cáo (data) không phải JSON hợp lệ: %w", err)
+		}
+		return p, nil
+	}
+
+	p.Title = c.PostForm("title")
+	p.Content = c.PostForm("content")
+	p.TargetURL = c.PostForm("target_url")
+	p.Format = c.PostForm("format")
+	p.Budget, _ = strconv.ParseFloat(c.PostForm("budget"), 64)
+	p.DailyBudget, _ = strconv.ParseFloat(c.PostForm("daily_budget"), 64)
+	p.CPMPrice, _ = strconv.ParseFloat(c.PostForm("cpm_price"), 64)
+	p.CPCPrice, _ = strconv.ParseFloat(c.PostForm("cpc_price"), 64)
+	p.MaxImpressions, _ = strconv.Atoi(c.PostForm("max_impressions"))
+	p.StartedAt = c.PostForm("started_at")
+	p.ExpiresAt = c.PostForm("expires_at")
+	p.TargetGender = c.PostForm("target_gender")
+	p.TargetAgeMin, _ = strconv.Atoi(c.PostForm("target_age_min"))
+	p.TargetAgeMax, _ = strconv.Atoi(c.PostForm("target_age_max"))
+	if locStr := c.PostForm("target_locations"); locStr != "" {
+		if err := json.Unmarshal([]byte(locStr), &p.TargetLocations); err != nil {
+			return p, fmt.Errorf("target_locations phải là mảng JSON: %w", err)
+		}
+	}
+
+	return p, nil
+}
+
+func (p adPayload) toCreateInput() (dto.CreateAdInput, error) {
+	startedAt, err := parseAdTime(p.StartedAt)
+	if err != nil {
+		return dto.CreateAdInput{}, err
+	}
+	expiresAt, err := parseAdTime(p.ExpiresAt)
+	if err != nil {
+		return dto.CreateAdInput{}, err
+	}
+
+	format := strings.TrimSpace(p.Format)
 	if format == "" {
 		format = "image"
 	}
 
-	budget, _ := strconv.ParseFloat(c.PostForm("budget"), 64)
-	dailyBudget, _ := strconv.ParseFloat(c.PostForm("daily_budget"), 64)
-	cpmPrice, _ := strconv.ParseFloat(c.PostForm("cpm_price"), 64)
-	cpcPrice, _ := strconv.ParseFloat(c.PostForm("cpc_price"), 64)
-	maxImpressions, _ := strconv.Atoi(c.PostForm("max_impressions"))
-
-	if err := validations.ValidateCreateAd(title, content, targetURL, format, budget); err != nil {
-		errorsapp.Respond(c, http.StatusBadRequest, err)
-		return
-	}
-
-	var startedAt, expiresAt *time.Time
-	if val := c.PostForm("started_at"); val != "" {
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			startedAt = &t
-		}
-	}
-	if val := c.PostForm("expires_at"); val != "" {
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			expiresAt = &t
-		}
-	}
-
-	targetGender := c.PostForm("target_gender")
-	targetAgeMin, _ := strconv.Atoi(c.PostForm("target_age_min"))
-	targetAgeMax, _ := strconv.Atoi(c.PostForm("target_age_max"))
-	var targetLocations []string
-	if locStr := c.PostForm("target_locations"); locStr != "" {
-		_ = json.Unmarshal([]byte(locStr), &targetLocations)
-	}
-
-	if err := validations.ValidateTargeting(targetGender, targetAgeMin, targetAgeMax); err != nil {
-		errorsapp.Respond(c, http.StatusBadRequest, err)
-		return
-	}
-
-	input := dto.CreateAdInput{
-		Title:           title,
-		Content:         content,
-		TargetURL:       targetURL,
+	return dto.CreateAdInput{
+		Title:           p.Title,
+		Content:         p.Content,
+		TargetURL:       p.TargetURL,
 		Format:          format,
-		Budget:          budget,
-		DailyBudget:     dailyBudget,
-		CPMPrice:        cpmPrice,
-		CPCPrice:        cpcPrice,
-		MaxImpressions:  maxImpressions,
+		Budget:          p.Budget,
+		DailyBudget:     p.DailyBudget,
+		CPMPrice:        p.CPMPrice,
+		CPCPrice:        p.CPCPrice,
+		MaxImpressions:  p.MaxImpressions,
 		StartedAt:       startedAt,
 		ExpiresAt:       expiresAt,
-		TargetGender:    targetGender,
-		TargetAgeMin:    targetAgeMin,
-		TargetAgeMax:    targetAgeMax,
-		TargetLocations: targetLocations,
+		TargetGender:    p.TargetGender,
+		TargetAgeMin:    p.TargetAgeMin,
+		TargetAgeMax:    p.TargetAgeMax,
+		TargetLocations: p.TargetLocations,
+	}, nil
+}
+
+func (p adPayload) toUpdateInput() (dto.UpdateAdInput, error) {
+	startedAt, err := parseAdTime(p.StartedAt)
+	if err != nil {
+		return dto.UpdateAdInput{}, err
+	}
+	expiresAt, err := parseAdTime(p.ExpiresAt)
+	if err != nil {
+		return dto.UpdateAdInput{}, err
 	}
 
-	form := c.Request.MultipartForm
-	files := form.File["media"]
+	return dto.UpdateAdInput{
+		Title:           p.Title,
+		Content:         p.Content,
+		TargetURL:       p.TargetURL,
+		Budget:          p.Budget,
+		DailyBudget:     p.DailyBudget,
+		CPMPrice:        p.CPMPrice,
+		CPCPrice:        p.CPCPrice,
+		MaxImpressions:  p.MaxImpressions,
+		StartedAt:       startedAt,
+		ExpiresAt:       expiresAt,
+		TargetGender:    p.TargetGender,
+		TargetAgeMin:    p.TargetAgeMin,
+		TargetAgeMax:    p.TargetAgeMax,
+		TargetLocations: p.TargetLocations,
+	}, nil
+}
+
+// adMediaFiles trả danh sách file đính kèm; request JSON không có multipart
+// form nên phải guard để tránh nil pointer.
+func adMediaFiles(c *gin.Context) []*multipart.FileHeader {
+	if c.Request.MultipartForm == nil {
+		return nil
+	}
+	return c.Request.MultipartForm.File["media"]
+}
+
+func (ctrl *AdController) CreateAd(c *gin.Context) {
+	payload, err := decodeAdPayload(c)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	input, err := payload.toCreateInput()
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := validations.ValidateCreateAd(input.Title, input.Content, input.TargetURL, input.Format, input.Budget); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := validations.ValidateTargeting(input.TargetGender, input.TargetAgeMin, input.TargetAgeMax); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
 
 	currentUserID := c.GetString("userID")
-	ad, err := ctrl.service.CreateAdWithMedia(c, input, files, currentUserID)
+	role := c.GetString("userRole")
+	platformAdmin := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
+
+	ad, err := ctrl.service.CreateAdWithMedia(c, input, adMediaFiles(c), currentUserID, platformAdmin)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
@@ -107,12 +234,7 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 		return
 	}
 
-	// 2.3 Moderation: Partner/Admin tạo ad → pending; SUPER_ADMIN → active
-	role := c.GetString("userRole")
-	if role != string(models.RoleSuperAdmin) {
-		_ = ctrl.service.SetAdStatus(ad.ID, models.AdStatusPending)
-	}
-
+	// Quảng cáo tạo xong là active ngay (bỏ bước duyệt pending).
 	c.JSON(http.StatusCreated, gin.H{"message": "Tạo quảng cáo thành công", "data": ad})
 }
 
@@ -249,54 +371,23 @@ func (ctrl *AdController) UpdateAd(c *gin.Context) {
 	id := c.Param("id")
 	partnerID := c.GetString("userID")
 
-	if err := c.Request.ParseMultipartForm(500 << 20); err != nil {
-		errorsapp.RespondError(c, http.StatusBadRequest, errorsapp.New(errorsapp.ErrCodeInvalidInput))
+	payload, err := decodeAdPayload(c)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
 
-	var startedAt, expiresAt *time.Time
-	if val := c.PostForm("started_at"); val != "" {
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			startedAt = &t
-		}
-	}
-	if val := c.PostForm("expires_at"); val != "" {
-		if t, err := time.Parse(time.RFC3339, val); err == nil {
-			expiresAt = &t
-		}
+	input, err := payload.toUpdateInput()
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
 	}
 
-	budget, _ := strconv.ParseFloat(c.PostForm("budget"), 64)
-	dailyBudget, _ := strconv.ParseFloat(c.PostForm("daily_budget"), 64)
-	cpmPrice, _ := strconv.ParseFloat(c.PostForm("cpm_price"), 64)
-	cpcPrice, _ := strconv.ParseFloat(c.PostForm("cpc_price"), 64)
-	maxImpressions, _ := strconv.Atoi(c.PostForm("max_impressions"))
-	targetAgeMin, _ := strconv.Atoi(c.PostForm("target_age_min"))
-	targetAgeMax, _ := strconv.Atoi(c.PostForm("target_age_max"))
-	targetGender := c.PostForm("target_gender")
-	var targetLocations []string
-	if locStr := c.PostForm("target_locations"); locStr != "" {
-		_ = json.Unmarshal([]byte(locStr), &targetLocations)
+	if err := validations.ValidateUpdateAd(input.Title, input.Content, input.TargetURL, input.Budget); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
 	}
-
-	input := dto.UpdateAdInput{
-		Title:           c.PostForm("title"),
-		Content:         c.PostForm("content"),
-		TargetURL:       c.PostForm("target_url"),
-		Budget:          budget,
-		DailyBudget:     dailyBudget,
-		CPMPrice:        cpmPrice,
-		CPCPrice:        cpcPrice,
-		MaxImpressions:  maxImpressions,
-		StartedAt:       startedAt,
-		ExpiresAt:       expiresAt,
-		TargetGender:    targetGender,
-		TargetAgeMin:    targetAgeMin,
-		TargetAgeMax:    targetAgeMax,
-		TargetLocations: targetLocations,
-	}
-
-	if err := validations.ValidateCreateAd(input.Title, input.Content, input.TargetURL, "image", input.Budget); err != nil {
+	if err := validations.ValidateTargeting(input.TargetGender, input.TargetAgeMin, input.TargetAgeMax); err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}

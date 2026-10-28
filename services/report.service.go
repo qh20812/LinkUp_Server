@@ -17,11 +17,12 @@ import (
 )
 
 type ReportService struct {
-	reportRepo        *repository.ReportRepository
-	authRepo          *repository.AuthRepository
-	postRepo          *repository.PostRepository
-	violationRuleSvc  *ViolationRuleService
-	validation        *validations.ReportValidation
+	reportRepo       *repository.ReportRepository
+	authRepo         *repository.AuthRepository
+	postRepo         *repository.PostRepository
+	communityRepo    *repository.CommunityRepository
+	violationRuleSvc *ViolationRuleService
+	validation       *validations.ReportValidation
 }
 
 func NewReportService(reportRepo *repository.ReportRepository, authRepo *repository.AuthRepository, postRepo *repository.PostRepository, validation *validations.ReportValidation) *ReportService {
@@ -36,6 +37,12 @@ func NewReportService(reportRepo *repository.ReportRepository, authRepo *reposit
 // SetViolationRuleService gán service kiểm tra violation rule (tránh breaking constructor).
 func (s *ReportService) SetViolationRuleService(svc *ViolationRuleService) {
 	s.violationRuleSvc = svc
+}
+
+// SetCommunityRepo gán community repository phục vụ report loại "community"
+// (khởi tạo muộn hơn report service trong main.go).
+func (s *ReportService) SetCommunityRepo(repo *repository.CommunityRepository) {
+	s.communityRepo = repo
 }
 
 func (s *ReportService) CreateReport(ctx context.Context, reporterID string, input dto.CreateReportInput) (dto.CreateReportResponse, error) {
@@ -107,6 +114,23 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 		if comment.Status == models.CommentStatusHidden {
 			return dto.CreateReportResponse{}, errors.New("không thể báo cáo bình luận đã bị ẩn")
 		}
+	case "community":
+		if s.communityRepo == nil {
+			return dto.CreateReportResponse{}, errors.New("tính năng báo cáo cộng đồng chưa sẵn sàng")
+		}
+		community, err := s.communityRepo.FindByID(ctx, input.TargetID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return dto.CreateReportResponse{}, errors.New("không tìm thấy cộng đồng")
+			}
+			return dto.CreateReportResponse{}, fmt.Errorf("check community: %w", err)
+		}
+		if community.CreatorID == reporterID {
+			return dto.CreateReportResponse{}, errors.New("không thể báo cáo cộng đồng của chính mình")
+		}
+		if community.Status != models.CommunityStatusActive {
+			return dto.CreateReportResponse{}, errors.New("không thể báo cáo cộng đồng đã bị ẩn hoặc đình chỉ")
+		}
 	}
 
 	now := time.Now().UTC()
@@ -128,6 +152,8 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 		report.TargetPostID = &input.TargetID
 	case "comment":
 		report.TargetCommentID = &input.TargetID
+	case "community":
+		report.TargetCommunityID = &input.TargetID
 	}
 
 	if err := s.reportRepo.Create(ctx, &report); err != nil {
@@ -167,6 +193,8 @@ func (s *ReportService) UpdateReport(ctx context.Context, reporterID, reportID s
 		targetType = "user"
 	case report.TargetCommentID != nil:
 		targetType = "comment"
+	case report.TargetCommunityID != nil:
+		targetType = "community"
 	}
 	if s.violationRuleSvc != nil {
 		if err := s.violationRuleSvc.ValidateForReport(ctx, input.ViolationRuleID, targetType); err != nil {

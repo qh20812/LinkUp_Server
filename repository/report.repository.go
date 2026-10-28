@@ -59,6 +59,8 @@ func (r *ReportRepository) FindPendingByReporterAndTarget(ctx context.Context, r
 		q = q.Where("target_post_id = ?", targetID)
 	case "comment":
 		q = q.Where("target_comment_id = ?", targetID)
+	case "community":
+		q = q.Where("target_community_id = ?", targetID)
 	}
 
 	err := q.First(&report).Error
@@ -96,7 +98,7 @@ func (r *ReportRepository) CountAdminReports(ctx context.Context, keyword, statu
 
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		q = q.Where("reporter.username LIKE ? OR reporter.email LIKE ? OR reports.reason_detail LIKE ? OR reports.target_user_id LIKE ? OR reports.target_post_id LIKE ? OR reports.target_comment_id LIKE ?", like, like, like, like, like, like)
+		q = q.Where("reporter.username LIKE ? OR reporter.email LIKE ? OR reports.reason_detail LIKE ? OR reports.target_user_id LIKE ? OR reports.target_post_id LIKE ? OR reports.target_comment_id LIKE ? OR reports.target_community_id LIKE ?", like, like, like, like, like, like, like)
 	}
 
 	if status != "" {
@@ -107,8 +109,9 @@ func (r *ReportRepository) CountAdminReports(ctx context.Context, keyword, statu
 		q = q.Where(`(
             (? = 'post' AND reports.target_post_id IS NOT NULL) OR
             (? = 'user' AND reports.target_user_id IS NOT NULL) OR
-            (? = 'comment' AND reports.target_comment_id IS NOT NULL)
-        )`, targetType, targetType, targetType)
+            (? = 'comment' AND reports.target_comment_id IS NOT NULL) OR
+            (? = 'community' AND reports.target_community_id IS NOT NULL)
+        )`, targetType, targetType, targetType, targetType)
 	}
 
 	if err := q.Count(&count).Error; err != nil {
@@ -136,9 +139,9 @@ func (r *ReportRepository) ListAdminReports(ctx context.Context, keyword, status
 	case "target_type":
 		switch order {
 		case "asc":
-			orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END ASC"
+			orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' WHEN reports.target_community_id IS NOT NULL THEN 'community' ELSE '' END ASC"
 		default:
-			orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END DESC"
+			orderBy = "CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' WHEN reports.target_community_id IS NOT NULL THEN 'community' ELSE '' END DESC"
 		}
 	default:
 		orderBy = "reports.created_at DESC"
@@ -153,13 +156,14 @@ func (r *ReportRepository) ListAdminReports(ctx context.Context, keyword, status
                 reports.target_user_id,
                 reports.target_post_id,
                 reports.target_comment_id,
+                reports.target_community_id,
                 reports.report_type,
                 reports.violation_rule_id,
                 violation_rule.title AS violation_rule_title,
                 reports.reason_detail,
                 reports.status,
                 reports.created_at,
-                CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' ELSE '' END AS target_type`).
+                CASE WHEN reports.target_post_id IS NOT NULL THEN 'post' WHEN reports.target_user_id IS NOT NULL THEN 'user' WHEN reports.target_comment_id IS NOT NULL THEN 'comment' WHEN reports.target_community_id IS NOT NULL THEN 'community' ELSE '' END AS target_type`).
 		Joins("LEFT JOIN users reporter ON reporter.id = reports.reporter_id").
 		Joins("LEFT JOIN violation_rules violation_rule ON violation_rule.id = reports.violation_rule_id").
 		Order(orderBy).
@@ -168,7 +172,7 @@ func (r *ReportRepository) ListAdminReports(ctx context.Context, keyword, status
 
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		q = q.Where("reporter.username LIKE ? OR reporter.email LIKE ? OR reports.reason_detail LIKE ? OR reports.target_user_id LIKE ? OR reports.target_post_id LIKE ? OR reports.target_comment_id LIKE ?", like, like, like, like, like, like)
+		q = q.Where("reporter.username LIKE ? OR reporter.email LIKE ? OR reports.reason_detail LIKE ? OR reports.target_user_id LIKE ? OR reports.target_post_id LIKE ? OR reports.target_comment_id LIKE ? OR reports.target_community_id LIKE ?", like, like, like, like, like, like, like)
 	}
 
 	if status != "" {
@@ -179,8 +183,9 @@ func (r *ReportRepository) ListAdminReports(ctx context.Context, keyword, status
 		q = q.Where(`(
             (? = 'post' AND reports.target_post_id IS NOT NULL) OR
             (? = 'user' AND reports.target_user_id IS NOT NULL) OR
-            (? = 'comment' AND reports.target_comment_id IS NOT NULL)
-        )`, targetType, targetType, targetType)
+            (? = 'comment' AND reports.target_comment_id IS NOT NULL) OR
+            (? = 'community' AND reports.target_community_id IS NOT NULL)
+        )`, targetType, targetType, targetType, targetType)
 	}
 
 	if err := q.Scan(&reports).Error; err != nil {

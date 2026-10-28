@@ -26,7 +26,10 @@ import (
 )
 
 type MediaService interface {
-	UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
+	// AutoApproveUpload upload media với status approved, KHÔNG chạy AI
+	// moderation. Đây là đường upload chuẩn cho mọi nội dung do user tạo
+	// (post, story, avatar, cộng đồng, quảng cáo...). Nội dung vi phạm được
+	// xử lý hậu kiểm qua report system, không chặn trước khi công khai.
 	AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	UploadChatMedia(ctx context.Context, userID string, file *multipart.FileHeader, durationSeconds int) (*models.Media, error)
 	// StageUpload lưu file vào staging local + tạo media row pending, rồi đẩy
@@ -40,18 +43,14 @@ type MediaService interface {
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
 	GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error)
-	ModerateByID(ctx context.Context, mediaID string) (*AIModerationResult, error)
 }
 
 type mediaService struct {
-	repo                repository.MediaRepository
-	validation          *validations.MediaValidation
-	cloudinary          *cloudinary.Cloudinary
-	aiModeration        AIModerationService
-	moderationRepo      *repository.ModerationRepository
-	notificationService *NotificationService
-	storyRepo           repository.StoryRepository
-	hub                 *ws.Hub
+	repo         repository.MediaRepository
+	validation   *validations.MediaValidation
+	cloudinary   *cloudinary.Cloudinary
+	aiModeration AIModerationService
+	hub          *ws.Hub
 }
 
 // Staging local cho async pipeline: file nằm đây từ lúc request tới khi
@@ -59,10 +58,10 @@ type mediaService struct {
 // post.routes.go) nên client thấy media ngay, rồi nhận URL Cloudinary
 // qua WS event media:ready.
 const (
-	stagingDir        = "./uploads/staging"
-	stagingURLPrefix  = "/static/staging/"
-	stagingMaxAge     = time.Hour
-	stagingUploadTTL  = 10 * time.Minute
+	stagingDir       = "./uploads/staging"
+	stagingURLPrefix = "/static/staging/"
+	stagingMaxAge    = time.Hour
+	stagingUploadTTL = 10 * time.Minute
 )
 
 // SetHub gán realtime hub để bắn event media:ready (tránh breaking constructor).
@@ -74,40 +73,19 @@ func NewMediaService(
 	repo repository.MediaRepository,
 	cloudinaryURL string,
 	aiModeration AIModerationService,
-	notificationService *NotificationService,
 ) *mediaService {
 	cld, _ := cloudinary.NewFromURL(cloudinaryURL)
 	return &mediaService{
-		repo:                repo,
-		validation:          validations.NewMediaValidation(),
-		cloudinary:          cld,
-		aiModeration:        aiModeration,
-		notificationService: notificationService,
+		repo:         repo,
+		validation:   validations.NewMediaValidation(),
+		cloudinary:   cld,
+		aiModeration: aiModeration,
 	}
-}
-
-// SetModerationRepo gán moderation repository sau khi khởi tạo
-// (tránh circular dependency nếu có).
-func (s *mediaService) SetModerationRepo(repo *repository.ModerationRepository) {
-	s.moderationRepo = repo
-}
-
-// SetStoryRepo gán story repository để ẩn story khi media bị reject.
-func (s *mediaService) SetStoryRepo(repo repository.StoryRepository) {
-	s.storyRepo = repo
-}
-
-func (s *mediaService) UploadMedia(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
-	media, err := s.upload(ctx, userID, file, models.MediaStatusPending, 0)
-	if err != nil {
-		return nil, err
-	}
-	go s.moderateInBackground(media.ID, media.FileURI)
-	return media, nil
 }
 
 // AutoApproveUpload upload media với status approved, không chạy AI moderation.
-// Dùng cho post creation, stories, và standalone upload — nội dung vi phạm sẽ được xử lý qua report system.
+// Dùng cho post creation, stories, avatar, cộng đồng, quảng cáo và standalone
+// upload — nội dung vi phạm sẽ được xử lý qua report system.
 func (s *mediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
 	return s.upload(ctx, userID, file, models.MediaStatusApproved, 0)
 }
@@ -301,65 +279,6 @@ func (s *mediaService) upload(ctx context.Context, userID string, file *multipar
 	return &media, nil
 }
 
-// moderateInBackground chạy AI moderation trên asset đã upload.
-// Nếu reject → cập nhật status, gửi notification, ẩn story liên quan.
-func (s *mediaService) moderateInBackground(mediaID, secureURL string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	publicID, resourceType, err := parseCloudinaryPublicID(secureURL)
-	if err != nil {
-		log.Printf("[Moderation] không thể parse public ID cho media %s: %v", mediaID, err)
-		return
-	}
-
-	result, err := s.aiModeration.ModerateAsset(ctx, publicID, resourceType)
-	if err != nil {
-		log.Printf("[Moderation] background moderation thất bại cho media %s: %v", mediaID, err)
-		return
-	}
-
-	// Nếu approved → không cần làm gì thêm (media đã ở trạng thái visible từ khi upload)
-	if result.Status == models.MediaStatusApproved {
-		s.writeModerationLog(ctx, mediaID, result)
-		return
-	}
-
-	// Cập nhật status trong DB
-	if err := s.repo.UpdateStatus(ctx, mediaID, result.Status); err != nil {
-		log.Printf("[Moderation] không thể cập nhật status cho media %s: %v", mediaID, err)
-		return
-	}
-
-	// Lấy media info để biết user_id và post_id
-	media, err := s.repo.GetByID(ctx, mediaID)
-	if err != nil {
-		log.Printf("[Moderation] không thể lấy media %s: %v", mediaID, err)
-		return
-	}
-
-	// Gửi notification cho user
-	s.sendRejectionNotification(ctx, media.UserID, media.PostID, result)
-
-	// Ghi moderation log
-	s.writeModerationLog(ctx, mediaID, result)
-
-	// Nếu rejected → ẩn story liên quan (nếu có)
-	if result.Status == models.MediaStatusRejected && s.storyRepo != nil {
-		s.hideStoriesByMediaURI(ctx, secureURL)
-	}
-}
-
-// hideStoriesByMediaURI xóa các story có media_uri trùng với URL bị reject.
-func (s *mediaService) hideStoriesByMediaURI(ctx context.Context, mediaURI string) {
-	if s.storyRepo == nil {
-		return
-	}
-	// Không có method xóa story theo mediaURI trong repo hiện tại.
-	// Story sẽ tự hết hạn sau 24h. Nếu cần ẩn ngay, thêm method vào StoryRepository.
-	log.Printf("[Moderation] story có media %s cần bị ẩn (chờ hết hạn 24h hoặc thêm story repo method)", mediaURI)
-}
-
 func (s *mediaService) DeleteMedia(ctx context.Context, userID string, mediaID string) error {
 	media, err := s.repo.GetByID(ctx, mediaID)
 	if err != nil {
@@ -410,86 +329,6 @@ func (s *mediaService) GetUserMedia(ctx context.Context, userID string) ([]model
 
 func (s *mediaService) GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error) {
 	return s.repo.GetByPostIDs(ctx, postIDs)
-}
-
-// ModerateByID chạy AI moderation cho media đã tồn tại (dùng khi cần re-moderate).
-func (s *mediaService) ModerateByID(ctx context.Context, mediaID string) (*AIModerationResult, error) {
-	media, err := s.repo.GetByID(ctx, mediaID)
-	if err != nil {
-		return nil, fmt.Errorf("get media: %w", err)
-	}
-
-	publicID, resourceType, err := parseCloudinaryPublicID(media.FileURI)
-	if err != nil {
-		return nil, fmt.Errorf("parse cloudinary url: %w", err)
-	}
-
-	result, err := s.aiModeration.ModerateAsset(ctx, publicID, resourceType)
-	if err != nil {
-		return nil, fmt.Errorf("moderate asset: %w", err)
-	}
-
-	if err := s.repo.UpdateStatus(ctx, mediaID, result.Status); err != nil {
-		log.Printf("[Moderation] không thể cập nhật status cho media %s: %v", mediaID, err)
-	}
-
-	return result, nil
-}
-
-// sendRejectionNotification gửi thông báo khi media bị reject.
-// Không gửi cho approved (silent success) vì user không cần biết.
-func (s *mediaService) sendRejectionNotification(ctx context.Context, userID string, postID *string, result *AIModerationResult) {
-	if s.notificationService == nil {
-		return
-	}
-
-	var message string
-	var notifType models.NotificationType
-	switch result.Status {
-	case models.MediaStatusRejected:
-		message = "Ảnh/video của bạn bị từ chối do vi phạm tiêu chuẩn cộng đồng."
-		notifType = models.NotificationTypeMediaRejected
-	case models.MediaStatusFlagged:
-		message = "Ảnh/video của bạn đang chờ admin kiểm duyệt."
-		notifType = models.NotificationTypeMediaFlagged
-	default:
-		return
-	}
-
-	if _, err := s.notificationService.Create(ctx, userID, nil, notifType,
-		message, postID, nil, nil); err != nil {
-		log.Printf("[Media] không thể gửi thông báo moderation cho user %s: %v", userID, err)
-	}
-}
-
-// writeModerationLog ghi log kiểm duyệt vào bảng moderation_logs.
-func (s *mediaService) writeModerationLog(ctx context.Context, mediaID string, result *AIModerationResult) {
-	if s.moderationRepo == nil {
-		return
-	}
-
-	reason := buildModerationReason(result)
-
-	logEntry := models.NewModerationLog("AI_SYSTEM", models.ModerationActionUpdate,
-		models.ModerationTargetMedia, mediaID, reason)
-	logEntry.ID = utils.GenerateUUID()
-	logEntry.CreatedAt = time.Now()
-
-	if err := s.moderationRepo.CreateLog(ctx, &logEntry); err != nil {
-		log.Printf("[Media] không thể ghi moderation log cho %s: %v", mediaID, err)
-	}
-}
-
-// buildModerationReason tạo chuỗi mô tả lý do từ kết quả AI moderation.
-func buildModerationReason(result *AIModerationResult) string {
-	if len(result.Labels) == 0 {
-		return fmt.Sprintf("AI moderation: %s", string(result.Status))
-	}
-	parts := make([]string, len(result.Labels))
-	for i, l := range result.Labels {
-		parts[i] = fmt.Sprintf("%s (%.1f%%)", l.Name, l.Confidence)
-	}
-	return fmt.Sprintf("AI moderation: %s — %s", string(result.Status), strings.Join(parts, ", "))
 }
 
 func parseCloudinaryPublicID(fileURI string) (string, string, error) {

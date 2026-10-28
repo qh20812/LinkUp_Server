@@ -6,8 +6,11 @@ import (
 
 	"linkup/cmd/seed/internal"
 	"linkup/config"
+	"linkup/seeddata"
 )
 
+// Run chèn cộng đồng, nội quy, chính sách đóng góp, thành viên, yêu cầu tham gia
+// và chat nhóm mặc định của từng cộng đồng từ seeddata.Communities.
 func Run(env config.Env, state *internal.SeedState) error {
 	database, err := internal.Connect(env)
 	if err != nil {
@@ -17,192 +20,169 @@ func Run(env config.Env, state *internal.SeedState) error {
 
 	now := time.Now().UTC()
 
-	superAdminID := state.UserIDs[0]
-
 	communityAdminRoleID := state.RoleIDs[9]
 	communityMemberRoleID := state.RoleIDs[10]
-	groupAdminRoleID := state.RoleIDs[6]
-	groupModRoleID := state.RoleIDs[7]
-	groupMemberRoleID := state.RoleIDs[8]
 
-	userRoleAssigned := map[string]bool{}
+	type assignedRole struct{ userID, roleID, scopeID string }
+	assigned := make(map[assignedRole]bool)
 
 	addUserRole := func(userID, roleID, scopeID string) error {
-		key := userID + "|" + roleID + "|" + scopeID
-		if userRoleAssigned[key] {
+		key := assignedRole{userID, roleID, scopeID}
+		if assigned[key] {
 			return nil
 		}
-		userRoleAssigned[key] = true
+		assigned[key] = true
 		return internal.Exec(database,
 			`INSERT INTO user_roles (id, user_id, role_id, scope_id, scope_type, assigned_at) VALUES (?, ?, ?, ?, 'community', ?)`,
 			internal.UUID(), userID, roleID, scopeID, now,
 		)
 	}
 
-	type communityData struct {
-		id          string
-		name        string
-		description string
-		creatorIdx  int
-	}
-
-	communities := []communityData{
-		{internal.UUID(), "Go Developers", "A community for Go programming enthusiasts", 2},
-		{internal.UUID(), "Cloud Architects", "Discussing cloud infrastructure and architecture", 4},
-		{internal.UUID(), "AI Enthusiasts", "Exploring artificial intelligence and machine learning", 3},
-		{internal.UUID(), "DevOps United", "Sharing DevOps best practices and tools", 5},
-		{internal.UUID(), "Open Source Contributors", "Collaborating on open source projects", 8},
-	}
-
-	for i, c := range communities {
-		if err := internal.Exec(database,
-			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, background_uri, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', ?, NULL)`,
-			c.id, state.UserIDs[c.creatorIdx], c.name, c.description,
-			fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
-			now,
-		); err != nil {
-			return fmt.Errorf("relationships: insert community %s: %w", c.name, err)
+	userID := func(key string) (string, error) {
+		id, ok := state.UserIDByUsername[key]
+		if !ok {
+			return "", fmt.Errorf("relationships: unknown user %q", key)
 		}
-		state.CommunityIDs = append(state.CommunityIDs, c.id)
+		return id, nil
+	}
+
+	for i, c := range seeddata.Communities {
+		communityID, ok := state.CommunityIDByKey[c.Key]
+		if !ok {
+			// Bước này chạy trước social nên thường tự cấp ID; nếu đã có thì dùng lại.
+			communityID = internal.UUID()
+			state.CommunityIDByKey[c.Key] = communityID
+		}
+		state.CommunityIDs = append(state.CommunityIDs, communityID)
+
+		creatorID, err := userID(c.Creator)
+		if err != nil {
+			return err
+		}
+
+		createdAt := now.Add(-time.Duration(120+i*90) * 24 * time.Hour)
+
+		if err := internal.Exec(database,
+			`INSERT INTO communities (id, creator_id, name, description, avatar_uri, background_uri, auto_approve, privacy, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			communityID, creatorID, c.Name, c.Description, c.Avatar, c.Background,
+			boolToInt(c.AutoApprove), c.Privacy, createdAt,
+		); err != nil {
+			return fmt.Errorf("relationships: insert community %s: %w", c.Name, err)
+		}
 
 		if err := internal.Exec(database,
 			`INSERT INTO community_policies (
 				id, community_id, post_weight, comment_weight, reaction_weight, event_weight,
 				top_contributor_threshold, moderator_promotion_threshold, auto_promote_enabled, badge_enabled,
 				created_at, updated_at
-			) VALUES (?, ?, 10, 5, 2, 20, 2500, 5000, 1, 1, ?, NULL)`,
-			internal.UUID(), c.id, now,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			internal.UUID(), communityID,
+			c.Policy.PostWeight, c.Policy.CommentWeight, c.Policy.ReactionWeight, c.Policy.EventWeight,
+			c.Policy.TopThreshold, c.Policy.ModThreshold,
+			boolToInt(c.Policy.AutoPromote), boolToInt(c.Policy.BadgeEnabled), createdAt,
 		); err != nil {
-			return fmt.Errorf("relationships: insert community policy for %s: %w", c.name, err)
+			return fmt.Errorf("relationships: insert policy for %s: %w", c.Name, err)
 		}
 
-		if err := addUserRole(state.UserIDs[c.creatorIdx], communityAdminRoleID, c.id); err != nil {
-			return fmt.Errorf("relationships: community_admin user_role for %s: %w", state.UserIDs[c.creatorIdx], err)
-		}
-
-		chatID := internal.UUID()
-		if err := internal.Exec(database,
-			`INSERT INTO chats (id, type, name, avatar_uri, encryption_key, community_id, created_at) VALUES (?, 'group', ?, ?, 'seed-enc-key', ?, ?)`,
-			chatID, c.name, fmt.Sprintf("https://api.dicebear.com/7.x/identicon/svg?seed=community%d", i),
-			c.id, now,
-		); err != nil {
-			return fmt.Errorf("relationships: insert default chat for community %s: %w", c.name, err)
-		}
-
-		if err := internal.Exec(database,
-			`INSERT INTO chat_participants (id, chat_id, user_id, role, joined_at) VALUES (?, ?, ?, 'CHAT_ADMIN', ?)`,
-			internal.UUID(), chatID, state.UserIDs[c.creatorIdx], now,
-		); err != nil {
-			return fmt.Errorf("relationships: insert admin participant for community %s: %w", c.name, err)
-		}
-
-		state.CommunityChatIDs = append(state.CommunityChatIDs, chatID)
-
-		rules := []struct {
-			category string
-			title    string
-			content  string
-			position int
-		}{
-			{"conduct", "Tôn trọng lẫn nhau", "Hãy luôn giữ thái độ tôn trọng với các thành viên khác. Không công kích cá nhân, quấy rối hoặc phân biệt đối xử.", 1},
-			{"conduct", "Giữ văn minh", "Thảo luận lành mạnh, không spam, không flood tin nhắn.", 2},
-			{"prohibited", "Nội dung bất hợp pháp", "Không đăng tải nội dung vi phạm pháp luật, bao gồm bản quyền và sở hữu trí tuệ.", 1},
-			{"prohibited", "Quảng cáo trái phép", "Không đăng quảng cáo hoặc link giới thiệu khi chưa được cho phép.", 2},
-			{"guidelines", "Cách đăng bài", "Đăng bài đúng chủ đề, tiêu đề rõ ràng, sử dụng tag phù hợp.", 1},
-			{"guidelines", "Đóng góp tích cực", "Chia sẻ kiến thức, hỗ trợ thành viên mới, báo cáo nội dung vi phạm.", 2},
-		}
-		for _, rule := range rules {
+		// Nội quy: position đánh lại từ 1 trong từng nhóm.
+		categoryPosition := make(map[string]int)
+		for _, rule := range c.Rules {
+			categoryPosition[rule.Category]++
 			if err := internal.Exec(database,
-				`INSERT INTO community_rules (id, community_id, category, title, content, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
-				internal.UUID(), c.id, rule.category, rule.title, rule.content, rule.position, now,
+				`INSERT INTO community_rules (id, community_id, category, title, content, position, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+				internal.UUID(), communityID, rule.Category, rule.Title, rule.Content,
+				categoryPosition[rule.Category], createdAt,
 			); err != nil {
-				return fmt.Errorf("relationships: insert rule %s for community %s: %w", rule.title, c.name, err)
+				return fmt.Errorf("relationships: insert rule %q for %s: %w", rule.Title, c.Name, err)
 			}
 		}
-	}
 
-	type memberData struct {
-		communityIdx int
-		userIdx      int
-		role         string
-	}
-
-	members := []memberData{}
-	for ci := range communities {
-		adminIdx := ci*2 + 2
-		modIdx := ci*2 + 3
-		members = append(members, memberData{communityIdx: ci, userIdx: adminIdx, role: "GROUP_ADMIN"})
-		members = append(members, memberData{communityIdx: ci, userIdx: modIdx, role: "GROUP_MOD"})
-		// Pick 3 group members từ các user thường, loại trừ admin/mod/creator để tránh trùng khóa (idx_group_members_pair)
-		var candidates []int
-		for u := 2; u < len(state.UserIDs); u++ {
-			if u == adminIdx || u == modIdx || u == communities[ci].creatorIdx {
-				continue
+		// Thành viên. Members[0] là quản trị viên cộng đồng.
+		for m, member := range c.Members {
+			memberID, err := userID(member.User)
+			if err != nil {
+				return err
 			}
-			candidates = append(candidates, u)
-		}
-		for m := 0; m < 3; m++ {
-			idx := candidates[(ci*3+m)%len(candidates)]
-			members = append(members, memberData{communityIdx: ci, userIdx: idx, role: "GROUP_MEMBER"})
-		}
-	}
-
-	for _, m := range members {
-		userID := state.UserIDs[m.userIdx]
-		if userID == superAdminID {
-			continue
-		}
-
-		points := 0
-		if m.role == "GROUP_ADMIN" {
-			points = 500
-		} else if m.role == "GROUP_MOD" {
-			points = 200
-		} else {
-			points = 10
-		}
-
-		if err := internal.Exec(database,
-			`INSERT INTO group_members (id, community_id, user_id, points, joined_at) VALUES (?, ?, ?, ?, ?)`,
-			internal.UUID(), state.CommunityIDs[m.communityIdx], userID, points, now,
-		); err != nil {
-			return fmt.Errorf("relationships: insert member for community %d user %d: %w", m.communityIdx, m.userIdx, err)
-		}
-
-		var roleID string
-		switch m.role {
-		case "GROUP_ADMIN":
-			roleID = groupAdminRoleID
-		case "GROUP_MOD":
-			roleID = groupModRoleID
-		default:
-			roleID = groupMemberRoleID
-		}
-		communityID := state.CommunityIDs[m.communityIdx]
-
-		if err := addUserRole(userID, roleID, communityID); err != nil {
-			return fmt.Errorf("relationships: user_role %s for user %s: %w", m.role, userID, err)
-		}
-
-		if err := addUserRole(userID, communityMemberRoleID, communityID); err != nil {
-			return fmt.Errorf("relationships: community_member user_role for %s: %w", userID, err)
-		}
-
-		// Skip chat_participant cho creator — đã được thêm khi tạo community
-		if m.userIdx != communities[m.communityIdx].creatorIdx {
-			partnerRole := "CHAT_MEMBER"
-			if m.role == "GROUP_ADMIN" {
-				partnerRole = "CHAT_ADMIN"
+			joinedAt := now.Add(-time.Duration(60+m*22) * 24 * time.Hour)
+			if joinedAt.Before(createdAt) {
+				joinedAt = createdAt.Add(time.Hour)
 			}
 
 			if err := internal.Exec(database,
-				`INSERT INTO chat_participants (id, chat_id, user_id, role, joined_at) VALUES (?, ?, ?, ?, ?)`,
-				internal.UUID(), state.CommunityChatIDs[m.communityIdx], userID, partnerRole, now,
+				`INSERT INTO group_members (id, community_id, user_id, points, joined_at) VALUES (?, ?, ?, ?, ?)`,
+				internal.UUID(), communityID, memberID, member.Points, joinedAt,
 			); err != nil {
-				return fmt.Errorf("relationships: insert chat participant for community %d user %d: %w", m.communityIdx, m.userIdx, err)
+				return fmt.Errorf("relationships: insert member %s in %s: %w", member.User, c.Name, err)
 			}
+
+			roleID := communityMemberRoleID
+			if m == 0 {
+				roleID = communityAdminRoleID
+			}
+			if err := addUserRole(memberID, roleID, communityID); err != nil {
+				return fmt.Errorf("relationships: assign role %s in %s: %w", member.User, c.Name, err)
+			}
+		}
+
+		if c.CreateChat {
+			chatID := internal.UUID()
+			state.CommunityChatIDs = append(state.CommunityChatIDs, chatID)
+
+			if err := internal.Exec(database,
+				`INSERT INTO chats (id, type, name, avatar_uri, encryption_key, community_id, created_at)
+				 VALUES (?, 'group', ?, ?, 'seed-enc-key', ?, ?)`,
+				chatID, c.ChatName, c.ChatAvatar, communityID, createdAt,
+			); err != nil {
+				return fmt.Errorf("relationships: insert community chat for %s: %w", c.Name, err)
+			}
+
+			for m, member := range c.Members {
+				memberID, err := userID(member.User)
+				if err != nil {
+					return err
+				}
+				chatRole := "CHAT_MEMBER"
+				if m == 0 {
+					chatRole = "CHAT_ADMIN"
+				}
+				if err := internal.Exec(database,
+					`INSERT INTO chat_participants (id, chat_id, user_id, role, joined_at) VALUES (?, ?, ?, ?, ?)`,
+					internal.UUID(), chatID, memberID, chatRole, createdAt.Add(time.Minute),
+				); err != nil {
+					return fmt.Errorf("relationships: insert chat participant %s for %s: %w", member.User, c.Name, err)
+				}
+			}
+		}
+	}
+
+	// Yêu cầu tham gia đang chờ duyệt.
+	for _, r := range seeddata.JoinRequests {
+		communityID, ok := state.CommunityIDByKey[r.Community]
+		if !ok {
+			return fmt.Errorf("relationships: join request references unknown community %q", r.Community)
+		}
+		requesterID, err := userID(r.User)
+		if err != nil {
+			return err
+		}
+		createdAt := now.Add(-time.Duration(r.AgeDays) * 24 * time.Hour)
+		if err := internal.Exec(database,
+			`INSERT INTO community_join_requests (id, community_id, user_id, status, created_at, responded_at)
+			 VALUES (?, ?, ?, ?, ?, NULL)`,
+			internal.UUID(), communityID, requesterID, r.Status, createdAt,
+		); err != nil {
+			return fmt.Errorf("relationships: insert join request %s→%s: %w", r.User, r.Community, err)
 		}
 	}
 
 	return nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

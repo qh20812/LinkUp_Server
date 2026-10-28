@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"linkup/config"
 	"linkup/models"
 
 	"gorm.io/gorm"
@@ -21,11 +22,14 @@ func NewInterestRepository(db *gorm.DB) *InterestRepository {
 
 // AddInterestScore cộng điểm interest cho (user, tag), tạo mới nếu chưa có.
 // Tag được chuẩn hóa lowercase để khớp với lookup hashtag.
+// Điểm bị chặn trần ở InterestScoreCap: trước đây cộng dồn vô hạn khiến một
+// hashtag đã tương tác giữ bonus tối đa hàng tuần (vòng lặp tự củng cố).
 func (r *InterestRepository) AddInterestScore(ctx context.Context, userID, tag string, delta float64) error {
 	tag = strings.ToLower(strings.TrimSpace(tag))
 	if tag == "" || delta == 0 {
 		return nil
 	}
+	cap := config.DefaultFeedRankV2.InterestScoreCap
 	interest := models.UserInterest{
 		UserID:    userID,
 		Tag:       tag,
@@ -35,7 +39,7 @@ func (r *InterestRepository) AddInterestScore(ctx context.Context, userID, tag s
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}, {Name: "tag"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"score":      gorm.Expr("score + ?", delta),
+			"score":      gorm.Expr("LEAST(score + ?, ?)", delta, cap),
 			"updated_at": time.Now(),
 		}),
 	}).Create(&interest).Error

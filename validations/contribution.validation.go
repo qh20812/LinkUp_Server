@@ -59,21 +59,61 @@ func (v *ContributionValidation) ValidateUpdatePolicyInput(input dto.UpdatePolic
 	})
 }
 
+const (
+	MinPointsPerPost   = 1
+	MaxPointsPerPost   = 1000
+	MinMaxParticipants = 1
+	MaxMaxParticipants = 100000
+)
+
 func (v *ContributionValidation) ValidateCreateChallenge(input dto.CreateChallengeInput) (time.Time, time.Time, error) {
-	if err := v.ValidateChallengeTitle(input.Title); err != nil {
+	if err := v.validateChallengeContent(input); err != nil {
 		return time.Time{}, time.Time{}, err
+	}
+	return v.validateChallengeDates(input.StartDate, input.EndDate, true)
+}
+
+// ValidateUpdateChallenge giống ValidateCreateChallenge nhưng cho phép start_date ở quá khứ,
+// vì admin có thể đang sửa một challenge đã/đang diễn ra.
+func (v *ContributionValidation) ValidateUpdateChallenge(input dto.CreateChallengeInput) (time.Time, time.Time, error) {
+	if err := v.validateChallengeContent(input); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return v.validateChallengeDates(input.StartDate, input.EndDate, false)
+}
+
+func (v *ContributionValidation) validateChallengeContent(input dto.CreateChallengeInput) error {
+	if err := v.ValidateChallengeTitle(input.Title); err != nil {
+		return err
 	}
 	if err := v.ValidateChallengeDescription(input.Description); err != nil {
-		return time.Time{}, time.Time{}, err
+		return err
 	}
 	if err := v.ValidateHashtag(input.Hashtag); err != nil {
-		return time.Time{}, time.Time{}, err
+		return err
 	}
-	start, end, err := v.ValidateChallengeDates(input.StartDate, input.EndDate)
-	if err != nil {
-		return time.Time{}, time.Time{}, err
+	return v.ValidateChallengeRewards(input.PointsPerPost, input.MaxParticipants)
+}
+
+// ValidateChallengeRewards kiểm tra điểm mỗi bài và giới hạn số người tham gia.
+func (v *ContributionValidation) ValidateChallengeRewards(points int, maxParticipants *int) error {
+	if points < MinPointsPerPost || points > MaxPointsPerPost {
+		return errorsapp.New(errorsapp.ErrCodeContribPointsInvalid)
 	}
-	return start, end, nil
+	if maxParticipants != nil && (*maxParticipants < MinMaxParticipants || *maxParticipants > MaxMaxParticipants) {
+		return errorsapp.New(errorsapp.ErrCodeContribMaxParticipantsInvalid)
+	}
+	return nil
+}
+
+// ValidateChallengeStatus chỉ chấp nhận các trạng thái admin được phép đặt.
+func (v *ContributionValidation) ValidateChallengeStatus(status string) error {
+	switch status {
+	case "active", "completed", "cancelled":
+		return nil
+	default:
+		return errorsapp.New(errorsapp.ErrCodeContribStatusInvalid)
+	}
 }
 
 func (v *ContributionValidation) ValidateChallengeTitle(title string) error {
@@ -112,6 +152,10 @@ func (v *ContributionValidation) ValidateHashtag(hashtag string) error {
 }
 
 func (v *ContributionValidation) ValidateChallengeDates(startDate, endDate string) (time.Time, time.Time, error) {
+	return v.validateChallengeDates(startDate, endDate, true)
+}
+
+func (v *ContributionValidation) validateChallengeDates(startDate, endDate string, requireFutureStart bool) (time.Time, time.Time, error) {
 	start, err := time.Parse(time.RFC3339, strings.TrimSpace(startDate))
 	if err != nil {
 		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribDateFormatInvalid)
@@ -120,7 +164,7 @@ func (v *ContributionValidation) ValidateChallengeDates(startDate, endDate strin
 	if err != nil {
 		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribDateFormatInvalid)
 	}
-	if start.Before(time.Now()) {
+	if requireFutureStart && start.Before(time.Now()) {
 		return time.Time{}, time.Time{}, errorsapp.New(errorsapp.ErrCodeContribStartDateInPast)
 	}
 	if !end.After(start) {

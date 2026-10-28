@@ -31,8 +31,10 @@ func RegisterContributionRoutes(router *gin.Engine, ctrl *controllers.Contributi
 
 	challengeGroup := router.Group("/api/communities/:communityID/challenges")
 	{
-		challengeGroup.GET("", ctrl.GetActiveChallenges)
+		challengeGroup.GET("", middlewares.OptionalAuth(env, db), ctrl.GetActiveChallenges)
+		challengeGroup.GET("/:challengeID", middlewares.OptionalAuth(env, db), ctrl.GetChallenge)
 		challengeGroup.POST("", middlewares.AuthMiddleware(env, db), ctrl.CreateChallenge)
+		challengeGroup.PATCH("/:challengeID", middlewares.AuthMiddleware(env, db), ctrl.UpdateChallenge)
 		challengeGroup.POST("/:challengeID/join", middlewares.AuthMiddleware(env, db), ctrl.JoinChallenge)
 		challengeGroup.GET("/:challengeID/participants", ctrl.GetChallengeParticipants)
 	}

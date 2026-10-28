@@ -65,7 +65,7 @@ func TestCreateCommunity_QuotaTotalLimit(t *testing.T) {
 		}
 	}
 
-	_, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "One Too Many", "", "", "", models.PrivacyPublic, false)
+	_, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "One Too Many", "", "", "", "", "", models.PrivacyPublic, false)
 	if err == nil {
 		t.Fatal("expected quota error, got nil")
 	}
@@ -80,12 +80,12 @@ func TestCreateCommunity_Throttle(t *testing.T) {
 
 	for i := 0; i < MaxCommunitiesPerDay; i++ {
 		name := fmt.Sprintf("Rapid %d %s", i, utils.GenerateUUID()[:8])
-		if _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, name, "", "", "", models.PrivacyPublic, false); err != nil {
+		if _, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, name, "", "", "", "", "", models.PrivacyPublic, false); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
 	}
 
-	_, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Too Fast", "", "", "", models.PrivacyPublic, false)
+	_, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Too Fast", "", "", "", "", "", models.PrivacyPublic, false)
 	if err == nil {
 		t.Fatal("expected throttle error, got nil")
 	}
@@ -98,7 +98,7 @@ func TestCreateCommunity_TrimsName(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	res, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "  Spaced Name  ", "  Padded desc  ", "", "", models.PrivacyPublic, false)
+	res, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "  Spaced Name  ", "  Padded desc  ", "", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestCreateCommunity_RejectsBadPrivacy(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	_, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Bad Privacy", "", "", "", models.CommunityPrivacy("publik"), false)
+	_, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Bad Privacy", "", "", "", "", "", models.CommunityPrivacy("publik"), false)
 	if err == nil {
 		t.Fatal("expected privacy error, got nil")
 	}
@@ -132,7 +132,7 @@ func TestCreateCommunity_SeedsDefaults(t *testing.T) {
 	seed := newCreateCommunityTestSeed(t)
 	ctx := context.Background()
 
-	res, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Seeded Community", "", "", "", models.PrivacyPublic, false)
+	res, err := seed.Service.CreateCommunity(ctx, seed.CreatorID, "Seeded Community", "", "", "", "", "", models.PrivacyPublic, false)
 	if err != nil {
 		t.Fatalf("CreateCommunity: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestCreateCommunity_DuplicateRace(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, errs[idx] = seed.Service.CreateCommunity(ctx, seed.CreatorID, name, "", "", "", models.PrivacyPublic, false)
+			_, errs[idx] = seed.Service.CreateCommunity(ctx, seed.CreatorID, name, "", "", "", "", "", models.PrivacyPublic, false)
 		}(i)
 	}
 	wg.Wait()

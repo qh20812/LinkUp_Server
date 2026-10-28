@@ -18,7 +18,7 @@ import (
 )
 
 type AdService interface {
-	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string) (*models.Ad, error)
+	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error)
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
 	GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error)
 	GetDashboardList() ([]models.Ad, error)
@@ -38,6 +38,20 @@ type adServiceImpl struct {
 	mediaService MediaService
 }
 
+// targetLocationsJSON luôn trả về một mảng JSON hợp lệ cho cột `target_locations`.
+// Cột này kiểu JSON nên chuỗi rỗng bị MySQL từ chối (Error 3140 "The document is
+// empty") — trước đây quảng cáo không chọn địa điểm luôn tạo thất bại vì lý do này.
+func targetLocationsJSON(locations []string) (string, error) {
+	if locations == nil {
+		locations = []string{}
+	}
+	raw, err := json.Marshal(locations)
+	if err != nil {
+		return "", fmt.Errorf("mã hoá target_locations: %w", err)
+	}
+	return string(raw), nil
+}
+
 func NewAdService(
 	repo repository.AdRepository,
 	packageRepo repository.PackageRepository,
@@ -50,34 +64,45 @@ func NewAdService(
 	}
 }
 
-func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string) (*models.Ad, error) {
-	// 1. Kiểm tra Subscription & Slot Limit (mục 2.1)[cite: 2]
-	sub, err := s.packageRepo.GetActiveSubscription(partnerID)
-	if err != nil {
-		return nil, err
-	}
-	if sub == nil {
-		return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
-	}
-
-	if sub.SlotsUsed >= sub.Package.MaxSlots {
-		return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
-	}
-
-	// 2. Kiểm tra Format có được gói hỗ trợ không
+// CreateAdWithMedia tạo quảng cáo kèm media.
+// platformAdmin = true khi ADMIN/SUPER_ADMIN tạo hộ: bỏ qua kiểm tra gói và
+// slot (admin không mua gói), ad không gắn PackageID. PARTNER vẫn bị ràng buộc
+// bởi gói đang hoạt động và số slot còn lại.
+func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error) {
 	adFormat := models.AdFormat(input.Format)
-	if adFormat == models.AdFormatVideo && !sub.Package.SupportsVideo {
-		return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotVideo)
-	}
-	if adFormat == models.AdFormatCarousel && !sub.Package.SupportsCarousel {
-		return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotCarousel)
+
+	// 1. Kiểm tra Subscription & Slot Limit (mục 2.1)[cite: 2]
+	var sub *models.PartnerSubscription
+	if !platformAdmin {
+		var err error
+		sub, err = s.packageRepo.GetActiveSubscription(partnerID)
+		if err != nil {
+			return nil, err
+		}
+		if sub == nil {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
+		}
+
+		if sub.SlotsUsed >= sub.Package.MaxSlots {
+			return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
+		}
+
+		// 2. Kiểm tra Format có được gói hỗ trợ không
+		if adFormat == models.AdFormatVideo && !sub.Package.SupportsVideo {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotVideo)
+		}
+		if adFormat == models.AdFormatCarousel && !sub.Package.SupportsCarousel {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotCarousel)
+		}
 	}
 
 	// 3. Khởi tạo Quảng cáo
 	ad := models.NewAd(input.Title, input.Content, input.TargetURL, input.Budget, adFormat)
 	ad.ID = utils.GenerateUUID()
 	ad.PartnerID = partnerID
-	ad.PackageID = &sub.PackageID
+	if sub != nil {
+		ad.PackageID = &sub.PackageID
+	}
 	ad.DailyBudget = input.DailyBudget
 	ad.CPMPrice = input.CPMPrice
 	ad.CPCPrice = input.CPCPrice
@@ -93,10 +118,15 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 	}
 	ad.TargetAgeMin = input.TargetAgeMin
 	ad.TargetAgeMax = input.TargetAgeMax
-	if input.TargetLocations != nil {
-		locJSON, _ := json.Marshal(input.TargetLocations)
-		ad.TargetLocations = string(locJSON)
+
+	// Cột target_locations là kiểu JSON nên KHÔNG được để chuỗi rỗng: MySQL trả
+	// Error 3140 ("The document is empty"), khiến mọi quảng cáo không chọn địa
+	// điểm đều tạo thất bại. Luôn ghi một mảng JSON hợp lệ.
+	locJSON, err := targetLocationsJSON(input.TargetLocations)
+	if err != nil {
+		return nil, err
 	}
+	ad.TargetLocations = locJSON
 
 	if err := s.repo.Create(&ad); err != nil {
 		return nil, err
@@ -105,7 +135,9 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 	// 4. Upload file đính kèm
 	var mediaList []models.AdMedia
 	for idx, fileHeader := range files {
-		uploadedMedia, err := s.mediaService.UploadMedia(ctx.Request.Context(), partnerID, fileHeader)
+		// Media quảng cáo auto-approve; bản thân ad vẫn qua bước admin duyệt
+		// (SetAdStatus pending→active) nên không cần moderation ở mức file.
+		uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx.Request.Context(), partnerID, fileHeader)
 		if err != nil {
 			return nil, fmt.Errorf("lỗi upload file %s: %w", fileHeader.Filename, err)
 		}
@@ -127,8 +159,10 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		ad.MediaList = mediaList
 	}
 
-	// 5. Cập nhật slot
-	_ = s.packageRepo.IncrementSlotsUsed(sub.ID)
+	// 5. Cập nhật slot (chỉ partner có gói mới có slot)
+	if sub != nil {
+		_ = s.packageRepo.IncrementSlotsUsed(sub.ID)
+	}
 
 	return &ad, nil
 }
@@ -311,8 +345,11 @@ func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) 
 		fields["target_age_max"] = input.TargetAgeMax
 	}
 	if input.TargetLocations != nil {
-		locJSON, _ := json.Marshal(input.TargetLocations)
-		fields["target_locations"] = string(locJSON)
+		locJSON, err := targetLocationsJSON(input.TargetLocations)
+		if err != nil {
+			return nil, err
+		}
+		fields["target_locations"] = locJSON
 	}
 
 	if len(fields) > 0 {
@@ -341,15 +378,14 @@ func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
 		return errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 	}
 
-	ad, err := s.repo.FindByID(id)
-	if err != nil {
+	// Xác nhận ad tồn tại trước khi xoá.
+	if _, err := s.repo.FindByID(id); err != nil {
 		return err
 	}
 
-	// Chỉ cho phép xóa khi status pending/rejected/paused
-	if ad.Status != models.AdStatusPending && ad.Status != models.AdStatusRejected && ad.Status != models.AdStatusPaused {
-		return errorsapp.New(errorsapp.ErrCodeAdCannotDelete)
-	}
+	// Không chặn theo trạng thái: quảng cáo tạo ra là active ngay (bỏ bước duyệt
+	// pending) nên nếu chỉ cho xoá pending/rejected/paused thì đối tác tạo xong
+	// là không thể xoá, slot trong gói bị kẹt vĩnh viễn.
 
 	// Xóa media trước
 	_ = s.repo.DeleteAdMedia(id)
@@ -359,9 +395,11 @@ func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
 		return err
 	}
 
-	// Giải phóng slot trong subscription
-	if ad.PackageID != nil {
-		_ = s.packageRepo.DecrementSlotsUsed(*ad.PackageID)
+	// Giải phóng slot trong subscription. Trước đây truyền ad.PackageID (id gói)
+	// nên câu UPDATE không khớp bản ghi subscription nào — slot không bao giờ
+	// được trả lại và đối tác sẽ cạn slot sau vài lần xoá.
+	if sub, err := s.packageRepo.GetActiveSubscription(partnerID); err == nil && sub != nil {
+		_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
 	}
 
 	return nil

@@ -63,6 +63,60 @@ func TestContributionScoreAndBadgeHelpers(t *testing.T) {
 	}
 }
 
+func TestChallengeState(t *testing.T) {
+	now := time.Now().UTC()
+	base := models.CommunityChallenge{Status: models.ChallengeStatusActive}
+
+	upcoming := base
+	upcoming.StartDate = now.Add(24 * time.Hour)
+	upcoming.EndDate = now.Add(48 * time.Hour)
+	if got := challengeState(&upcoming, now); got != ChallengeStateUpcoming {
+		t.Errorf("upcoming state = %q, want %q", got, ChallengeStateUpcoming)
+	}
+
+	active := base
+	active.StartDate = now.Add(-24 * time.Hour)
+	active.EndDate = now.Add(24 * time.Hour)
+	if got := challengeState(&active, now); got != ChallengeStateActive {
+		t.Errorf("active state = %q, want %q", got, ChallengeStateActive)
+	}
+
+	// DB status vẫn là 'active' nhưng đã quá end_date → phải hiển thị là đã kết thúc.
+	ended := base
+	ended.StartDate = now.Add(-48 * time.Hour)
+	ended.EndDate = now.Add(-24 * time.Hour)
+	if got := challengeState(&ended, now); got != ChallengeStateEnded {
+		t.Errorf("expired challenge state = %q, want %q", got, ChallengeStateEnded)
+	}
+
+	cancelled := base
+	cancelled.Status = models.ChallengeStatusCancelled
+	if got := challengeState(&cancelled, now); got != ChallengeStateCancelled {
+		t.Errorf("cancelled state = %q, want %q", got, ChallengeStateCancelled)
+	}
+
+	completed := active
+	completed.Status = models.ChallengeStatusCompleted
+	if got := challengeState(&completed, now); got != ChallengeStateEnded {
+		t.Errorf("completed state = %q, want %q", got, ChallengeStateEnded)
+	}
+}
+
+func TestChallengeAwardDate(t *testing.T) {
+	at := time.Date(2026, 10, 21, 23, 59, 59, 0, time.UTC)
+	want := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
+	if got := challengeAwardDate(at); !got.Equal(want) {
+		t.Errorf("challengeAwardDate(%v) = %v, want %v", at, got, want)
+	}
+
+	// 01:30 ngày 22/10 giờ ICT (UTC+7) vẫn là 18:30 ngày 21/10 theo UTC.
+	ict := time.FixedZone("ICT", 7*60*60)
+	other := time.Date(2026, 10, 22, 1, 30, 0, 0, ict)
+	if got := challengeAwardDate(other); !got.Equal(want) {
+		t.Errorf("challengeAwardDate(%v) = %v, want %v (UTC date)", other, got, want)
+	}
+}
+
 func TestExtractHashtags(t *testing.T) {
 	content := "Joining the #LinkUpPhoto challenge! also #golang and #LinkUpPhoto."
 	hashtags := extractHashtags(content)
@@ -158,6 +212,7 @@ func connectAndMigrate(t *testing.T) *gorm.DB {
 		&models.CommunityPolicy{},
 		&models.CommunityChallenge{},
 		&models.ChallengeParticipant{},
+		&models.ChallengeDailyAward{},
 	); err != nil {
 		t.Fatalf("auto-migrate: %v", err)
 	}
@@ -228,11 +283,11 @@ func newTestSeed(t *testing.T) testSeed {
 
 	scopeType := models.ScopeTypeCommunity
 	if err := db.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    userID,
-		RoleID:    roleIDs[models.RoleGroupMember],
-		ScopeID:   &communityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     userID,
+		RoleID:     roleIDs[models.RoleGroupMember],
+		ScopeID:    &communityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign user role: %v", err)
@@ -240,21 +295,21 @@ func newTestSeed(t *testing.T) testSeed {
 
 	// Pre-create contribution + policy so ensure* calls are no-ops.
 	if err := db.Create(&models.MemberContribution{
-		ID:          utils.GenerateUUID(),
-		CommunityID: communityID,
-		UserID:      userID,
+		ID:               utils.GenerateUUID(),
+		CommunityID:      communityID,
+		UserID:           userID,
 		LastCalculatedAt: time.Now().UTC(),
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:        time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("create contribution: %v", err)
 	}
 	if err := db.Create(&models.CommunityPolicy{
-		ID:          utils.GenerateUUID(),
-		CommunityID: communityID,
-		PostWeight:  10,
-		CommentWeight: 5,
-		ReactionWeight: 2,
-		EventWeight: 20,
+		ID:                          utils.GenerateUUID(),
+		CommunityID:                 communityID,
+		PostWeight:                  10,
+		CommentWeight:               5,
+		ReactionWeight:              2,
+		EventWeight:                 20,
 		TopContributorThreshold:     2500,
 		ModeratorPromotionThreshold: 999999,
 		AutoPromoteEnabled:          false,
@@ -563,6 +618,9 @@ func TestProcessChallengePost_HappyPath(t *testing.T) {
 	ctx := context.Background()
 
 	challengeID := seedChallenge(t, seed.DB, seed.CommunityID, "#PhotoChallenge", nil)
+	if err := seed.Service.JoinChallenge(ctx, seed.UserID, challengeID); err != nil {
+		t.Fatalf("join challenge: %v", err)
+	}
 
 	err := seed.Service.ProcessChallengePost(ctx, seed.CommunityID, seed.UserID,
 		"Check out my #PhotoChallenge entry!")
@@ -627,9 +685,14 @@ func TestProcessChallengePost_AlreadyJoined(t *testing.T) {
 	seed := newTestSeed(t)
 	ctx := context.Background()
 
-	seedChallenge(t, seed.DB, seed.CommunityID, "#PhotoChallenge", nil)
+	challengeID := seedChallenge(t, seed.DB, seed.CommunityID, "#PhotoChallenge", nil)
 
-	// First call joins the challenge.
+	// Join tường minh — bắt buộc trước khi bài viết được tính điểm.
+	if err := seed.Service.JoinChallenge(ctx, seed.UserID, challengeID); err != nil {
+		t.Fatalf("join challenge: %v", err)
+	}
+
+	// First call earns points.
 	if err := seed.Service.ProcessChallengePost(ctx, seed.CommunityID, seed.UserID,
 		"My first #PhotoChallenge post!"); err != nil {
 		t.Fatalf("first call: %v", err)
@@ -642,17 +705,7 @@ func TestProcessChallengePost_AlreadyJoined(t *testing.T) {
 	}
 
 	var participant models.ChallengeParticipant
-	if err := seed.DB.Where("challenge_id = ? AND user_id = ?", seed.CommunityID+"_challenge", seed.UserID).
-		First(&participant).Error; err != nil {
-		// Need actual challenge ID, let me look it up differently.
-	}
-	// Re-fetch properly.
-	seed.DB.Where("hashtag = ? AND community_id = ?", "#PhotoChallenge", seed.CommunityID).First(&models.CommunityChallenge{})
-	var chall models.CommunityChallenge
-	if err := seed.DB.Where("hashtag = ? AND community_id = ?", "#PhotoChallenge", seed.CommunityID).First(&chall).Error; err != nil {
-		t.Fatalf("find challenge: %v", err)
-	}
-	if err := seed.DB.Where("challenge_id = ? AND user_id = ?", chall.ID, seed.UserID).
+	if err := seed.DB.Where("challenge_id = ? AND user_id = ?", challengeID, seed.UserID).
 		First(&participant).Error; err != nil {
 		t.Fatalf("get participant: %v", err)
 	}
@@ -663,6 +716,74 @@ func TestProcessChallengePost_AlreadyJoined(t *testing.T) {
 	c := getContribution(t, seed.DB, seed.CommunityID, seed.UserID)
 	if c.EventParticipations != 2 {
 		t.Errorf("EventParticipations = %d, want 2", c.EventParticipations)
+	}
+}
+
+func TestProcessChallengePost_NotJoined(t *testing.T) {
+	seed := newTestSeed(t)
+	ctx := context.Background()
+
+	challengeID := seedChallenge(t, seed.DB, seed.CommunityID, "#NoJoin", nil)
+
+	if err := seed.Service.ProcessChallengePost(ctx, seed.CommunityID, seed.UserID,
+		"Posting #NoJoin without joining first"); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+
+	var count int64
+	if err := seed.DB.Model(&models.ChallengeParticipant{}).
+		Where("challenge_id = ? AND user_id = ?", challengeID, seed.UserID).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count participants: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("participant count = %d, want 0 (join must be explicit)", count)
+	}
+}
+
+func TestProcessChallengePost_DailyCap(t *testing.T) {
+	seed := newTestSeed(t)
+	ctx := context.Background()
+
+	challengeID := seedChallenge(t, seed.DB, seed.CommunityID, "#FarmProof", nil)
+	if err := seed.Service.JoinChallenge(ctx, seed.UserID, challengeID); err != nil {
+		t.Fatalf("join challenge: %v", err)
+	}
+
+	// Đăng nhiều hơn trần: chỉ MaxChallengePostsPerDay bài đầu được tính điểm.
+	for i := 0; i < MaxChallengePostsPerDay+2; i++ {
+		if err := seed.Service.ProcessChallengePost(ctx, seed.CommunityID, seed.UserID,
+			fmt.Sprintf("Bai viet #FarmProof lan %d", i+1)); err != nil {
+			t.Fatalf("post %d: %v", i+1, err)
+		}
+	}
+
+	var participant models.ChallengeParticipant
+	if err := seed.DB.Where("challenge_id = ? AND user_id = ?", challengeID, seed.UserID).
+		First(&participant).Error; err != nil {
+		t.Fatalf("get participant: %v", err)
+	}
+	if participant.PostsCount != MaxChallengePostsPerDay {
+		t.Errorf("PostsCount = %d, want %d (daily cap)", participant.PostsCount, MaxChallengePostsPerDay)
+	}
+	wantPoints := MaxChallengePostsPerDay * 10 // seedChallenge dùng points_per_post = 10
+	if participant.TotalPointsEarned != wantPoints {
+		t.Errorf("TotalPointsEarned = %d, want %d", participant.TotalPointsEarned, wantPoints)
+	}
+
+	c := getContribution(t, seed.DB, seed.CommunityID, seed.UserID)
+	if c.EventParticipations != MaxChallengePostsPerDay {
+		t.Errorf("EventParticipations = %d, want %d", c.EventParticipations, MaxChallengePostsPerDay)
+	}
+
+	var award models.ChallengeDailyAward
+	if err := seed.DB.Where("challenge_id = ? AND user_id = ?", challengeID, seed.UserID).
+		First(&award).Error; err != nil {
+		t.Fatalf("get daily award: %v", err)
+	}
+	if award.PostsCount != MaxChallengePostsPerDay || award.PointsEarned != wantPoints {
+		t.Errorf("daily award = (%d posts, %d points), want (%d, %d)",
+			award.PostsCount, award.PointsEarned, MaxChallengePostsPerDay, wantPoints)
 	}
 }
 
@@ -764,7 +885,10 @@ func TestConcurrentIncrementAndChallenge(t *testing.T) {
 	seed := newTestSeed(t)
 	ctx := context.Background()
 
-	seedChallenge(t, seed.DB, seed.CommunityID, "#LinkUp", nil)
+	challengeID := seedChallenge(t, seed.DB, seed.CommunityID, "#LinkUp", nil)
+	if err := seed.Service.JoinChallenge(ctx, seed.UserID, challengeID); err != nil {
+		t.Fatalf("join challenge: %v", err)
+	}
 	const goroutines = 10
 
 	var wg sync.WaitGroup
@@ -894,11 +1018,11 @@ func newFullTestSeed(t *testing.T) fullTestSeed {
 
 	scopeType := models.ScopeTypeCommunity
 	if err := db.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    userID,
-		RoleID:    roleIDs[models.RoleGroupMember],
-		ScopeID:   &communityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     userID,
+		RoleID:     roleIDs[models.RoleGroupMember],
+		ScopeID:    &communityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign user role: %v", err)
@@ -960,12 +1084,12 @@ func TestGetPolicy_WithExistingPolicy(t *testing.T) {
 
 	// Seed an existing policy with custom weights.
 	if err := seed.DB.Create(&models.CommunityPolicy{
-		ID:          utils.GenerateUUID(),
-		CommunityID: seed.CommunityID,
-		PostWeight:  25,
-		CommentWeight: 10,
-		ReactionWeight: 5,
-		EventWeight:   30,
+		ID:                          utils.GenerateUUID(),
+		CommunityID:                 seed.CommunityID,
+		PostWeight:                  25,
+		CommentWeight:               10,
+		ReactionWeight:              5,
+		EventWeight:                 30,
 		TopContributorThreshold:     5000,
 		ModeratorPromotionThreshold: 10000,
 		AutoPromoteEnabled:          false,
@@ -1029,11 +1153,11 @@ func TestUpdatePolicy_HappyPath(t *testing.T) {
 
 	// Make user an admin.
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1117,11 +1241,11 @@ func TestUpdatePolicy_ValidationWeightsInvalid(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1149,11 +1273,11 @@ func TestUpdatePolicy_ValidationThresholdOrderInvalid(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1219,12 +1343,12 @@ func TestGetLeaderboard_WithData(t *testing.T) {
 			t.Fatalf("create user %d: %v", i, err)
 		}
 		if err := seed.DB.Create(&models.MemberContribution{
-			ID:                  utils.GenerateUUID(),
-			CommunityID:         seed.CommunityID,
-			UserID:              uid,
-			ContributionScore:   score,
-			LastCalculatedAt:    time.Now().UTC(),
-			CreatedAt:           time.Now().UTC(),
+			ID:                utils.GenerateUUID(),
+			CommunityID:       seed.CommunityID,
+			UserID:            uid,
+			ContributionScore: score,
+			LastCalculatedAt:  time.Now().UTC(),
+			CreatedAt:         time.Now().UTC(),
 		}).Error; err != nil {
 			t.Fatalf("create contribution %d: %v", i, err)
 		}
@@ -1259,12 +1383,12 @@ func TestGetLeaderboard_Pagination(t *testing.T) {
 			t.Fatalf("create user %d: %v", i, err)
 		}
 		if err := seed.DB.Create(&models.MemberContribution{
-			ID:                  utils.GenerateUUID(),
-			CommunityID:         seed.CommunityID,
-			UserID:              uid,
-			ContributionScore:   (i + 1) * 100,
-			LastCalculatedAt:    time.Now().UTC(),
-			CreatedAt:           time.Now().UTC(),
+			ID:                utils.GenerateUUID(),
+			CommunityID:       seed.CommunityID,
+			UserID:            uid,
+			ContributionScore: (i + 1) * 100,
+			LastCalculatedAt:  time.Now().UTC(),
+			CreatedAt:         time.Now().UTC(),
 		}).Error; err != nil {
 			t.Fatalf("create contribution %d: %v", i, err)
 		}
@@ -1563,11 +1687,11 @@ func TestCreateChallenge_HappyPath(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1577,12 +1701,12 @@ func TestCreateChallenge_HappyPath(t *testing.T) {
 	endDate := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, seed.CommunityID, dto.CreateChallengeInput{
-		Title:           "Photo Challenge",
-		Description:     "Share your best photos",
-		Hashtag:         "#PhotoChallenge",
-		PointsPerPost:   15,
-		StartDate:       startDate,
-		EndDate:         endDate,
+		Title:         "Photo Challenge",
+		Description:   "Share your best photos",
+		Hashtag:       "#PhotoChallenge",
+		PointsPerPost: 15,
+		StartDate:     startDate,
+		EndDate:       endDate,
 	})
 	if err != nil {
 		t.Fatalf("CreateChallenge: %v", err)
@@ -1606,10 +1730,10 @@ func TestCreateChallenge_CommunityNotFound(t *testing.T) {
 	endDate := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, "nonexistent", dto.CreateChallengeInput{
-		Title:         "Test",
-		Hashtag:       "#Test",
-		StartDate:     startDate,
-		EndDate:       endDate,
+		Title:     "Test",
+		Hashtag:   "#Test",
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1627,10 +1751,10 @@ func TestCreateChallenge_NotAdmin(t *testing.T) {
 	endDate := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, seed.CommunityID, dto.CreateChallengeInput{
-		Title:         "Test",
-		Hashtag:       "#Test",
-		StartDate:     startDate,
-		EndDate:       endDate,
+		Title:     "Test",
+		Hashtag:   "#Test",
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1646,11 +1770,11 @@ func TestCreateChallenge_EmptyTitle(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1660,10 +1784,10 @@ func TestCreateChallenge_EmptyTitle(t *testing.T) {
 	endDate := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, seed.CommunityID, dto.CreateChallengeInput{
-		Title:         "",
-		Hashtag:       "#Test",
-		StartDate:     startDate,
-		EndDate:       endDate,
+		Title:     "",
+		Hashtag:   "#Test",
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err == nil {
 		t.Fatal("expected error for empty title, got nil")
@@ -1679,11 +1803,11 @@ func TestCreateChallenge_TitleTooShort(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1693,10 +1817,10 @@ func TestCreateChallenge_TitleTooShort(t *testing.T) {
 	endDate := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, seed.CommunityID, dto.CreateChallengeInput{
-		Title:         "Hi",
-		Hashtag:       "#Test",
-		StartDate:     startDate,
-		EndDate:       endDate,
+		Title:     "Hi",
+		Hashtag:   "#Test",
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err == nil {
 		t.Fatal("expected error for short title, got nil")
@@ -1712,11 +1836,11 @@ func TestCreateChallenge_HashtagInvalidFormat(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1726,10 +1850,10 @@ func TestCreateChallenge_HashtagInvalidFormat(t *testing.T) {
 	endDate := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, seed.CommunityID, dto.CreateChallengeInput{
-		Title:         "Valid Title",
-		Hashtag:       "NoHash",
-		StartDate:     startDate,
-		EndDate:       endDate,
+		Title:     "Valid Title",
+		Hashtag:   "NoHash",
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err == nil {
 		t.Fatal("expected error for invalid hashtag format, got nil")
@@ -1745,11 +1869,11 @@ func TestCreateChallenge_EndDateBeforeStart(t *testing.T) {
 	scopeType := models.ScopeTypeCommunity
 
 	if err := seed.DB.Create(&models.UserRole{
-		ID:        utils.GenerateUUID(),
-		UserID:    seed.UserID,
-		RoleID:    seed.RoleIDs[models.RoleGroupAdmin],
-		ScopeID:   &seed.CommunityID,
-		ScopeType: &scopeType,
+		ID:         utils.GenerateUUID(),
+		UserID:     seed.UserID,
+		RoleID:     seed.RoleIDs[models.RoleGroupAdmin],
+		ScopeID:    &seed.CommunityID,
+		ScopeType:  &scopeType,
 		AssignedAt: time.Now().UTC(),
 	}).Error; err != nil {
 		t.Fatalf("assign admin role: %v", err)
@@ -1759,10 +1883,10 @@ func TestCreateChallenge_EndDateBeforeStart(t *testing.T) {
 	endDate := time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339)
 
 	err := seed.Service.CreateChallenge(ctx, seed.UserID, seed.CommunityID, dto.CreateChallengeInput{
-		Title:         "Valid Title",
-		Hashtag:       "#Test",
-		StartDate:     startDate,
-		EndDate:       endDate,
+		Title:     "Valid Title",
+		Hashtag:   "#Test",
+		StartDate: startDate,
+		EndDate:   endDate,
 	})
 	if err == nil {
 		t.Fatal("expected error for end before start, got nil")
@@ -1924,12 +2048,12 @@ func TestRecalculateScore_BadgeAssignment(t *testing.T) {
 
 	// Use a community with a low TopContributorThreshold so the badge triggers.
 	if err := seed.DB.Create(&models.CommunityPolicy{
-		ID:          utils.GenerateUUID(),
-		CommunityID: seed.CommunityID,
-		PostWeight:  10,
-		CommentWeight: 5,
-		ReactionWeight: 2,
-		EventWeight:   20,
+		ID:                          utils.GenerateUUID(),
+		CommunityID:                 seed.CommunityID,
+		PostWeight:                  10,
+		CommentWeight:               5,
+		ReactionWeight:              2,
+		EventWeight:                 20,
 		TopContributorThreshold:     50,
 		ModeratorPromotionThreshold: 999999,
 		AutoPromoteEnabled:          false,
@@ -1970,12 +2094,12 @@ func TestRecalculateScore_BadgeDisabled(t *testing.T) {
 
 	// Policy with BadgeEnabled=false but high score.
 	if err := seed.DB.Create(&models.CommunityPolicy{
-		ID:          utils.GenerateUUID(),
-		CommunityID: seed.CommunityID,
-		PostWeight:  10,
-		CommentWeight: 5,
-		ReactionWeight: 2,
-		EventWeight:   20,
+		ID:                          utils.GenerateUUID(),
+		CommunityID:                 seed.CommunityID,
+		PostWeight:                  10,
+		CommentWeight:               5,
+		ReactionWeight:              2,
+		EventWeight:                 20,
 		TopContributorThreshold:     50,
 		ModeratorPromotionThreshold: 999999,
 		AutoPromoteEnabled:          false,
