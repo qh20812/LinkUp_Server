@@ -112,14 +112,19 @@ func (ctrl *FriendController) GetFriends(c *gin.Context) {
 		errorsapp.RespondError(c, http.StatusUnauthorized, errorsapp.New(errorsapp.ErrCodeUnauthorized))
 		return
 	}
-	userID := val.(string)
+	viewerID := val.(string)
+	targetUserID := c.DefaultQuery("user_id", viewerID)
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	response, err := ctrl.friendService.GetFriends(c.Request.Context(), userID, page, pageSize)
+	response, err := ctrl.friendService.GetFriends(c.Request.Context(), viewerID, targetUserID, page, pageSize)
 	if err != nil {
-		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		status := http.StatusInternalServerError
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			status = errorsapp.StatusCode(appErr.Code)
+		}
+		errorsapp.Respond(c, status, err)
 		return
 	}
 

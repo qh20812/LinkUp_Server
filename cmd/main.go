@@ -218,6 +218,7 @@ func main() {
 
 		// ===== KHỞI TẠO TẦNG FRIEND (BẠN BÈ) =====
 		friendRepository := repository.NewFriendRepository(gormDB)
+		profileService.SetFriendRepo(friendRepository)
 		friendValidation := validations.NewFriendValidation()
 		friendService := services.NewFriendService(friendRepository, authRepository, profileRepository, friendValidation, notificationService)
 		friendController := controllers.NewFriendController(friendService)

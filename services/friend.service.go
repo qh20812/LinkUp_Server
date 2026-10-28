@@ -198,14 +198,34 @@ func (s *FriendService) RejectFriendRequest(ctx context.Context, userID, request
 	}, nil
 }
 
-func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pageSize int) (dto.FriendListResponse, error) {	if page < 1 {
+func (s *FriendService) GetFriends(ctx context.Context, viewerID, targetUserID string, page, pageSize int) (dto.FriendListResponse, error) {
+	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 || pageSize > 50 {
 		pageSize = 20
 	}
 
-	items, total, err := s.friendRepo.FindAcceptedFriends(ctx, userID, page, pageSize)
+	if viewerID != targetUserID {
+		profile, err := s.profileRepo.FindByUserID(ctx, targetUserID)
+		if err != nil {
+			return dto.FriendListResponse{}, fmt.Errorf("get friends visibility: %w", err)
+		}
+		if profile == nil {
+			return dto.FriendListResponse{}, errorsapp.New(errorsapp.ErrCodeFriendUserNotFound)
+		}
+		if profile.IsPrivateProfile {
+			isFriend, err := s.friendRepo.IsAcceptedFriend(ctx, viewerID, targetUserID)
+			if err != nil {
+				return dto.FriendListResponse{}, fmt.Errorf("get friends visibility: %w", err)
+			}
+			if !isFriend {
+				return dto.FriendListResponse{}, errorsapp.New(errorsapp.ErrCodeProfilePrivate)
+			}
+		}
+	}
+
+	items, total, err := s.friendRepo.FindAcceptedFriends(ctx, targetUserID, page, pageSize)
 	if err != nil {
 		return dto.FriendListResponse{}, fmt.Errorf("get friends: %w", err)
 	}

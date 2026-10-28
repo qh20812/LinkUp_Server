@@ -15,48 +15,48 @@ import (
 const MaxFindByIDs = 100
 
 type ProfileRepository struct {
-    db *gorm.DB
+	db *gorm.DB
 }
 
 func NewProfileRepository(db *gorm.DB) *ProfileRepository {
-    return &ProfileRepository{db: db}
+	return &ProfileRepository{db: db}
 }
 
 func (r *ProfileRepository) Create(ctx context.Context, profile *models.Profile) (*models.Profile, error) {
-    tx := r.db.WithContext(ctx).Create(profile)
-    if tx.Error != nil {
-        return nil, fmt.Errorf("insert profile: %w", tx.Error)
-    }
-    return profile, nil
+	tx := r.db.WithContext(ctx).Create(profile)
+	if tx.Error != nil {
+		return nil, fmt.Errorf("insert profile: %w", tx.Error)
+	}
+	return profile, nil
 }
 
 // FindByUserID returns the profile for the given user ID.
 // Returns (nil, nil) when no profile exists — consistent with FindByPhoneNumber.
 // Callers must check both err and the returned profile for nil.
 func (r *ProfileRepository) FindByUserID(ctx context.Context, userID string) (*models.Profile, error) {
-    var profile models.Profile
-    tx := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&profile)
-    if tx.Error != nil {
-        if tx.Error == gorm.ErrRecordNotFound {
-            return nil, nil
-        }
-        return nil, fmt.Errorf("find profile: %w", tx.Error)
-    }
-    return &profile, nil
+	var profile models.Profile
+	tx := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&profile)
+	if tx.Error != nil {
+		if tx.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find profile: %w", tx.Error)
+	}
+	return &profile, nil
 }
 
 func (r *ProfileRepository) FindByPhoneNumber(ctx context.Context, phoneNumber string, excludeUserID string) (*models.Profile, error) {
-    var profile models.Profile
-    tx := r.db.WithContext(ctx).
-        Where("phone_number = ? AND user_id != ?", phoneNumber, excludeUserID).
-        First(&profile)
-    if tx.Error != nil {
-        if tx.Error == gorm.ErrRecordNotFound {
-            return nil, nil // Không tìm thấy = OK
-        }
-        return nil, fmt.Errorf("find by phone: %w", tx.Error)
-    }
-    return &profile, nil
+	var profile models.Profile
+	tx := r.db.WithContext(ctx).
+		Where("phone_number = ? AND user_id != ?", phoneNumber, excludeUserID).
+		First(&profile)
+	if tx.Error != nil {
+		if tx.Error == gorm.ErrRecordNotFound {
+			return nil, nil // Không tìm thấy = OK
+		}
+		return nil, fmt.Errorf("find by phone: %w", tx.Error)
+	}
+	return &profile, nil
 }
 
 func (r *ProfileRepository) Update(ctx context.Context, userID string, profile *models.Profile) (*models.Profile, error) {
@@ -82,36 +82,37 @@ func (r *ProfileRepository) UpdateSelected(ctx context.Context, userID string, p
 
 // ProfileView is an enriched profile that includes data from the users and posts tables.
 type ProfileView struct {
- models.Profile
- Username  string    `json:"username"`
- PostCount int64     `json:"post_count"`
- FriendCount int64   `json:"friend_count"`
- CreatedAt time.Time `json:"created_at"`
+	models.Profile
+	Username              string    `json:"username"`
+	PostCount             int64     `json:"post_count"`
+	FriendCount           int64     `json:"friend_count"`
+	CreatedAt             time.Time `json:"created_at"`
+	CanViewPrivateProfile bool      `json:"can_view_private_profile"`
 }
 
 // FindEnrichedByUserID returns an enriched profile with username, post_count, and created_at.
 // Returns (nil, nil) when no profile exists.
 func (r *ProfileRepository) FindEnrichedByUserID(ctx context.Context, userID string) (*ProfileView, error) {
- var pv ProfileView
- tx := r.db.WithContext(ctx).
-   Raw(`SELECT p.*, u.username,
+	var pv ProfileView
+	tx := r.db.WithContext(ctx).
+		Raw(`SELECT p.*, u.username,
        (SELECT COUNT(*) FROM posts WHERE user_id = p.user_id AND status != 'deleted') AS post_count,
        (SELECT COUNT(*) FROM friends WHERE (sender_id = p.user_id OR receiver_id = p.user_id) AND status = 'accepted') AS friend_count,
        u.created_at
        FROM profiles p
        JOIN users u ON u.id = p.user_id
        WHERE p.user_id = ?`, userID).
-   Scan(&pv)
- if tx.Error != nil {
-   if tx.Error == gorm.ErrRecordNotFound {
-     return nil, nil
-   }
-   return nil, fmt.Errorf("find enriched profile: %w", tx.Error)
- }
- if pv.UserID == "" {
-   return nil, nil
- }
- return &pv, nil
+		Scan(&pv)
+	if tx.Error != nil {
+		if tx.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find enriched profile: %w", tx.Error)
+	}
+	if pv.UserID == "" {
+		return nil, nil
+	}
+	return &pv, nil
 }
 
 // FindByIDs returns profiles for the given user IDs.

@@ -18,6 +18,7 @@ type ViewProfileResponse struct {
 	WorkOther                  string     `json:"work_other"`
 	Website                    string     `json:"website"`
 	IsPrivateProfile           bool       `json:"is_private_profile"`
+	CanViewPrivateProfile      bool       `json:"can_view_private_profile"`
 	IsPrivatePosts             bool       `json:"is_private_posts"`
 	AllowStrangerFriendRequest bool       `json:"allow_stranger_friend_request"`
 	CoverURI                   string     `json:"cover_uri"`
@@ -50,6 +51,6 @@ type EditProfileInput struct {
 }
 
 type EditProfileResponse struct {
-    Message string              `json:"message"`
-    Data    ViewProfileResponse `json:"data"`
+	Message string              `json:"message"`
+	Data    ViewProfileResponse `json:"data"`
 }

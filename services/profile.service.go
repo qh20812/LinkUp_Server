@@ -18,6 +18,7 @@ import (
 type ProfileService struct {
 	profileRepository *repository.ProfileRepository
 	mediaRepo         *repository.MediaRepository
+	friendRepo        *repository.FriendRepository
 }
 
 func NewProfileService(profileRepository *repository.ProfileRepository) *ProfileService {
@@ -31,6 +32,11 @@ func (s *ProfileService) SetMediaRepo(repo *repository.MediaRepository) {
 	s.mediaRepo = repo
 }
 
+// SetFriendRepo wires friend visibility checks without introducing a repository cycle.
+func (s *ProfileService) SetFriendRepo(repo *repository.FriendRepository) {
+	s.friendRepo = repo
+}
+
 func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*repository.ProfileView, error) {
 	profile, err := s.profileRepository.FindEnrichedByUserID(ctx, userID)
 	if err != nil {
@@ -39,6 +45,7 @@ func (s *ProfileService) ViewProfile(ctx context.Context, userID string) (*repos
 	if profile == nil {
 		return nil, errorsapp.New(errorsapp.ErrCodeProfileNotFound)
 	}
+	profile.CanViewPrivateProfile = true
 	return profile, nil
 }
 
@@ -52,14 +59,45 @@ func (s *ProfileService) ViewProfileByID(ctx context.Context, viewerID string, t
 	}
 
 	if viewerID == targetUserID {
+		profile.CanViewPrivateProfile = true
 		return profile, nil
 	}
 
+	canViewDetails := !profile.IsPrivateProfile
 	if profile.IsPrivateProfile {
-		return nil, errorsapp.New(errorsapp.ErrCodeProfilePrivate)
+		if s.friendRepo != nil {
+			canViewDetails, err = s.friendRepo.IsAcceptedFriend(ctx, viewerID, targetUserID)
+			if err != nil {
+				return nil, fmt.Errorf("view private profile: %w", err)
+			}
+		}
+		if !canViewDetails {
+			return redactPrivateProfile(profile), nil
+		}
 	}
 
+	profile.CanViewPrivateProfile = canViewDetails
 	return profile, nil
+}
+
+func redactPrivateProfile(profile *repository.ProfileView) *repository.ProfileView {
+	redacted := *profile
+	redacted.PhoneNumber = ""
+	redacted.DateOfBirth = nil
+	redacted.Bio = ""
+	redacted.Location = ""
+	redacted.HometownProvince = ""
+	redacted.CurrentProvince = ""
+	redacted.CurrentWard = ""
+	redacted.Gender = ""
+	redacted.Work = ""
+	redacted.Education = ""
+	redacted.WorkOther = ""
+	redacted.Website = ""
+	redacted.PostCount = 0
+	redacted.FriendCount = 0
+	redacted.CanViewPrivateProfile = false
+	return &redacted
 }
 
 func (s *ProfileService) EditProfile(ctx context.Context, userID string, input dto.EditProfileInput) (*models.Profile, error) {
