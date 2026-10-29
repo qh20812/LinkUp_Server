@@ -454,14 +454,20 @@ func seedAdPackages(db *gorm.DB) {
 
 // ensureForeignKey tạo FK nếu chưa tồn tại (idempotent). Kiểm tra
 // information_schema trước, tránh lỗi duplicate khi chạy lại server.
+//
+// Kiểm tra theo cặp (cột → bảng.cột đích) chứ không theo tên constraint:
+// schema seed tạo FK không đặt tên nên MySQL tự sinh `*_ibfk_N`, và nếu chỉ so
+// tên thì hàm này sẽ thêm một FK thứ hai trên cùng cột — schema có FK trùng làm
+// hỏng các công cụ đọc schema (dbdiagram, ERD, migration diff).
 func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn string) {
 	type row struct {
 		Count int
 	}
 	var r row
-	err := db.Raw(`SELECT COUNT(*) AS count FROM information_schema.REFERENTIAL_CONSTRAINTS
-		WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = ? AND TABLE_NAME = ?`,
-		fkName, table).Scan(&r).Error
+	err := db.Raw(`SELECT COUNT(*) AS count FROM information_schema.KEY_COLUMN_USAGE
+		WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+			AND REFERENCED_TABLE_NAME = ? AND REFERENCED_COLUMN_NAME = ?`,
+		table, column, refTable, refColumn).Scan(&r).Error
 	if err != nil || r.Count > 0 {
 		return
 	}
