@@ -598,8 +598,25 @@ func (ctrl *CommunityController) ListCommunities(c *gin.Context) {
 
 	userID, _ := c.Get("userID")
 	if uid, ok := userID.(string); ok && uid != "" {
+		ids := make([]string, 0, len(result.Communities))
 		for i := range result.Communities {
 			result.Communities[i].IsCreator = result.Communities[i].CreatorID == uid
+			ids = append(ids, result.Communities[i].ID)
+		}
+
+		// Batch membership: ưu tiên creator > member > pending > none.
+		// Lỗi batch không làm hỏng list — fallback creator/none.
+		statuses, err := ctrl.communityService.GetUserMembershipStatuses(c.Request.Context(), uid, ids)
+		for i := range result.Communities {
+			item := &result.Communities[i]
+			switch {
+			case item.IsCreator:
+				item.MembershipStatus = "creator"
+			case err == nil && statuses[item.ID] != "":
+				item.MembershipStatus = statuses[item.ID]
+			default:
+				item.MembershipStatus = "none"
+			}
 		}
 	}
 
@@ -631,6 +648,10 @@ func (ctrl *CommunityController) ListJoinedCommunities(c *gin.Context) {
 		return
 	}
 
+	for i := range result.Communities {
+		result.Communities[i].MembershipStatus = "member"
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -657,6 +678,10 @@ func (ctrl *CommunityController) ListCreatedCommunities(c *gin.Context) {
 	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
+	}
+
+	for i := range result.Communities {
+		result.Communities[i].MembershipStatus = "creator"
 	}
 
 	c.JSON(http.StatusOK, result)

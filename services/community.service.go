@@ -1022,6 +1022,13 @@ func (s *CommunityService) ListCreatedCommunities(ctx context.Context, userID, k
 	}, nil
 }
 
+// GetUserMembershipStatuses trả membership status batch ("member"/"pending")
+// của user cho danh sách community_id — controller dùng để điền membership_status
+// cho list endpoints (2 query thay vì N).
+func (s *CommunityService) GetUserMembershipStatuses(ctx context.Context, userID string, communityIDs []string) (map[string]string, error) {
+	return s.repo.GetUserMembershipStatuses(ctx, userID, communityIDs)
+}
+
 func (s *CommunityService) GetCommunityDetail(ctx context.Context, communityID, userID string) (*dto.CommunityDetailResponse, error) {
 	if communityID == "" {
 		return nil, errorsapp.New(errorsapp.ErrCodeCommunityNotFound)
