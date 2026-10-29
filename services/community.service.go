@@ -338,7 +338,13 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID,
 
 	switch community.Privacy {
 	case models.PrivacyInvitationOnly:
-		return s.joinByInvitation(ctx, userID, community, invitationID)
+		if inviteCode != "" {
+			return s.joinByCode(ctx, userID, community, inviteCode)
+		}
+		if invitationID != "" {
+			return s.joinByInvitation(ctx, userID, community, invitationID)
+		}
+		return nil, errorsapp.New(errorsapp.ErrCodeInviteCodeRequired)
 	default:
 		// Nếu có mã mời hoặc lời mời được cung cấp, vẫn validate kể cả community công khai
 		if inviteCode != "" {
@@ -400,6 +406,9 @@ func (s *CommunityService) joinByCode(ctx context.Context, userID string, commun
 
 	inviteCode, err := s.repo.FindInviteCodeByCode(ctx, code)
 	if err != nil {
+		return nil, validations.ErrInviteCodeNotFound
+	}
+	if inviteCode.CommunityID != community.ID {
 		return nil, validations.ErrInviteCodeNotFound
 	}
 
