@@ -209,6 +209,10 @@ func (s *FriendService) GetFriends(ctx context.Context, userID string, page, pag
 	if err != nil {
 		return dto.FriendListResponse{}, fmt.Errorf("get friends: %w", err)
 	}
+	// Nil slice marshal ra JSON null → client crash; list rỗng phải là [].
+	if items == nil {
+		items = []dto.FriendItem{}
+	}
 
 	return dto.FriendListResponse{
 		Data:     items,

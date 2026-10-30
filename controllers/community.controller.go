@@ -743,6 +743,10 @@ func (ctrl *CommunityController) GetCommunityPosts(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
+	// Nil slice marshal ra JSON null → client crash; list rỗng phải là [].
+	if posts == nil {
+		posts = []models.Post{}
+	}
 
 	c.JSON(http.StatusOK, gin.H{"posts": posts})
 }

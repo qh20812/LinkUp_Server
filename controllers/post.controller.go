@@ -111,6 +111,11 @@ func (ctrl *PostController) GetPosts(c *gin.Context) {
 		nc = &nextCursor
 	}
 
+	// Nil slice marshal ra JSON null → client (web/mobile) crash .filter/.map.
+	// List rỗng phải là [] để client render empty state.
+	if posts == nil {
+		posts = []models.Post{}
+	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
 		"page_size":   pageSize,
@@ -134,6 +139,9 @@ func (ctrl *PostController) GetSavedPosts(c *gin.Context) {
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
+	}
+	if posts == nil {
+		posts = []models.Post{}
 	}
 
 	var nc *string
@@ -167,6 +175,9 @@ func (ctrl *PostController) GetUserPosts(c *gin.Context) {
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
+	}
+	if posts == nil {
+		posts = []models.Post{}
 	}
 
 	var nc *string
@@ -480,6 +491,9 @@ func (ctrl *PostController) GetPostsByHashtag(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
+	if posts == nil {
+		posts = []models.Post{}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"hashtag":   name,
@@ -591,6 +605,9 @@ func (ctrl *PostController) GetUserMedia(c *gin.Context) {
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
+	}
+	if media == nil {
+		media = []models.Media{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
