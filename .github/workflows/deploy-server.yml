@@ -45,6 +45,24 @@ jobs:
         run: |
           docker save linkup-server | gzip > server.tar.gz
 
+      - name: Cleanup VPS before copy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 24700
+          timeout: 60s
+          script_timeout: 5m
+          script: |
+            set -e
+            echo "Freeing disk space before deploy..."
+            rm -f /tmp/server.tar.gz
+            docker image prune -f || true
+            docker builder prune -f || true
+            journalctl --vacuum-size=200M || true
+            df -h /
+
       - name: Copy to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
