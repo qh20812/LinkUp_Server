@@ -53,7 +53,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 24700
           timeout: 60s
-          script_timeout: 5m
+          command_timeout: 5m
           script: |
             set -e
             echo "Freeing disk space before deploy..."
@@ -81,7 +81,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 24700
           timeout: 60s
-          script_timeout: 10m
+          command_timeout: 15m
           script: |
             set -e
             cd /opt/linkup
@@ -102,9 +102,9 @@ jobs:
             docker exec linkup-nginx nginx -s reload
             sleep 2
 
-            # Health check (up to 60s)
-            echo "Waiting for server (up to 60s)..."
-            for i in $(seq 1 20); do
+            # Health check (up to 300s): startup runs DB AutoMigrate against a remote DB.
+            echo "Waiting for server (up to 300s)..."
+            for i in $(seq 1 100); do
               if curl -skf https://localhost/health > /dev/null 2>&1; then
                 echo "SERVER HEALTHY after ${i}x3s"
                 break
@@ -115,14 +115,26 @@ jobs:
             # Rollback on failure
             if ! curl -skf https://localhost/health > /dev/null 2>&1; then
               echo "DEPLOY FAILED — rolling back to previous image..."
-              docker compose down server
+              docker ps -a --filter name=linkup-server
+              docker logs --tail 100 linkup-server || true
+
               docker tag linkup-server:prev linkup-server:latest 2>/dev/null || true
-              docker compose up -d --no-build server
-              sleep 10
-              if curl -skf https://localhost/health > /dev/null 2>&1; then
-                echo "ROLLBACK OK — server restored from prev image"
-              else
+              docker compose up -d --no-build --force-recreate server
+              docker exec linkup-nginx nginx -s reload || true
+
+              # Wait up to 300s for the rolled-back version.
+              echo "Waiting for rollback (up to 300s)..."
+              for i in $(seq 1 100); do
+                if curl -skf https://localhost/health > /dev/null 2>&1; then
+                  echo "ROLLBACK OK after ${i}x3s — server restored from prev image"
+                  break
+                fi
+                sleep 3
+              done
+
+              if ! curl -skf https://localhost/health > /dev/null 2>&1; then
                 echo "ROLLBACK ALSO FAILED!"
+                docker logs --tail 100 linkup-server || true
               fi
               exit 1
             fi
