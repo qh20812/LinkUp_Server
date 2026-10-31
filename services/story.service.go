@@ -208,12 +208,12 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 		return errorsapp.New(errorsapp.ErrCodeStoryInteractNotFound)
 	}
 
-	notifyOwner := func(notifType models.NotificationType, content string) {
+	notifyOwner := func(notifType models.NotificationType, content string, opts ...PushOption) {
 		if s.notifService == nil || story.UserID == userID {
 			return
 		}
 		senderID := userID
-		s.notifService.Create(context.Background(), story.UserID, &senderID, notifType, content, nil, nil, nil)
+		s.notifService.Create(context.Background(), story.UserID, &senderID, notifType, content, nil, nil, nil, opts...)
 	}
 
 	if req.Type == "react" {
@@ -264,13 +264,11 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 		return err
 	}
 
-	notifType := models.NotificationTypeShare
-	content := "đã chia sẻ story của bạn"
 	if req.Type == "reply" {
-		notifType = models.NotificationTypeComment
-		content = "đã trả lời story của bạn"
+		notifyOwner(models.NotificationTypeComment, "đã trả lời story của bạn", WithPushBody("đã trả lời story: "+req.Content))
+		return nil
 	}
-	notifyOwner(notifType, content)
+	notifyOwner(models.NotificationTypeShare, "đã chia sẻ story của bạn")
 	return nil
 }
 

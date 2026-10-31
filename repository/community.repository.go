@@ -324,6 +324,43 @@ func (r *CommunityRepository) IsUserMember(ctx context.Context, communityID, use
 	return count > 0, err
 }
 
+// GetUserMembershipStatuses trả membership status batch ("member"/"pending") của user
+// cho danh sách community_id — dùng cho list endpoints, 2 query thay vì N.
+func (r *CommunityRepository) GetUserMembershipStatuses(ctx context.Context, userID string, communityIDs []string) (map[string]string, error) {
+	statuses := make(map[string]string, len(communityIDs))
+	if userID == "" || len(communityIDs) == 0 {
+		return statuses, nil
+	}
+
+	var memberIDs []string
+	scopeType := models.ScopeTypeCommunity
+	if err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Where("user_id = ? AND scope_type = ? AND scope_id IN ?", userID, scopeType, communityIDs).
+		Pluck("scope_id", &memberIDs).
+		Error; err != nil {
+		return nil, fmt.Errorf("batch member lookup: %w", err)
+	}
+	for _, id := range memberIDs {
+		statuses[id] = "member"
+	}
+
+	var pendingIDs []string
+	if err := r.db.WithContext(ctx).
+		Model(&models.CommunityJoinRequest{}).
+		Where("user_id = ? AND status = ? AND community_id IN ?", userID, models.JoinRequestStatusPending, communityIDs).
+		Pluck("community_id", &pendingIDs).
+		Error; err != nil {
+		return nil, fmt.Errorf("batch pending lookup: %w", err)
+	}
+	for _, id := range pendingIDs {
+		if _, ok := statuses[id]; !ok {
+			statuses[id] = "pending"
+		}
+	}
+	return statuses, nil
+}
+
 // GetUserRole lấy role của user trong community từ user_roles.
 func (r *CommunityRepository) GetUserRole(ctx context.Context, communityID, userID string) (models.GroupRole, error) {
 	type userRoleWithName struct {

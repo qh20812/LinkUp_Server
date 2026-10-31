@@ -36,6 +36,7 @@ type CommunityService interface {
 	ListCommunities(ctx context.Context, keyword string, page, pageSize int) (dto.CommunityListResponse, error)
 	ListJoinedCommunities(ctx context.Context, userID, keyword string, page, pageSize int) (dto.CommunityListResponse, error)
 	ListCreatedCommunities(ctx context.Context, userID, keyword string, page, pageSize int) (dto.CommunityListResponse, error)
+	GetUserMembershipStatuses(ctx context.Context, userID string, communityIDs []string) (map[string]string, error)
 	GetCommunityDetail(ctx context.Context, communityID, userID string) (*dto.CommunityDetailResponse, error)
 	GetCommunityPosts(ctx context.Context, communityID, viewerID string, cursorCreatedAt, cursorID *string, limit int) ([]models.Post, error)
 }

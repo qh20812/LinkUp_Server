@@ -338,7 +338,13 @@ func (s *CommunityService) RequestJoin(ctx context.Context, userID, communityID,
 
 	switch community.Privacy {
 	case models.PrivacyInvitationOnly:
-		return s.joinByInvitation(ctx, userID, community, invitationID)
+		if inviteCode != "" {
+			return s.joinByCode(ctx, userID, community, inviteCode)
+		}
+		if invitationID != "" {
+			return s.joinByInvitation(ctx, userID, community, invitationID)
+		}
+		return nil, errorsapp.New(errorsapp.ErrCodeInviteCodeRequired)
 	default:
 		// Nếu có mã mời hoặc lời mời được cung cấp, vẫn validate kể cả community công khai
 		if inviteCode != "" {
@@ -400,6 +406,9 @@ func (s *CommunityService) joinByCode(ctx context.Context, userID string, commun
 
 	inviteCode, err := s.repo.FindInviteCodeByCode(ctx, code)
 	if err != nil {
+		return nil, validations.ErrInviteCodeNotFound
+	}
+	if inviteCode.CommunityID != community.ID {
 		return nil, validations.ErrInviteCodeNotFound
 	}
 
@@ -1020,6 +1029,13 @@ func (s *CommunityService) ListCreatedCommunities(ctx context.Context, userID, k
 		Page:        page,
 		PageSize:    pageSize,
 	}, nil
+}
+
+// GetUserMembershipStatuses trả membership status batch ("member"/"pending")
+// của user cho danh sách community_id — controller dùng để điền membership_status
+// cho list endpoints (2 query thay vì N).
+func (s *CommunityService) GetUserMembershipStatuses(ctx context.Context, userID string, communityIDs []string) (map[string]string, error) {
+	return s.repo.GetUserMembershipStatuses(ctx, userID, communityIDs)
 }
 
 func (s *CommunityService) GetCommunityDetail(ctx context.Context, communityID, userID string) (*dto.CommunityDetailResponse, error) {
