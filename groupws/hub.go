@@ -21,6 +21,15 @@ type BroadcastMessage struct {
 	Data   []byte
 }
 
+const (
+	// persistTimeout giới hạn thời gian ghi MongoDB để một Mongo treo không
+	// chặn ReadPump tới mức vượt read deadline của websocket.
+	persistTimeout = 2 * time.Second
+	// callDisconnectGrace là khoảng ân hạn trước khi coi một socket rớt là đã rời
+	// cuộc gọi. Nhờ vậy rớt mạng ngắn (đổi wifi, ngủ máy vài giây) không kết thúc call.
+	callDisconnectGrace = 15 * time.Second
+)
+
 type callStore interface {
 	Create(ctx context.Context, doc *repository.GroupCallDocument) error
 	UpdateParticipants(ctx context.Context, callID string, participants []string) error
@@ -57,6 +66,9 @@ type GroupCallSession struct {
 	ActiveParticipants map[string]struct{} // người đã connect media thành công
 	Muted              map[string]bool
 	VideoEnabled       map[string]bool
+	// DisconnectedAt đánh dấu người vừa rớt socket; chỉ bị rút khỏi call sau
+	// callDisconnectGrace để họ kịp kết nối lại.
+	DisconnectedAt map[string]time.Time
 	CreatedAt          time.Time
 	LastActivity       time.Time
 	ExpiresAt          *time.Time // hết hạn nếu không có ai join sau một khoảng ngắn
@@ -101,6 +113,7 @@ type RequestJoinResult struct {
 type ApproveJoinResult struct {
 	CallID         string
 	ChatID         string
+	CallerID       string
 	ParticipantIDs []string
 	JoinedIDs      []string
 }
@@ -178,22 +191,15 @@ func (h *Hub) Run() {
 				}
 			}
 			h.mu.Unlock()
-			close(client.send)
+			client.closeSend()
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
 			clients := h.rooms[message.ChatID]
 			for client := range clients {
-				select {
-				case client.send <- message.Data:
-				default:
-					h.mu.RUnlock()
-					h.mu.Lock()
-					delete(clients, client)
-					close(client.send)
-					h.mu.Unlock()
-					h.mu.RLock()
-				}
+				// Drop khi buffer đầy thay vì đóng channel: đóng từ đây có thể
+				// trùng với unregister và làm panic cả process.
+				client.trySend(message.Data)
 			}
 			h.mu.RUnlock()
 
@@ -278,9 +284,9 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 	}
 
 	if len(participantIDs) == 0 {
-		for id := range memberSet {
-			selected[id] = struct{}{}
-		}
+		// Người dùng không chọn ai ⇒ chỉ người tạo vào cuộc gọi. Trước đây nhánh
+		// này tự động mời TOÀN BỘ thành viên nhóm, biến một cuộc gọi riêng thành
+		// cuộc gọi cả nhóm ngoài ý muốn.
 	} else {
 		for _, id := range participantIDs {
 			if id == "" {
@@ -306,6 +312,7 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 		ActiveParticipants: make(map[string]struct{}),
 		Muted:              make(map[string]bool),
 		VideoEnabled:       map[string]bool{},
+		DisconnectedAt:     make(map[string]time.Time),
 		CreatedAt:          time.Now().UTC(),
 		LastActivity:       time.Now().UTC(),
 		Status:             "calling",
@@ -334,11 +341,12 @@ func (h *Hub) CreateGroupCall(chatID, callerID, callType string, participantIDs,
 			CreatedAt: session.CreatedAt,
 			UpdatedAt: time.Now().UTC(),
 		}
-		if err := h.callStore.Create(context.Background(), doc); err != nil {
-			h.mu.Lock()
-			delete(h.groupCalls, session.CallID)
-			h.mu.Unlock()
-			return nil, fmt.Errorf("lưu cuộc gọi nhóm: %w", err)
+		ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
+		err := h.callStore.Create(ctx, doc)
+		cancel()
+		if err != nil {
+			// Lịch sử cuộc gọi chỉ là phụ; không được phép chặn signaling vì Mongo.
+			log.Printf("group call: persist create failed for %s: %v", session.CallID, err)
 		}
 	}
 
@@ -375,6 +383,9 @@ func (h *Hub) RequestJoinCall(userID, callID string) (RequestJoinResult, error) 
 			session.Joined = make(map[string]struct{})
 		}
 		session.Joined[userID] = struct{}{}
+		if session.DisconnectedAt != nil {
+			delete(session.DisconnectedAt, userID)
+		}
 		h.touchCallSessionLocked(session)
 		// Khi đã có ít nhất 2 người join, call không còn được xem là stale theo mốc 60 giây.
 		if len(session.Joined) > 1 {
@@ -396,39 +407,52 @@ func (h *Hub) RequestJoinCall(userID, callID string) (RequestJoinResult, error) 
 
 func (h *Hub) ApproveJoinCall(creatorID, userID, callID string) (ApproveJoinResult, error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	session, ok := h.groupCalls[callID]
 	if !ok {
+		h.mu.Unlock()
 		return ApproveJoinResult{}, errors.New("cuộc gọi không tồn tại")
 	}
 	if session.CallerID != creatorID {
+		h.mu.Unlock()
 		return ApproveJoinResult{}, errors.New("chỉ người tạo cuộc gọi mới được duyệt")
 	}
 
 	if _, ok := session.PendingRequests[userID]; !ok {
+		h.mu.Unlock()
 		return ApproveJoinResult{}, errors.New("người này không có yêu cầu tham gia")
 	}
 
 	delete(session.PendingRequests, userID)
 	session.Participants[userID] = struct{}{}
 	session.Joined[userID] = struct{}{}
+	if session.DisconnectedAt != nil {
+		delete(session.DisconnectedAt, userID)
+	}
 	h.touchCallSessionLocked(session)
 	if len(session.Joined) > 1 {
 		session.ExpiresAt = nil
 	}
 	session.UpdateActivity()
 
-	if h.callStore != nil {
-		_ = h.callStore.UpdateParticipants(context.Background(), session.CallID, session.ParticipantIDs())
-	}
-
-	return ApproveJoinResult{
+	result := ApproveJoinResult{
 		CallID:         session.CallID,
 		ChatID:         session.ChatID,
+		CallerID:       session.CallerID,
 		ParticipantIDs: session.ParticipantIDs(),
 		JoinedIDs:      session.JoinedIDs(),
-	}, nil
+	}
+	h.mu.Unlock()
+
+	// Ghi MongoDB nằm ngoài hub lock: trước đây một Mongo chậm giữ khoá hub và
+	// làm nghẽn toàn bộ signaling.
+	if h.callStore != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
+		_ = h.callStore.UpdateParticipants(ctx, result.CallID, result.ParticipantIDs)
+		cancel()
+	}
+
+	return result, nil
 }
 
 func (h *Hub) RejectJoinCall(creatorID, userID, callID string) error {
@@ -493,6 +517,9 @@ func (h *Hub) EndCallByUser(enderID, callID string) (EndCallResult, error) {
 	if session.ActiveParticipants != nil {
 		delete(session.ActiveParticipants, enderID)
 	}
+	if session.DisconnectedAt != nil {
+		delete(session.DisconnectedAt, enderID)
+	}
 	result.NotifyUserIDs = session.JoinedIDs()
 	result.Ended = len(session.Joined) == 0
 	if result.Ended {
@@ -516,13 +543,18 @@ func (h *Hub) persistCallEnd(session *GroupCallSession) {
 	if len(session.Joined) <= 1 {
 		newStatus = "cancelled"
 	}
-	if err := h.callStore.UpdateStatus(context.Background(), session.CallID, newStatus, &now); err != nil {
+	if err := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
+		defer cancel()
+		return h.callStore.UpdateStatus(ctx, session.CallID, newStatus, &now)
+	}(); err != nil {
 		log.Printf("group call: update status failed for %s: %v", session.CallID, err)
 	}
 }
 
 // RelaySignalTargets đánh dấu participant active và trả danh sách người nhận signal.
-func (h *Hub) RelaySignalTargets(callID, senderID string) (chatID string, recipients []string, err error) {
+// targetUserID rỗng = client cũ, relay cho toàn bộ Joined (tương thích ngược).
+func (h *Hub) RelaySignalTargets(callID, senderID, targetUserID string) (chatID string, recipients []string, err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -543,6 +575,16 @@ func (h *Hub) RelaySignalTargets(callID, senderID string) (chatID string, recipi
 	}
 	session.ActiveParticipants[senderID] = struct{}{}
 	session.UpdateActivity()
+
+	if targetUserID != "" {
+		if targetUserID == senderID {
+			return "", nil, errors.New("không thể gửi signal cho chính mình")
+		}
+		if _, joined := session.Joined[targetUserID]; !joined {
+			return "", nil, errors.New("người nhận không ở trong cuộc gọi")
+		}
+		return chatID, []string{targetUserID}, nil
+	}
 
 	recipients = make([]string, 0, len(session.Joined))
 	for id := range session.Joined {
@@ -632,6 +674,40 @@ func (h *Hub) GetParticipantsSnapshot(callID, userID string) (dto.GroupCallParti
 	}, nil
 }
 
+// HasOtherClients cho biết user còn một socket call-mode khác đang mở (ví dụ
+// tab thứ hai), để việc đóng một tab không bị coi là mất kết nối.
+func (h *Hub) HasOtherClients(userID string, except *Client) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.clients[userID] {
+		if client != except {
+			return true
+		}
+	}
+	return false
+}
+
+// MarkDisconnected ghi nhận một participant vừa rớt socket. Họ vẫn nằm trong
+// Joined trong callDisconnectGrace để có thể rejoin mà không làm mất cuộc gọi.
+func (h *Hub) MarkDisconnected(callID, userID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	session, ok := h.groupCalls[callID]
+	if !ok || session == nil {
+		return false
+	}
+	if _, joined := session.Joined[userID]; !joined {
+		return false
+	}
+	if session.DisconnectedAt == nil {
+		session.DisconnectedAt = make(map[string]time.Time)
+	}
+	session.DisconnectedAt[userID] = time.Now().UTC()
+	return true
+}
+
 // ListCallIDsByUser trả về các call mà user đang trong Joined để cleanup khi mất kết nối.
 func (h *Hub) ListCallIDsByUser(userID string) []string {
 	h.mu.RLock()
@@ -650,7 +726,8 @@ func (h *Hub) ListCallIDsByUser(userID string) []string {
 	return result
 }
 
-// CleanupStaleCalls dọn session rác định kỳ: call chưa có ai join sau 60s và request chờ quá 30s.
+// CleanupStaleCalls dọn session rác định kỳ: call chưa có ai join sau 60s,
+// request chờ quá 30s, và người đã rớt socket quá callDisconnectGrace.
 func (h *Hub) CleanupStaleCalls() {
 	now := time.Now().UTC()
 
@@ -661,19 +738,33 @@ func (h *Hub) CleanupStaleCalls() {
 
 	type expiredCall struct {
 		session *GroupCallSession
+		reason  string
+		notify  []string
+	}
+
+	type droppedClient struct {
+		session     *GroupCallSession
+		callID      string
+		userID      string
+		notify      []string
+		remaining   []string
+		newCallerID string
+		ended       bool
 	}
 
 	h.mu.Lock()
 	pending := make([]pendingTimeout, 0)
 	expired := make([]expiredCall, 0)
+	dropped := make([]droppedClient, 0)
 	for callID, session := range h.groupCalls {
 		if session == nil {
 			continue
 		}
 
 		if session.ExpiresAt != nil && now.After(*session.ExpiresAt) {
+			notify := session.JoinedIDs()
 			delete(h.groupCalls, callID)
-			expired = append(expired, expiredCall{session: session})
+			expired = append(expired, expiredCall{session: session, reason: "timeout", notify: notify})
 			continue
 		}
 
@@ -683,6 +774,44 @@ func (h *Hub) CleanupStaleCalls() {
 			}
 			delete(session.PendingRequests, userID)
 			pending = append(pending, pendingTimeout{callID: callID, userID: userID})
+		}
+
+		// Người rớt socket quá ân hạn: rút khỏi cuộc gọi và chuyển quyền nếu là creator.
+		for userID, disconnectedAt := range session.DisconnectedAt {
+			if now.Sub(disconnectedAt) < callDisconnectGrace {
+				continue
+			}
+			delete(session.DisconnectedAt, userID)
+
+			drop := droppedClient{
+				session: session,
+				callID:  callID,
+				userID:  userID,
+				notify:  session.JoinedIDs(),
+			}
+			delete(session.Joined, userID)
+			delete(session.ActiveParticipants, userID)
+			delete(session.Muted, userID)
+			delete(session.VideoEnabled, userID)
+
+			if session.CallerID == userID {
+				if next, ok := session.firstJoinedLocked(); ok {
+					session.CallerID = next
+					drop.newCallerID = next
+				}
+			}
+
+			if len(session.Joined) == 0 {
+				delete(h.groupCalls, callID)
+				drop.ended = true
+			} else {
+				drop.remaining = session.JoinedIDs()
+			}
+			dropped = append(dropped, drop)
+			if drop.ended {
+				// Session đã bị xoá; các entry còn lại của DisconnectedAt vô nghĩa.
+				break
+			}
 		}
 	}
 	h.mu.Unlock()
@@ -698,6 +827,51 @@ func (h *Hub) CleanupStaleCalls() {
 		})
 	}
 
+	for _, item := range dropped {
+		session := item.session
+		if session == nil {
+			continue
+		}
+
+		if item.ended {
+			event := dto.WsEvent{
+				Type: "group:call:ended",
+				Payload: mustMarshal(map[string]any{
+					"call_id": item.callID,
+					"reason":  "disconnected",
+				}),
+			}
+			h.SendToUsers(item.notify, event)
+			if h.groupChatHub != nil {
+				h.groupChatHub.Broadcast(session.ChatID, event)
+			}
+			if h.messageService != nil {
+				if _, err := h.messageService.CreateSystemMessage(context.Background(), session.ChatID, "call_ended", "call_ended", item.userID); err != nil {
+					log.Printf("group call: create system message: %v", err)
+				}
+			}
+			h.persistCallEnd(session)
+			continue
+		}
+
+		h.SendToUsers(item.remaining, dto.WsEvent{
+			Type: "group:call:left",
+			Payload: mustMarshal(map[string]any{
+				"call_id": item.callID,
+				"user_id": item.userID,
+			}),
+		})
+		if item.newCallerID != "" {
+			h.SendToUsers(item.remaining, dto.WsEvent{
+				Type: "group:call:creator-changed",
+				Payload: mustMarshal(map[string]any{
+					"call_id":   item.callID,
+					"caller_id": item.newCallerID,
+				}),
+			})
+		}
+	}
+
 	for _, item := range expired {
 		session := item.session
 		if session == nil {
@@ -708,10 +882,10 @@ func (h *Hub) CleanupStaleCalls() {
 			Type: "group:call:ended",
 			Payload: mustMarshal(map[string]any{
 				"call_id": session.CallID,
-				"reason":  "timeout",
+				"reason":  item.reason,
 			}),
 		}
-		h.SendToUsers(session.JoinedIDs(), event)
+		h.SendToUsers(item.notify, event)
 		if h.groupChatHub != nil {
 			h.groupChatHub.Broadcast(session.ChatID, event)
 		}
@@ -739,17 +913,9 @@ func (h *Hub) SendToUser(userID string, msg any) {
 	h.mu.RUnlock()
 
 	for client := range clients {
-		select {
-		case client.send <- data:
-		default:
-			h.mu.Lock()
-			delete(clients, client)
-			close(client.send)
-			if len(clients) == 0 {
-				delete(h.clients, userID)
-			}
-			h.mu.Unlock()
-		}
+		// Không đóng channel khi buffer đầy: một client chậm không được phép
+		// giết kết nối (và trước đây còn có thể close() hai lần → panic toàn server).
+		client.trySend(data)
 	}
 }
 
@@ -781,4 +947,16 @@ func (s *GroupCallSession) JoinedIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// firstJoinedLocked chọn người kế nhiệm làm creator khi creator rời cuộc gọi.
+// Bỏ qua người đang mất kết nối để quyền không rơi vào một socket đã chết.
+func (s *GroupCallSession) firstJoinedLocked() (string, bool) {
+	for _, id := range s.JoinedIDs() {
+		if _, disconnected := s.DisconnectedAt[id]; disconnected {
+			continue
+		}
+		return id, true
+	}
+	return "", false
 }

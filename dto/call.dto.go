@@ -9,6 +9,10 @@ const (
 	// maxSignalSize is the maximum allowed size for a WebRTC signal payload.
 	// Prevents malicious clients from forwarding huge payloads via HandleSignal.
 	maxSignalSize = 8192
+	// maxGroupSignalSize is the cap for group-call signals. An SDP offer with
+	// audio+video plus inline candidates is routinely larger than 8 KB once it
+	// is JSON-escaped, so the direct-call cap would reject/close valid calls.
+	maxGroupSignalSize = 32 * 1024
 )
 
 type IceServer struct {
@@ -94,8 +98,19 @@ type GroupCallApprovePayload struct {
 }
 
 type GroupCallSignalPayload struct {
-	CallID string          `json:"call_id"`
-	Signal json.RawMessage `json:"signal"`
+	CallID string `json:"call_id"`
+	// TargetUserID giới hạn signal cho đúng một peer. Bắt buộc với cuộc gọi
+	// mesh ≥3 người: nếu broadcast, offer dành cho C cũng bị B áp vào PC A–B.
+	TargetUserID string          `json:"target_user_id,omitempty"`
+	Signal       json.RawMessage `json:"signal"`
+}
+
+// Validate checks that a group-call signal stays within the transport budget.
+func (p *GroupCallSignalPayload) Validate() error {
+	if len(p.Signal) > maxGroupSignalSize {
+		return fmt.Errorf("signal payload quá lớn (tối đa %d bytes)", maxGroupSignalSize)
+	}
+	return nil
 }
 
 type GroupCallEndPayload struct {
@@ -169,4 +184,12 @@ type GroupCallParticipantsResponse struct {
 	Participants       []string `json:"participants"`
 	Joined             []string `json:"joined"`
 	ActiveParticipants []string `json:"active_participants"`
+	// Profiles cho phép client hiển thị tên/ảnh thật thay vì UUID.
+	Profiles map[string]GroupCallProfile `json:"profiles,omitempty"`
+}
+
+// GroupCallProfile là thông tin tối thiểu để vẽ tile của một người trong cuộc gọi nhóm.
+type GroupCallProfile struct {
+	DisplayName string `json:"display_name"`
+	AvatarURI   string `json:"avatar_uri"`
 }

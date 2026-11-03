@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"linkup/dto"
@@ -21,6 +22,10 @@ const (
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 8192
+	// maxCallMessageSize áp riêng cho endpoint group-calls: một SDP offer video
+	// sau khi JSON-escape thường vượt 8 KB, nếu giữ limit cũ thì server đóng
+	// socket ngay khi bắt đầu thương lượng (biểu hiện "tự ngắt khi đang gọi").
+	maxCallMessageSize = 64 * 1024
 )
 
 type Client struct {
@@ -31,6 +36,11 @@ type Client struct {
 	groupService   *services.GroupChatService
 	userID         string
 	send           chan []byte
+	// sendMu/sendClosed bảo vệ channel send khỏi bị close hai lần khi vừa
+	// unregister vừa bị hub loại vì chậm.
+	sendMu         sync.Mutex
+	sendClosed     bool
+	maxReadBytes   int
 	joinedChats    map[string]struct{}
 	typingChats    map[string]bool
 	mode           string
@@ -49,6 +59,10 @@ func NewClientWithMode(
 	mode string,
 	groupChatHub *Hub,
 ) *Client {
+	readLimit := maxMessageSize
+	if mode == "call" {
+		readLimit = maxCallMessageSize
+	}
 	return &Client{
 		ctx:            ctx,
 		conn:           conn,
@@ -57,6 +71,7 @@ func NewClientWithMode(
 		groupService:   groupService,
 		userID:         userID,
 		send:           make(chan []byte, 256),
+		maxReadBytes:   readLimit,
 		joinedChats:    make(map[string]struct{}),
 		typingChats:    make(map[string]bool),
 		mode:           mode,
@@ -83,7 +98,7 @@ func (c *Client) ReadPump() {
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadLimit(int64(c.maxReadBytes))
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -556,7 +571,7 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 			if strings.EqualFold(payload.Mode, "all") {
 				c.hub.broadcast <- &BroadcastMessage{ChatID: msg.ChatID, Data: ack}
 			} else {
-				c.send <- ack
+				c.trySend(ack)
 			}
 
 		case "group:leave":
@@ -778,19 +793,20 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 
 			c.markCallActive(session.CallID, true)
 
+			participantIDs := session.ParticipantIDs()
 			createdPayload := map[string]any{
 				"call_id":      session.CallID,
 				"chat_id":      session.ChatID,
 				"caller_id":    session.CallerID,
-				"participants": session.ParticipantIDs(),
+				"participants": participantIDs,
 				"is_video":     true,
+				"profiles":     c.memberProfiles(session.ChatID, participantIDs),
 			}
 
 			c.sendEvent("group:call:created", createdPayload)
-			c.groupChatHub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type:    "group:call:incoming",
-				Payload: mustMarshal(createdPayload),
-			})
+			// Chỉ reo cho người được mời. Trước đây event này còn được broadcast
+			// vào cả phòng chat, khiến thành viên không được mời cũng thấy modal
+			// reo và thấy danh sách UUID người được mời.
 			for participantID := range session.Participants {
 				if participantID == c.userID {
 					continue
@@ -835,18 +851,21 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 				c.hub.SendToUsers(result.JoinedIDs, dto.WsEvent{
 					Type: "group:call:joined",
 					Payload: mustMarshal(map[string]any{
-						"call_id": payload.CallID,
-						"chat_id": result.ChatID,
-						"user_id": c.userID,
+						"call_id":   payload.CallID,
+						"chat_id":   result.ChatID,
+						"user_id":   c.userID,
+						"caller_id": result.CallerID,
+						"profiles":  c.memberProfiles(result.ChatID, []string{c.userID}),
 					}),
 				})
 			} else {
 				c.hub.SendToUser(result.CallerID, dto.WsEvent{
 					Type: "group:call:join-request",
 					Payload: mustMarshal(map[string]any{
-						"call_id": payload.CallID,
-						"chat_id": result.ChatID,
-						"user_id": c.userID,
+						"call_id":  payload.CallID,
+						"chat_id":  result.ChatID,
+						"user_id":  c.userID,
+						"profiles": c.memberProfiles(result.ChatID, []string{c.userID}),
 					}),
 				})
 				c.sendEvent("group:call:join-request-sent", map[string]any{
@@ -878,21 +897,16 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 				continue
 			}
 
-			c.hub.SendToUser(payload.UserID, dto.WsEvent{
+			// Một event duy nhất cho những người đang trong cuộc gọi (trước đây
+			// gửi 2 lần: SendToUser rồi SendToUsers, gây đúp offer ở client).
+			c.hub.SendToUsers(result.JoinedIDs, dto.WsEvent{
 				Type: "group:call:joined",
 				Payload: mustMarshal(map[string]any{
-					"call_id": result.CallID,
-					"chat_id": result.ChatID,
-					"user_id": payload.UserID,
-				}),
-			})
-
-			c.hub.SendToUsers(result.ParticipantIDs, dto.WsEvent{
-				Type: "group:call:joined",
-				Payload: mustMarshal(map[string]any{
-					"call_id": result.CallID,
-					"chat_id": result.ChatID,
-					"user_id": payload.UserID,
+					"call_id":   result.CallID,
+					"chat_id":   result.ChatID,
+					"user_id":   payload.UserID,
+					"caller_id": result.CallerID,
+					"profiles":  c.memberProfiles(result.ChatID, []string{payload.UserID}),
 				}),
 			})
 
@@ -933,8 +947,12 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 				c.sendError("dữ liệu signal không hợp lệ")
 				continue
 			}
+			if err := payload.Validate(); err != nil {
+				c.sendError(err.Error())
+				continue
+			}
 
-			chatID, recipients, err := c.hub.RelaySignalTargets(payload.CallID, c.userID)
+			chatID, recipients, err := c.hub.RelaySignalTargets(payload.CallID, c.userID, payload.TargetUserID)
 			if err != nil {
 				c.sendError(err.Error())
 				continue
@@ -949,9 +967,10 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 				c.hub.SendToUser(participantID, dto.WsEvent{
 					Type: "group:call:signal",
 					Payload: mustMarshal(map[string]any{
-						"call_id":   payload.CallID,
-						"sender_id": c.userID,
-						"signal":    payload.Signal,
+						"call_id":        payload.CallID,
+						"sender_id":      c.userID,
+						"target_user_id": participantID,
+						"signal":         payload.Signal,
 					}),
 				})
 			}
@@ -1138,6 +1157,7 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 				c.sendError(err.Error())
 				continue
 			}
+			participants.Profiles = c.memberProfiles(snapshot.ChatID, participants.Participants)
 
 			c.sendEvent("group:call:participants", participants)
 
@@ -1183,11 +1203,39 @@ func (c *Client) WritePump() {
 	}
 }
 
+// trySend đẩy một frame vào hàng đợi của client. Trả về false nếu client đã
+// đóng hoặc buffer đầy — khi đó frame bị bỏ, KHÔNG đóng socket.
+func (c *Client) trySend(data []byte) bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- data:
+		return true
+	default:
+		log.Printf("group ws: drop frame for user %s (buffer full)", c.userID)
+		return false
+	}
+}
+
+// closeSend đóng channel send đúng một lần, an toàn khi gọi từ nhiều goroutine.
+func (c *Client) closeSend() {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	c.sendClosed = true
+	close(c.send)
+}
+
 func (c *Client) sendEvent(eventType string, payload any) {
-	c.send <- mustMarshal(dto.WsEvent{
+	c.trySend(mustMarshal(dto.WsEvent{
 		Type:    eventType,
 		Payload: mustMarshal(payload),
-	})
+	}))
 }
 
 func (c *Client) sendError(text string) {
@@ -1249,36 +1297,17 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 		return
 	}
 
+	// Còn socket call-mode khác đang mở (tab thứ hai) thì chưa phải mất kết nối.
+	if c.hub.HasOtherClients(c.userID, c) {
+		c.clearActiveCall()
+		return
+	}
+
+	// Chỉ đánh dấu đã rớt. Người dùng có callDisconnectGrace để kết nối lại;
+	// hết ân hạn CleanupStaleCalls mới rút họ khỏi cuộc gọi. Trước đây mọi cú
+	// rớt socket đều kết thúc ngay cuộc gọi (và caller rớt thì cả nhóm bị đá ra).
 	for _, callID := range c.hub.ListCallIDsByUser(c.userID) {
-		result, err := c.hub.EndCallByUser(c.userID, callID)
-		if err != nil {
-			continue
-		}
-
-		if result.Ended {
-			event := dto.WsEvent{
-				Type: "group:call:ended",
-				Payload: mustMarshal(map[string]any{
-					"call_id": callID,
-					"by":      c.userID,
-				}),
-			}
-			c.hub.SendToUsers(result.NotifyUserIDs, event)
-			if c.groupChatHub != nil {
-				c.groupChatHub.Broadcast(result.ChatID, event)
-			}
-			c.sendGroupChatSystemMessage(result.ChatID, "call_ended", "call_ended", c.userID)
-			continue
-		}
-
-		event := dto.WsEvent{
-			Type: "group:call:left",
-			Payload: mustMarshal(map[string]any{
-				"call_id": callID,
-				"user_id": c.userID,
-			}),
-		}
-		c.hub.SendToUsers(result.NotifyUserIDs, event)
+		c.hub.MarkDisconnected(callID, c.userID)
 	}
 
 	c.clearActiveCall()
@@ -1289,4 +1318,21 @@ func (c *Client) sendGroupChatSystemMessage(chatID, translationKey, msgType, act
 		return
 	}
 	_, _ = c.messageService.CreateSystemMessage(c.ctx, chatID, translationKey, msgType, actorID, extra...)
+}
+
+// memberProfiles trả về tên/ảnh thật của các thành viên để client không phải
+// hiển thị UUID trong cuộc gọi nhóm.
+func (c *Client) memberProfiles(chatID string, userIDs []string) map[string]dto.GroupCallProfile {
+	out := make(map[string]dto.GroupCallProfile, len(userIDs))
+	if c.messageService == nil || chatID == "" || len(userIDs) == 0 {
+		return out
+	}
+	profiles := c.messageService.GetMemberProfiles(c.ctx, chatID, userIDs)
+	for id, profile := range profiles {
+		out[id] = dto.GroupCallProfile{
+			DisplayName: profile.DisplayName,
+			AvatarURI:   profile.AvatarURI,
+		}
+	}
+	return out
 }

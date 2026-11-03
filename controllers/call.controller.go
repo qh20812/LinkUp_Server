@@ -51,13 +51,22 @@ func (ctrl *VoiceCallController) GetIceServers(c *gin.Context) {
 		}
 	}
 
-	// Nếu có TURN server config, append vào danh sách
+	// Parse TURN URLs từ env (comma-separated). Mỗi URL phải là một IceServer
+	// riêng vì RTCIceServer coi mỗi phần tử là một transport riêng (UDP/TCP/TLS);
+	// gộp chung sẽ chỉ thử được một transport và dễ thất bại sau firewall.
 	if ctrl.env.TurnServerUrl != "" {
-		servers = append(servers, dto.IceServer{
-			URLs:       ctrl.env.TurnServerUrl,
-			Username:   ctrl.env.TurnUsername,
-			Credential: ctrl.env.TurnCredential,
-		})
+		urls := strings.Split(ctrl.env.TurnServerUrl, ",")
+		for _, url := range urls {
+			url = strings.TrimSpace(url)
+			if url == "" {
+				continue
+			}
+			servers = append(servers, dto.IceServer{
+				URLs:       url,
+				Username:   ctrl.env.TurnUsername,
+				Credential: ctrl.env.TurnCredential,
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, dto.IceServersResponse{IceServers: servers})
