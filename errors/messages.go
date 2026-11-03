@@ -400,6 +400,12 @@ var Messages = map[string]string{
 	"package.SUBSCRIBE_FAILED": "Không thể đăng ký gói",
 	"package.NOT_SUBSCRIBED":   "Bạn chưa đăng ký gói quảng cáo nào",
 
+	// ── Payment ────────────────────────────────────────────────
+	"payment.NOT_CONFIGURED": "Cổng thanh toán VNPay chưa được cấu hình",
+	"payment.INVALID_AMOUNT": "Số tiền thanh toán không hợp lệ",
+	"payment.ALREADY_ACTIVE": "Gói này đang hoạt động, không cần thanh toán lại",
+	"payment.CREATE_FAILED":  "Không thể tạo giao dịch thanh toán",
+
 	// ── Notification ───────────────────────────────────────────
 	"notification.CREATE_FAILED":      "Không thể tạo thông báo",
 	"notification.CREATE_BULK_FAILED": "Không thể tạo thông báo hàng loạt",

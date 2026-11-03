@@ -400,6 +400,12 @@ const (
 	ErrCodePackageSubscribeFailed = "package.SUBSCRIBE_FAILED"
 	ErrCodePackageNotSubscribed   = "package.NOT_SUBSCRIBED"
 
+	// ── Payment ────────────────────────────────────────────────
+	ErrCodePaymentNotConfigured = "payment.NOT_CONFIGURED"
+	ErrCodePaymentInvalidAmount = "payment.INVALID_AMOUNT"
+	ErrCodePaymentAlreadyActive = "payment.ALREADY_ACTIVE"
+	ErrCodePaymentCreateFailed  = "payment.CREATE_FAILED"
+
 	// ── Notification ───────────────────────────────────────────
 	ErrCodeNotificationCreateFailed = "notification.CREATE_FAILED"
 	ErrCodeNotificationBulkFailed   = "notification.CREATE_BULK_FAILED"

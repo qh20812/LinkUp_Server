@@ -1018,6 +1018,32 @@ func Run(env config.Env) error {
 			INDEX idx_partner_subscriptions_package_id (package_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+		// payment_transactions — giao dịch thanh toán gói quảng cáo qua VNPay.
+		// TxnRef là khoá idempotent khi nhận return/IPN.
+		`CREATE TABLE IF NOT EXISTS payment_transactions (
+			id VARCHAR(36) NOT NULL PRIMARY KEY,
+			txn_ref VARCHAR(64) NOT NULL,
+			request_id VARCHAR(64) DEFAULT '',
+			user_id VARCHAR(36) NOT NULL,
+			package_id VARCHAR(36) NOT NULL,
+			amount BIGINT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			gateway VARCHAR(20) NOT NULL DEFAULT 'vnpay',
+			response_code VARCHAR(10) DEFAULT '',
+			transaction_no VARCHAR(50) DEFAULT '',
+			bank_code VARCHAR(30) DEFAULT '',
+			pay_date VARCHAR(20) DEFAULT '',
+			order_info VARCHAR(255) DEFAULT '',
+			paid_at DATETIME(3) NULL,
+			created_at DATETIME(3) NULL,
+			updated_at DATETIME(3) NULL,
+			UNIQUE INDEX idx_payment_transactions_txn_ref (txn_ref),
+			INDEX idx_payment_transactions_request_id (request_id),
+			INDEX idx_payment_transactions_user_id (user_id),
+			INDEX idx_payment_transactions_package_id (package_id),
+			INDEX idx_payment_transactions_status (status)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		// 49. post_views — log lượt xem đã dedup, dùng trong công thức xếp hạng
 		// feed và để giảm điểm bài đã xem. Server có AutoMigrate nhưng danh sách
 		// AutoMigrate dừng ở comment_reactions (lỗi index trên cột longtext),

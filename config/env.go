@@ -11,13 +11,13 @@ import (
 )
 
 type Env struct {
-	Port         string
-	DBHost       string
-	DBPort       int
-	DBUser       string
-	DBPassword   string
-	DBSSL        bool
-	DBName       string
+	Port       string
+	DBHost     string
+	DBPort     int
+	DBUser     string
+	DBPassword string
+	DBSSL      bool
+	DBName     string
 	// Optional path to a PEM-encoded CA certificate for verifying the
 	// MySQL server (required by managed providers like Aiven). Empty =
 	// legacy behavior (no TLS in DSN).
@@ -25,8 +25,8 @@ type Env struct {
 	JWTSecret    string
 	JWTExpiresIn int
 
-	CloudinaryEnv    string
-	FrontendURL      string
+	CloudinaryEnv     string
+	FrontendURL       string
 	MobileFrontendURL string
 
 	IceServerUrls  string
@@ -34,12 +34,30 @@ type Env struct {
 	TurnUsername   string
 	TurnCredential string
 
-	MongoURI string
+	MongoURI    string
 	MongoDBName string
 
-	GoogleClientIDs []string
-	GoogleClientID string
+	GoogleClientIDs    []string
+	GoogleClientID     string
 	GoogleClientSecret string
+
+	// VNPay — cổng thanh toán gói quảng cáo. Tất cả optional: thiếu cấu hình
+	// chỉ làm endpoint thanh toán trả lỗi, không chặn server khởi động.
+	VNPayTMNCode           string
+	VNPayHashSecret        string
+	VNPayPaymentURL        string
+	VNPayReturnURL         string
+	VNPayFrontendReturnURL string
+
+	// MoMo — cổng thanh toán thay thế. Cũng optional như VNPay.
+	MoMoPartnerCode string
+	MoMoAccessKey   string
+	MoMoSecretKey   string
+	MoMoEndpoint    string
+	MoMoRedirectURL string
+	MoMoIPNURL      string
+	// Trang web hiển thị kết quả sau khi MoMo redirect trình duyệt về.
+	MoMoFrontendReturnURL string
 }
 
 var (
@@ -81,19 +99,19 @@ func LoadEnv() error {
 	}
 
 	env = Env{
-		Port:       getString("PORT", "8080"),
-		DBHost:     getRequiredString("DB_HOST"),
-		DBPort:     dbPort,
-		DBUser:     getRequiredString("DB_USER"),
-		DBPassword: getRequiredString("DB_PASSWORD"),
-		DBSSL:      dbSSL,
+		Port:         getString("PORT", "8080"),
+		DBHost:       getRequiredString("DB_HOST"),
+		DBPort:       dbPort,
+		DBUser:       getRequiredString("DB_USER"),
+		DBPassword:   getRequiredString("DB_PASSWORD"),
+		DBSSL:        dbSSL,
 		DBCACertPath: getString("DB_CA_CERT_PATH", ""),
 		DBName:       getRequiredString("DB_NAME"),
 		JWTSecret:    getRequiredString("JWT_SECRET"),
 		JWTExpiresIn: jwtExpiresIn,
 
-		CloudinaryEnv:    getRequiredString("CLOUDINARY_URL"),
-		FrontendURL:      getString("VERIFY_EMAIL_URL", getString("FRONTEND_RESET_URL", "http://localhost:3000")),
+		CloudinaryEnv:     getRequiredString("CLOUDINARY_URL"),
+		FrontendURL:       getString("VERIFY_EMAIL_URL", getString("FRONTEND_RESET_URL", "http://localhost:3000")),
 		MobileFrontendURL: getString("MOBILE_VERIFY_URL", "linkupmobile://verify-email"),
 
 		IceServerUrls:  getString("ICE_SERVER_URLS", ""),
@@ -101,12 +119,29 @@ func LoadEnv() error {
 		TurnUsername:   getString("TURN_USERNAME", ""),
 		TurnCredential: getString("TURN_CREDENTIAL", ""),
 
-		MongoURI: getRequiredString("MONGO_URI"),
+		MongoURI:    getRequiredString("MONGO_URI"),
 		MongoDBName: getString("MONGO_DB_NAME", "linkup"),
 
-		GoogleClientIDs: parseCSV(getString("GOOGLE_CLIENT_IDS", "")),
-		GoogleClientID: getString("GOOGLE_CLIENT_ID", ""),
+		GoogleClientIDs:    parseCSV(getString("GOOGLE_CLIENT_IDS", "")),
+		GoogleClientID:     getString("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getString("GOOGLE_CLIENT_SECRET", ""),
+
+		VNPayTMNCode:           getString("VNP_TMN_CODE", ""),
+		VNPayHashSecret:        getString("VNP_HASH_SECRET", ""),
+		VNPayPaymentURL:        getString("VNP_PAYMENT_URL", ""),
+		VNPayReturnURL:         getString("VNP_RETURN_URL", ""),
+		VNPayFrontendReturnURL: getString("VNP_FRONTEND_RETURN_URL", ""),
+
+		MoMoPartnerCode: getString("MOMO_PARTNER_CODE", ""),
+		MoMoAccessKey:   getString("MOMO_ACCESS_KEY", ""),
+		MoMoSecretKey:   getString("MOMO_SECRET_KEY", ""),
+		MoMoEndpoint:    getString("MOMO_ENDPOINT", ""),
+		MoMoRedirectURL: getString("MOMO_REDIRECT_URL", ""),
+		MoMoIPNURL:      getString("MOMO_IPN_URL", ""),
+		MoMoFrontendReturnURL: getString(
+			"MOMO_FRONTEND_RETURN_URL",
+			getString("VNP_FRONTEND_RETURN_URL", ""),
+		),
 	}
 
 	missing := validateRequired(env)

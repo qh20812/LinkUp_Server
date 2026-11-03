@@ -39,21 +39,7 @@ func (s *packageServiceImpl) SubscribePackage(userID string, packageID string) (
 		return nil, err
 	}
 
-	now := time.Now()
-	expiresAt := now.AddDate(0, 0, pkg.MaxDurationDays)
-
-	newSub := &models.PartnerSubscription{
-		ID:        utils.GenerateUUID(),
-		UserID:    userID,
-		PackageID: pkg.ID,
-		SlotsUsed: 0,
-		StartedAt: now,
-		ExpiresAt: expiresAt,
-		Status:    models.SubscriptionStatusActive,
-		AutoRenew: true,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+	newSub := newPartnerSubscription(userID, pkg)
 
 	// Gọi Transaction: tự động xử lý hủy gói cũ + tạo gói mới + nâng role người dùng
 	if err := s.repo.SubscribeWithTransaction(activeSub, newSub); err != nil {
@@ -61,6 +47,25 @@ func (s *packageServiceImpl) SubscribePackage(userID string, packageID string) (
 	}
 
 	return newSub, nil
+}
+
+// newPartnerSubscription dựng bản ghi gói mới từ gói hiện tại. Dùng chung cho
+// luồng đăng ký trực tiếp và luồng thanh toán VNPay để hai bên luôn tính cùng
+// thời hạn/slot.
+func newPartnerSubscription(userID string, pkg *models.AdPackage) *models.PartnerSubscription {
+	now := time.Now()
+	return &models.PartnerSubscription{
+		ID:        utils.GenerateUUID(),
+		UserID:    userID,
+		PackageID: pkg.ID,
+		SlotsUsed: 0,
+		StartedAt: now,
+		ExpiresAt: now.AddDate(0, 0, pkg.MaxDurationDays),
+		Status:    models.SubscriptionStatusActive,
+		AutoRenew: true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 }
 
 func (s *packageServiceImpl) GetUserSubscription(userID string) (*dto.SubscriptionResponse, error) {

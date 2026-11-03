@@ -228,6 +228,13 @@ func StatusCode(code string) int {
 		default:
 			return http.StatusBadRequest
 		}
+	case strings.HasPrefix(code, "payment."):
+		switch {
+		case strings.HasSuffix(code, "NOT_CONFIGURED") || strings.HasSuffix(code, "CREATE_FAILED"):
+			return http.StatusInternalServerError
+		default:
+			return http.StatusBadRequest
+		}
 	case strings.HasPrefix(code, "notification."):
 		return http.StatusInternalServerError
 	case strings.HasPrefix(code, "admin."):

@@ -115,53 +115,60 @@ func (r *packageRepositoryImpl) UpdateUserRole(userID string, roleName models.Ro
 // SubscribeWithTransaction thực hiện toàn bộ thao tác đổi gói + cập nhật role PARTNER trong 1 Transaction
 func (r *packageRepositoryImpl) SubscribeWithTransaction(activeSub *models.PartnerSubscription, newSub *models.PartnerSubscription) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Hủy gói cước cũ nếu có
-		if activeSub != nil {
-			activeSub.Status = models.SubscriptionStatusCancelled
-			if err := tx.Save(activeSub).Error; err != nil {
-				return err
-			}
-		}
-
-		// 2. Tạo bản ghi gói cước mới
-		if err := tx.Create(newSub).Error; err != nil {
-			return err
-		}
-
-		// 3. Lấy ID của role PARTNER từ bảng roles
-		var partnerRole models.Role
-		if err := tx.Where("name = ?", models.RolePartner).First(&partnerRole).Error; err != nil {
-			return fmt.Errorf("không tìm thấy role PARTNER trong DB: %w", err)
-		}
-
-		// 4. Cập nhật hoặc chèn bản ghi vào bảng user_roles cho Platform-level (ScopeID = NULL)
-		var userRole models.UserRole
-		err := tx.Where("user_id = ? AND scope_id IS NULL", newSub.UserID).First(&userRole).Error
-
-		if err == nil {
-			// Đã có platform role -> Cập nhật sang PARTNER
-			if err := tx.Model(&userRole).Update("role_id", partnerRole.ID).Error; err != nil {
-				return err
-			}
-		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Chưa có -> Tạo mới bản ghi UserRole
-			newUserRole := models.UserRole{
-				ID:         utils.GenerateUUID(),
-				UserID:     newSub.UserID,
-				RoleID:     partnerRole.ID,
-				ScopeID:    nil,
-				ScopeType:  nil,
-				AssignedAt: time.Now(),
-			}
-			if err := tx.Create(&newUserRole).Error; err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-
-		return nil
+		return subscribeWithTx(tx, activeSub, newSub)
 	})
+}
+
+// subscribeWithTx là phần thân dùng chung của SubscribeWithTransaction và
+// PaymentRepository.CompletePayment — nhờ vậy luồng thanh toán có thể ghi
+// trạng thái giao dịch + đổi gói + nâng role trong cùng một transaction.
+func subscribeWithTx(tx *gorm.DB, activeSub *models.PartnerSubscription, newSub *models.PartnerSubscription) error {
+	// 1. Hủy gói cước cũ nếu có
+	if activeSub != nil {
+		activeSub.Status = models.SubscriptionStatusCancelled
+		if err := tx.Save(activeSub).Error; err != nil {
+			return err
+		}
+	}
+
+	// 2. Tạo bản ghi gói cước mới
+	if err := tx.Create(newSub).Error; err != nil {
+		return err
+	}
+
+	// 3. Lấy ID của role PARTNER từ bảng roles
+	var partnerRole models.Role
+	if err := tx.Where("name = ?", models.RolePartner).First(&partnerRole).Error; err != nil {
+		return fmt.Errorf("không tìm thấy role PARTNER trong DB: %w", err)
+	}
+
+	// 4. Cập nhật hoặc chèn bản ghi vào bảng user_roles cho Platform-level (ScopeID = NULL)
+	var userRole models.UserRole
+	err := tx.Where("user_id = ? AND scope_id IS NULL", newSub.UserID).First(&userRole).Error
+
+	if err == nil {
+		// Đã có platform role -> Cập nhật sang PARTNER
+		if err := tx.Model(&userRole).Update("role_id", partnerRole.ID).Error; err != nil {
+			return err
+		}
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Chưa có -> Tạo mới bản ghi UserRole
+		newUserRole := models.UserRole{
+			ID:         utils.GenerateUUID(),
+			UserID:     newSub.UserID,
+			RoleID:     partnerRole.ID,
+			ScopeID:    nil,
+			ScopeType:  nil,
+			AssignedAt: time.Now(),
+		}
+		if err := tx.Create(&newUserRole).Error; err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	return nil
 }
 
 // FindExpiredSubscriptions tìm các subscription active đã hết hạn (mục 1.3)

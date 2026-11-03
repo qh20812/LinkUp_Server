@@ -28,6 +28,7 @@ func Run(db *gorm.DB) {
 		&models.StoryMute{},
 		&models.AdPackage{},
 		&models.PartnerSubscription{},
+		&models.PaymentTransaction{},
 		&models.Ad{},
 		&models.AdMedia{},
 		&models.AdAnalytics{},

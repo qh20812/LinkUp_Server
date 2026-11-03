@@ -297,6 +297,9 @@ func main() {
 
 		adService := services.NewAdService(adRepository, packageRepository, mediaService)
 		packageService := services.NewPackageService(packageRepository)
+		paymentRepository := repository.NewPaymentRepository(gormDB)
+		paymentService := services.NewPaymentService(paymentRepository, packageRepository, env)
+		momoService := services.NewMoMoService(paymentRepository, packageRepository, env)
 
 		// Background worker: downgrade expired partner subscriptions (mục 1.3)
 		go func() {
@@ -314,10 +317,14 @@ func main() {
 
 		adController := controllers.NewAdController(adService, profileRepository)
 		packageController := controllers.NewPackageController(packageService, authService)
+		paymentController := controllers.NewPaymentController(paymentService, env)
+		momoController := controllers.NewMoMoController(momoService, env)
 
 		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
 		routes.RegisterAdRoutes(router, adController, adService, env, gormDB)
 		routes.RegisterPackageRoutes(router, packageController, env, gormDB)
+		routes.RegisterPaymentRoutes(router, paymentController, env, gormDB)
+		routes.RegisterMoMoRoutes(router, momoController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)

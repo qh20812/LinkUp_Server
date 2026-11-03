@@ -16,9 +16,12 @@ func RegisterPackageRoutes(router *gin.Engine, ctrl *controllers.PackageControll
 
 	partnerGroup := router.Group("/api/ads-management")
 	{
+		// Kích hoạt gói trực tiếp (không qua thanh toán) chỉ dành cho admin —
+		// trước đây route này mở cho mọi user nên có thể bỏ qua VNPay. Luồng
+		// mua gói của người dùng đi qua POST /api/ads-management/payments/vnpay.
 		partnerGroup.POST("/subscribe",
 			middlewares.AuthMiddleware(env, db),
-			middlewares.RequireRoles(db, models.RoleUser, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
+			middlewares.RequireRoles(db, models.RoleAdmin, models.RoleSuperAdmin),
 			ctrl.Subscribe,
 		)
 
