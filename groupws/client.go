@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"linkup/dto"
@@ -17,10 +18,12 @@ import (
 )
 
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 8192
+	writeWait  = 10 * time.Second
+	pongWait   = 60 * time.Second
+	pingPeriod = (pongWait * 9) / 10
+	// SDP offer/answer (WebRTC) thường vượt 8KB — 8192 cắt kết nối
+	// creator giữa chừng → call ended → client bị văng.
+	maxMessageSize = 65536
 )
 
 type Client struct {
@@ -37,6 +40,15 @@ type Client struct {
 	groupChatHub   *Hub
 	activeCallID   string
 	callCreator    bool
+	// closeOnce bảo vệ double-close(client.send) — unregister + overflow
+	// đều có thể close; panic sẽ giết cả Run() goroutine.
+	closeOnce sync.Once
+}
+
+func (c *Client) closeSend() {
+	c.closeOnce.Do(func() {
+		close(c.send)
+	})
 }
 
 func NewClientWithMode(
@@ -988,7 +1000,17 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 						"by":      c.userID,
 					}),
 				}
+				// Gửi tới joined + ringing invitees (Participants chưa join).
 				c.hub.SendToUsers(result.NotifyUserIDs, event)
+				joinedSet := make(map[string]struct{}, len(result.NotifyUserIDs))
+				for _, jid := range result.NotifyUserIDs {
+					joinedSet[jid] = struct{}{}
+				}
+				for _, pid := range result.NotifyParticipantIDs {
+					if _, ok := joinedSet[pid]; !ok {
+						c.hub.SendToUser(pid, event)
+					}
+				}
 				if c.groupChatHub != nil {
 					c.groupChatHub.Broadcast(result.ChatID, event)
 				}
@@ -1264,6 +1286,15 @@ func (c *Client) cleanupDisconnectedCallSessions() {
 				}),
 			}
 			c.hub.SendToUsers(result.NotifyUserIDs, event)
+			joinedSet := make(map[string]struct{}, len(result.NotifyUserIDs))
+			for _, jid := range result.NotifyUserIDs {
+				joinedSet[jid] = struct{}{}
+			}
+			for _, pid := range result.NotifyParticipantIDs {
+				if _, ok := joinedSet[pid]; !ok {
+					c.hub.SendToUser(pid, event)
+				}
+			}
 			if c.groupChatHub != nil {
 				c.groupChatHub.Broadcast(result.ChatID, event)
 			}

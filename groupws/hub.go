@@ -109,7 +109,9 @@ type EndCallResult struct {
 	Ended         bool
 	ChatID        string
 	CallID        string
-	NotifyUserIDs []string
+	NotifyUserIDs []string // đã join — nhận left/ended
+	// Participants CHƯA join (đang ringing) — cần nhận group:call:ended để dismiss modal.
+	NotifyParticipantIDs []string
 }
 
 func (h *Hub) snapshotSessionLocked(session *GroupCallSession) GroupCallSnapshot {
@@ -178,7 +180,7 @@ func (h *Hub) Run() {
 				}
 			}
 			h.mu.Unlock()
-			close(client.send)
+			client.closeSend()
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
@@ -190,7 +192,7 @@ func (h *Hub) Run() {
 					h.mu.RUnlock()
 					h.mu.Lock()
 					delete(clients, client)
-					close(client.send)
+					client.closeSend()
 					h.mu.Unlock()
 					h.mu.RLock()
 				}
@@ -478,6 +480,7 @@ func (h *Hub) EndCallByUser(enderID, callID string) (EndCallResult, error) {
 	// Nếu creator kết thúc thì đóng toàn bộ session ngay lập tức.
 	if session.CallerID == enderID {
 		result.NotifyUserIDs = session.JoinedIDs()
+		result.NotifyParticipantIDs = session.ParticipantIDs()
 		result.Ended = true
 		persistSession = session
 		delete(h.groupCalls, callID)
@@ -494,6 +497,7 @@ func (h *Hub) EndCallByUser(enderID, callID string) (EndCallResult, error) {
 		delete(session.ActiveParticipants, enderID)
 	}
 	result.NotifyUserIDs = session.JoinedIDs()
+	result.NotifyParticipantIDs = session.ParticipantIDs()
 	result.Ended = len(session.Joined) == 0
 	if result.Ended {
 		persistSession = session
@@ -651,6 +655,24 @@ func (h *Hub) ListCallIDsByUser(userID string) []string {
 }
 
 // CleanupStaleCalls dọn session rác định kỳ: call chưa có ai join sau 60s và request chờ quá 30s.
+// notifyCallEnded phát group:call:ended tới joined + ringing invitees (chưa join)
+// + broadcast chat room. Dùng chung cho end/expire/disconnect để invitee đang
+// chuông không bị “ring ma” khi call đã chết.
+func (h *Hub) notifyCallEnded(session *GroupCallSession, event dto.WsEvent) {
+	if session == nil {
+		return
+	}
+	h.SendToUsers(session.JoinedIDs(), event)
+	for _, pid := range session.ParticipantIDs() {
+		if !session.IsJoined(pid) {
+			h.SendToUser(pid, event)
+		}
+	}
+	if h.groupChatHub != nil {
+		h.groupChatHub.Broadcast(session.ChatID, event)
+	}
+}
+
 func (h *Hub) CleanupStaleCalls() {
 	now := time.Now().UTC()
 
@@ -711,10 +733,7 @@ func (h *Hub) CleanupStaleCalls() {
 				"reason":  "timeout",
 			}),
 		}
-		h.SendToUsers(session.JoinedIDs(), event)
-		if h.groupChatHub != nil {
-			h.groupChatHub.Broadcast(session.ChatID, event)
-		}
+		h.notifyCallEnded(session, event)
 
 		// Persist a system message into the group chat so members see the end notification.
 		if h.messageService != nil {
@@ -744,7 +763,7 @@ func (h *Hub) SendToUser(userID string, msg any) {
 		default:
 			h.mu.Lock()
 			delete(clients, client)
-			close(client.send)
+			client.closeSend()
 			if len(clients) == 0 {
 				delete(h.clients, userID)
 			}
