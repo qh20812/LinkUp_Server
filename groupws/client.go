@@ -611,8 +611,10 @@ if previews := c.messageService.GetChatRepo().GetReplyPreviews(c.ctx, replyIDs);
 				continue
 			}
 
+			// Lúc mời (chưa accept) — type riêng để client không hiện tin
+			// "đã tham gia" sớm; tin hệ thống chỉ tạo khi accept.
 			c.hub.Broadcast(payload.ChatID, dto.WsEvent{
-				Type: "group:member:added",
+				Type: "group:member:invited",
 				Payload: mustMarshal(map[string]any{
 					"chat_id": payload.ChatID,
 					"user_id": payload.UserID,
