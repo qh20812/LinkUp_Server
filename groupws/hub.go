@@ -122,7 +122,9 @@ type EndCallResult struct {
 	Ended         bool
 	ChatID        string
 	CallID        string
-	NotifyUserIDs []string
+	NotifyUserIDs []string // đã join — nhận left/ended
+	// Participants CHƯA join (đang ringing) — cần nhận group:call:ended để dismiss modal.
+	NotifyParticipantIDs []string
 }
 
 func (h *Hub) snapshotSessionLocked(session *GroupCallSession) GroupCallSnapshot {
@@ -502,6 +504,7 @@ func (h *Hub) EndCallByUser(enderID, callID string) (EndCallResult, error) {
 	// Nếu creator kết thúc thì đóng toàn bộ session ngay lập tức.
 	if session.CallerID == enderID {
 		result.NotifyUserIDs = session.JoinedIDs()
+		result.NotifyParticipantIDs = session.ParticipantIDs()
 		result.Ended = true
 		persistSession = session
 		delete(h.groupCalls, callID)
@@ -521,6 +524,7 @@ func (h *Hub) EndCallByUser(enderID, callID string) (EndCallResult, error) {
 		delete(session.DisconnectedAt, enderID)
 	}
 	result.NotifyUserIDs = session.JoinedIDs()
+	result.NotifyParticipantIDs = session.ParticipantIDs()
 	result.Ended = len(session.Joined) == 0
 	if result.Ended {
 		persistSession = session
@@ -728,6 +732,21 @@ func (h *Hub) ListCallIDsByUser(userID string) []string {
 
 // CleanupStaleCalls dọn session rác định kỳ: call chưa có ai join sau 60s,
 // request chờ quá 30s, và người đã rớt socket quá callDisconnectGrace.
+func (h *Hub) notifyCallEnded(session *GroupCallSession, event dto.WsEvent) {
+	if session == nil {
+		return
+	}
+	h.SendToUsers(session.JoinedIDs(), event)
+	for _, pid := range session.ParticipantIDs() {
+		if !session.IsJoined(pid) {
+			h.SendToUser(pid, event)
+		}
+	}
+	if h.groupChatHub != nil {
+		h.groupChatHub.Broadcast(session.ChatID, event)
+	}
+}
+
 func (h *Hub) CleanupStaleCalls() {
 	now := time.Now().UTC()
 
@@ -841,10 +860,7 @@ func (h *Hub) CleanupStaleCalls() {
 					"reason":  "disconnected",
 				}),
 			}
-			h.SendToUsers(item.notify, event)
-			if h.groupChatHub != nil {
-				h.groupChatHub.Broadcast(session.ChatID, event)
-			}
+			h.notifyCallEnded(session, event)
 			if h.messageService != nil {
 				if _, err := h.messageService.CreateSystemMessage(context.Background(), session.ChatID, "call_ended", "call_ended", item.userID); err != nil {
 					log.Printf("group call: create system message: %v", err)
@@ -885,10 +901,7 @@ func (h *Hub) CleanupStaleCalls() {
 				"reason":  item.reason,
 			}),
 		}
-		h.SendToUsers(item.notify, event)
-		if h.groupChatHub != nil {
-			h.groupChatHub.Broadcast(session.ChatID, event)
-		}
+		h.notifyCallEnded(session, event)
 
 		// Persist a system message into the group chat so members see the end notification.
 		if h.messageService != nil {

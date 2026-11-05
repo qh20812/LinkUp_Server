@@ -20,7 +20,8 @@ const (
 	writeWait             = 10 * time.Second
 	pongWait              = 60 * time.Second
 	pingPeriod            = (pongWait * 9) / 10
-	maxMessageSize        = 8192
+	// SDP offer/answer (WebRTC) thường vượt 8KB — 8192 cắt kết nối mid-call.
+	maxMessageSize        = 65536
 	defaultHistoryLimit   = 30
 	maxHistoryLimit       = 100
 )

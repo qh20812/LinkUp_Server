@@ -308,8 +308,8 @@ func (s *GroupChatService) addMemberRequest(ctx context.Context, chatID, request
 		)
 	}
 
-	s.createSystemMessage(ctx, chatID, "member_invited", "member_invited", requesterID)
-
+	// Không tạo tin hệ thống lúc mời — tin "đã được X thêm" chỉ tạo khi
+	// accept (xem ApproveMemberRequest), để 1 hành động = 1 tin trong nhóm.
 	requesterName := s.GetDisplayName(ctx, requesterID)
 	_ = s.createGroupInviteMessage(ctx, chatID, req.ID, requesterID, newMemberID, requesterName)
 
@@ -674,40 +674,42 @@ func (s *GroupChatService) UnmuteMember(ctx context.Context, chatID, adminID, ta
 	return nil
 }
 
-func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, targetUserID, requestID string) error {
+// ApproveMemberRequest trả về requesterID (người đã gửi lời mời) để controller
+// broadcast kèm by — client render "[invitee] đã được [inviter] thêm vào nhóm".
+func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, targetUserID, requestID string) (string, error) {
 	req, err := s.groupRepo.FindMemberRequestByID(ctx, requestID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if req.ChatID != chatID {
-		return errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
+		return "", errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
 	}
 	if req.TargetUserID != targetUserID {
-		return errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
+		return "", errorsapp.New(errorsapp.ErrCodeGCRequestNotOwn)
 	}
 	if req.Status != models.GroupChatMemberRequestPending {
-		return errorsapp.New(errorsapp.ErrCodeGCRequestAlreadyHandled)
+		return "", errorsapp.New(errorsapp.ErrCodeGCRequestAlreadyHandled)
 	}
 
 	isBanned, err := s.groupRepo.IsUserBanned(ctx, chatID, targetUserID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if isBanned {
-		return errorsapp.New(errorsapp.ErrCodeGCBanned)
+		return "", errorsapp.New(errorsapp.ErrCodeGCBanned)
 	}
 
 	isTargetMember, err := s.groupRepo.IsUserMember(ctx, chatID, targetUserID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if isTargetMember {
-		return errorsapp.New(errorsapp.ErrCodeGCAlreadyMember)
+		return "", errorsapp.New(errorsapp.ErrCodeGCAlreadyMember)
 	}
 
 	if err := s.groupRepo.ApproveMemberRequest(ctx, requestID); err != nil {
-		return err
+		return "", err
 	}
 
 	_ = s.updateGroupInviteStatus(ctx, requestID, "accepted", req.RequesterID, targetUserID)
@@ -725,9 +727,13 @@ func (s *GroupChatService) ApproveMemberRequest(ctx context.Context, chatID, tar
 		)
 	}
 
-	s.createSystemMessage(ctx, chatID, "member_joined", "member_joined", targetUserID)
+	// Content 3 phần: key|invitee|inviter — client mới render
+	// "[invitee] đã được [inviter] thêm vào nhóm"; client cũ (2 phần) vẫn
+	// render tạm được nhờ key cũ. Thay cho member_joined để đúng ngữ nghĩa
+	// "được thêm" thay vì "tự tham gia".
+	s.createSystemMessage(ctx, chatID, "member_invited", "member_invited", targetUserID, req.RequesterID)
 
-	return nil
+	return req.RequesterID, nil
 }
 
 func (s *GroupChatService) RejectMemberRequest(ctx context.Context, chatID, targetUserID, requestID string) error {

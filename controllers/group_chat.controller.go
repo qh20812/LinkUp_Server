@@ -76,8 +76,10 @@ func (ctrl *GroupChatController) AddMember(c *gin.Context) {
 		return
 	}
 
+	// Lúc mời (chưa accept) — broadcast type riêng để client KHÔNG hiện
+	// tin "đã tham gia" sớm; tin hệ thống chỉ tạo khi accept (xem service).
 	ctrl.broadcastToChat(chatID, dto.WsEvent{
-		Type: "group:member:added",
+		Type: "group:member:invited",
 		Payload: mustMarshalCtrl(map[string]any{
 			"chat_id": chatID,
 			"user_id": input.UserID,
@@ -338,7 +340,8 @@ func (ctrl *GroupChatController) ApproveMemberRequest(c *gin.Context) {
 	chatID := c.Param("chatID")
 	requestID := c.Param("requestID")
 
-	if err := ctrl.groupService.ApproveMemberRequest(c.Request.Context(), chatID, userID, requestID); err != nil {
+	requesterID, err := ctrl.groupService.ApproveMemberRequest(c.Request.Context(), chatID, userID, requestID)
+	if err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
@@ -350,7 +353,7 @@ func (ctrl *GroupChatController) ApproveMemberRequest(c *gin.Context) {
 			"chat_id":     chatID,
 			"user_id":     userID,
 			"user_name":   memberName,
-			"by":          userID,
+			"by":          requesterID,
 			"member_name": memberName,
 		}),
 	})
