@@ -807,6 +807,22 @@ func (ctrl *AdminController) ListAds(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (ctrl *AdminController) GetAdAnalytics(c *gin.Context) {
+	adID := c.Param("id")
+	if adID == "" {
+		errors.RespondError(c, http.StatusBadRequest, errors.New(errors.ErrCodeAdminInvalidInput))
+		return
+	}
+
+	userID := c.GetString("userID")
+	report, err := ctrl.adminService.GetAdPerformance(c.Request.Context(), userID, adID)
+	if err != nil {
+		errors.Respond(c, http.StatusForbidden, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": report})
+}
+
 func (ctrl *AdminController) UpdateAdStatus(c *gin.Context) {
 	adID := c.Param("id")
 	if adID == "" {

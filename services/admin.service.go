@@ -47,6 +47,7 @@ type AdminService struct {
 	adminRepo           repository.AdminRepository
 	mediaRepo           *repository.MediaRepository
 	adRepo              repository.AdRepository
+	adService           AdService
 	violationRuleRepo   *repository.ViolationRuleRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
@@ -78,6 +79,12 @@ func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
 // SetViolationRuleRepository gán repo để tra cứu tên rule trong report detail.
 func (s *AdminService) SetViolationRuleRepository(repo *repository.ViolationRuleRepository) {
 	s.violationRuleRepo = repo
+}
+
+// SetAdService cho admin xem thống kê quảng cáo của mọi partner. Dùng setter để
+// không phải đổi chữ ký NewAdminService (đang được nhiều nơi gọi).
+func (s *AdminService) SetAdService(adService AdService) {
+	s.adService = adService
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -1535,6 +1542,17 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
 
 	return nil
+}
+
+// GetAdPerformance cho admin xem thống kê của bất kỳ quảng cáo nào.
+func (s *AdminService) GetAdPerformance(ctx context.Context, adminID, adID string) (*dto.AdPerformanceResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
+	if s.adService == nil {
+		return nil, fmt.Errorf("admin: ad service chưa được khởi tạo")
+	}
+	return s.adService.GetAdPerformance(adID, "", true)
 }
 
 func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error {

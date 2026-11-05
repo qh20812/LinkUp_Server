@@ -20,7 +20,7 @@ import (
 type AdService interface {
 	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error)
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
-	GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error)
+	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool) (*dto.AdPerformanceResponse, error)
 	GetDashboardList() ([]models.Ad, error)
 	GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error)
 	GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error)
@@ -244,9 +244,12 @@ func (s *adServiceImpl) SubmitForReview(id, partnerID string) (*models.Ad, error
 	return s.repo.FindByID(id)
 }
 
-func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error) {
-	if partnerID != "" {
-		isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+// GetAdPerformance trả số liệu của một quảng cáo. Partner chỉ xem được ad của
+// mình; admin (viewerIsAdmin) xem được mọi ad — trước đây admin bị chặn 403 vì
+// service kiểm tra ownership bằng userID của admin.
+func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdmin bool) (*dto.AdPerformanceResponse, error) {
+	if !viewerIsAdmin && viewerID != "" {
+		isOwner, err := s.repo.CheckAdOwnership(id, viewerID)
 		if err != nil || !isOwner {
 			return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 		}

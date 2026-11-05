@@ -55,7 +55,22 @@ type fakeAdRepo struct {
 	updated       *models.Ad
 	updateErr     error
 	updatedFields map[string]interface{}
+
+	actionCounts map[string]int64
+	countsErr    error
 }
+
+func (f *fakeAdRepo) GetActionCounts(string) (map[string]int64, error) {
+	if f.countsErr != nil {
+		return nil, f.countsErr
+	}
+	if f.actionCounts == nil {
+		return map[string]int64{}, nil
+	}
+	return f.actionCounts, nil
+}
+
+func (f *fakeAdRepo) GetUniqueReach(string) (int64, error) { return 0, nil }
 
 func (f *fakeAdRepo) Update(ad *models.Ad) error {
 	f.updated = ad
@@ -499,6 +514,35 @@ func TestUpdateStatus_ResumeRejectedWhenBudgetSpent(t *testing.T) {
 
 	if _, err := svc.UpdateStatus("ad-1", "active", "partner-1"); err == nil {
 		t.Fatalf("hết ngân sách thì không được bật lại")
+	}
+}
+
+func TestGetAdPerformance_AdminBypassesOwnership(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:      false,
+		existing:     &models.Ad{ID: "ad-1", Status: models.AdStatusActive, Budget: 100, TotalSpent: 10},
+		actionCounts: map[string]int64{"impression": 1000, "click": 20},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	report, err := svc.GetAdPerformance("ad-1", "admin-1", true)
+	if err != nil {
+		t.Fatalf("admin phải xem được ad của partner: %v", err)
+	}
+	if report.Impressions != 1000 || report.Clicks != 20 {
+		t.Fatalf("số liệu không đúng: %+v", report)
+	}
+}
+
+func TestGetAdPerformance_PartnerOnlyOwnAds(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  false,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	if _, err := svc.GetAdPerformance("ad-1", "partner-2", false); err == nil {
+		t.Fatalf("partner không được xem ad của người khác")
 	}
 }
 

@@ -263,8 +263,10 @@ func (ctrl *AdController) UpdateStatus(c *gin.Context) {
 func (ctrl *AdController) GetAnalytics(c *gin.Context) {
 	id := c.Param("id")
 	partnerID := c.GetString("userID")
+	role := c.GetString("userRole")
+	isAdmin := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
-	report, err := ctrl.service.GetAdPerformance(id, partnerID)
+	report, err := ctrl.service.GetAdPerformance(id, partnerID, isAdmin)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)

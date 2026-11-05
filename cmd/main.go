@@ -332,6 +332,7 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminService.SetViolationRuleRepository(violationRuleRepository)
+	adminService.SetAdService(adService)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 
