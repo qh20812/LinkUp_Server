@@ -60,6 +60,9 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "messages", "media_group_id", "VARCHAR(36) NULL")
 	ensureIndex(db, "messages", "idx_messages_media_group_id", "media_group_id")
 
+	// Lý do admin hạ quảng cáo (status = suspended). Idempotent, không mất dữ liệu.
+	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
+
 	// Thêm cột messages.forwarded_from/forwards_count cho tính năng chuyển tiếp
 	// (forward) tin nhắn: trỏ về tin gốc + số lần chuỗi đã được chuyển tiếp.
 	ensureColumn(db, "messages", "forwarded_from", "VARCHAR(36) NULL")

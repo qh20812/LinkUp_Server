@@ -1146,6 +1146,7 @@ func Run(env config.Env) error {
 		{"target_age_max", "INT NOT NULL DEFAULT 100"},
 		{"target_locations", "JSON NULL"},
 		{"rejection_reason", "TEXT NULL"},
+		{"suspended_reason", "TEXT NULL"},
 	} {
 		if err := addColumnIfMissing(database, "ads", col.name, col.def); err != nil {
 			return fmt.Errorf("schema: add ads.%s: %w", col.name, err)

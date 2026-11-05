@@ -13,6 +13,9 @@ const (
 	AdStatusCompleted AdStatus = "completed"
 	AdStatusPending   AdStatus = "pending"
 	AdStatusRejected  AdStatus = "rejected"
+	// AdStatusSuspended: admin hạ quảng cáo vi phạm. Khác Paused (partner tự
+	// tạm dừng) ở chỗ partner không được tự bật lại.
+	AdStatusSuspended AdStatus = "suspended"
 )
 
 type AdFormat string
@@ -39,6 +42,8 @@ type Ad struct {
 	CPCPrice       float64    `json:"cpc_price" gorm:"default:0"`
 	MaxImpressions int        `json:"max_impressions" gorm:"default:0"`
 	RejectionReason *string    `json:"rejection_reason,omitempty"`
+	// SuspendedReason: lý do admin hạ quảng cáo (chỉ có giá trị khi status = suspended).
+	SuspendedReason *string   `json:"suspended_reason,omitempty" gorm:"type:text"`
 	TargetGender   string     `json:"target_gender" gorm:"size:10;default:'all'"`
 	TargetAgeMin   int        `json:"target_age_min" gorm:"default:0"`
 	TargetAgeMax   int        `json:"target_age_max" gorm:"default:100"`
@@ -75,6 +80,8 @@ func ParseAdStatus(value string) AdStatus {
 		return AdStatusPending
 	case string(AdStatusRejected):
 		return AdStatusRejected
+	case string(AdStatusSuspended):
+		return AdStatusSuspended
 	default:
 		return AdStatusPaused
 	}

@@ -116,7 +116,7 @@ func (r *adRepositoryImpl) ListByPartnerID(partnerID string, limit, offset int) 
 		       a.budget, a.daily_budget, a.cpm_price, a.cpc_price, a.max_impressions,
 		       a.total_spent, a.target_gender, a.target_age_min, a.target_age_max,
 		       COALESCE(NULLIF(a.target_locations, ''), JSON_ARRAY()) AS target_locations,
-		       a.started_at, a.expires_at, a.created_at, a.rejection_reason,
+		       a.started_at, a.expires_at, a.created_at, a.rejection_reason, a.suspended_reason,
 		       COALESCE((SELECT am.url FROM ad_media am WHERE am.ad_id = a.id ORDER BY am.sort_order, am.created_at LIMIT 1), '') AS media_uri,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression') AS impressions,
 		       (SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'click') AS clicks,
@@ -265,7 +265,7 @@ func (r *adRepositoryImpl) ListAds(ctx context.Context, keyword, status string, 
 
 	query := `
 		SELECT a.id, a.title, a.content, a.partner_id, a.target_url, a.status, a.budget,
-		       a.started_at, a.expires_at, a.created_at,
+		       a.started_at, a.expires_at, a.created_at, a.rejection_reason, a.suspended_reason,
 		       u.username AS partner_name,
 		       COALESCE(p.display_name, u.username) AS partner_display_name,
 		       COALESCE((SELECT am.url FROM ad_media am WHERE am.ad_id = a.id ORDER BY am.sort_order, am.created_at LIMIT 1), '') AS media_uri,

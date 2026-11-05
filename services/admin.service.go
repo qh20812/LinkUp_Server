@@ -1463,22 +1463,51 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 		return nil
 	}
 
-	// Moderation logic: chỉ cho phép approve khi ad đang pending
-	if newStatus == string(models.AdStatusActive) && ad.Status != models.AdStatusPending {
-		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+	rejectionReason := strings.TrimSpace(input.RejectionReason)
+	suspendedReason := strings.TrimSpace(input.SuspendedReason)
+	if suspendedReason == "" {
+		suspendedReason = rejectionReason
 	}
-	// Reject chỉ khi ad đang pending
-	if newStatus == string(models.AdStatusRejected) && ad.Status != models.AdStatusPending {
+
+	// State machine: admin chỉ chuyển được những cặp trạng thái có nghĩa.
+	switch newStatus {
+	case string(models.AdStatusActive):
+		// Duyệt từ pending, hoặc bỏ tạm dừng / gỡ takedown.
+		if ad.Status != models.AdStatusPending &&
+			ad.Status != models.AdStatusPaused &&
+			ad.Status != models.AdStatusSuspended {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+		ad.SuspendedReason = nil
+		ad.RejectionReason = nil
+	case string(models.AdStatusRejected):
+		if ad.Status != models.AdStatusPending {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+		if rejectionReason == "" {
+			return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
+		}
+	case string(models.AdStatusSuspended):
+		if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+		if suspendedReason == "" {
+			return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
+		}
+	case string(models.AdStatusPaused), string(models.AdStatusCompleted):
+		if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+	default:
 		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
-	}
-	// Reject phải có lý do
-	if newStatus == string(models.AdStatusRejected) && strings.TrimSpace(input.RejectionReason) == "" {
-		return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
 	}
 
 	ad.Status = models.ParseAdStatus(newStatus)
 	if newStatus == string(models.AdStatusRejected) {
-		ad.RejectionReason = &input.RejectionReason
+		ad.RejectionReason = &rejectionReason
+	}
+	if newStatus == string(models.AdStatusSuspended) {
+		ad.SuspendedReason = &suspendedReason
 	}
 	if err := s.adRepo.Update(ad); err != nil {
 		return fmt.Errorf("cập nhật trạng thái quảng cáo thất bại: %w", err)
@@ -1491,12 +1520,17 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 			return "phê duyệt"
 		case models.AdStatusRejected:
 			return "từ chối"
+		case models.AdStatusSuspended:
+			return "tạm ngưng"
 		default:
 			return "cập nhật trạng thái"
 		}
 	}())
-	if newStatus == string(models.AdStatusRejected) && input.RejectionReason != "" {
-		statusMsg += " Lý do: " + input.RejectionReason
+	if newStatus == string(models.AdStatusRejected) && rejectionReason != "" {
+		statusMsg += " Lý do: " + rejectionReason
+	}
+	if newStatus == string(models.AdStatusSuspended) && suspendedReason != "" {
+		statusMsg += " Lý do: " + suspendedReason
 	}
 	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
 

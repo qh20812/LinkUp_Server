@@ -28,6 +28,7 @@ type AdService interface {
 	GetAdByID(id string) (*models.Ad, error)
 	UpdateAd(id, partnerID string, input dto.UpdateAdInput) (*models.Ad, error)
 	DeleteAd(id, partnerID string) error
+	SubmitForReview(id, partnerID string) (*models.Ad, error)
 	SetAdStatus(id string, status models.AdStatus) error
 	GetOverview(partnerID string) (*dto.AdOverviewResponse, error)
 }
@@ -98,6 +99,10 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 
 	// 3. Khởi tạo Quảng cáo
 	ad := models.NewAd(input.Title, input.Content, input.TargetURL, input.Budget, adFormat)
+	// Partner phải qua bước duyệt; admin tạo hộ thì phát ngay.
+	if !platformAdmin {
+		ad.Status = models.AdStatusPending
+	}
 	ad.ID = utils.GenerateUUID()
 	ad.PartnerID = partnerID
 	if sub != nil {
@@ -171,6 +176,10 @@ func (s *adServiceImpl) GetAdByID(id string) (*models.Ad, error) {
 	return s.repo.FindByID(id)
 }
 
+// UpdateStatus cho partner tạm dừng / bật lại quảng cáo của mình.
+// Chỉ chấp nhận active ↔ paused; duyệt, từ chối, takedown và hoàn thành do
+// admin/hệ thống quyết định nên partner không được tự đổi sang các trạng thái
+// đó (trước đây partner đổi được mọi trạng thái, kể cả tự duyệt).
 func (s *adServiceImpl) UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error) {
 	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
 	if err != nil || !isOwner {
@@ -181,11 +190,58 @@ func (s *adServiceImpl) UpdateStatus(id string, statusStr string, partnerID stri
 	if err != nil {
 		return nil, err
 	}
-	ad.Status = models.ParseAdStatus(statusStr)
+
+	target := models.ParseAdStatus(statusStr)
+	allowed := (ad.Status == models.AdStatusActive && target == models.AdStatusPaused) ||
+		(ad.Status == models.AdStatusPaused && target == models.AdStatusActive)
+	if !allowed {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	// Bật lại chỉ hợp lệ khi còn ngân sách, chưa hết hạn và gói còn hiệu lực.
+	if target == models.AdStatusActive {
+		if ad.Budget > 0 && ad.TotalSpent >= ad.Budget {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdBudgetExceeded)
+		}
+		if ad.ExpiresAt != nil && ad.ExpiresAt.Before(time.Now()) {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+		}
+		if sub, subErr := s.packageRepo.GetActiveSubscription(partnerID); subErr != nil || sub == nil {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
+		}
+	}
+
+	ad.Status = target
 	if err := s.repo.Update(ad); err != nil {
 		return nil, err
 	}
 	return ad, nil
+}
+
+// SubmitForReview đưa quảng cáo bị từ chối trở lại hàng đợi duyệt và xoá lý do
+// từ chối cũ, để partner sửa nội dung rồi gửi duyệt lại.
+func (s *adServiceImpl) SubmitForReview(id, partnerID string) (*models.Ad, error) {
+	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+	if err != nil || !isOwner {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
+	}
+
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if ad.Status != models.AdStatusRejected {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	fields := map[string]interface{}{
+		"status":           string(models.AdStatusPending),
+		"rejection_reason": nil,
+	}
+	if err := s.repo.UpdateAdFields(ad, fields); err != nil {
+		return nil, err
+	}
+	return s.repo.FindByID(id)
 }
 
 func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error) {
@@ -300,7 +356,11 @@ func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) 
 		return nil, err
 	}
 
-	if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+	// Chỉ sửa nội dung khi quảng cáo chưa kết thúc vòng đời. Cho phép cả
+	// pending/rejected để partner sửa trước khi gửi duyệt lại.
+	switch ad.Status {
+	case models.AdStatusPending, models.AdStatusRejected, models.AdStatusActive, models.AdStatusPaused:
+	default:
 		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
 	}
 

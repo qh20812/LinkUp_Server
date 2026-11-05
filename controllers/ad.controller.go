@@ -404,6 +404,23 @@ func (ctrl *AdController) UpdateAd(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật quảng cáo thành công", "data": ad})
 }
 
+// SubmitAd đưa quảng cáo bị từ chối trở lại hàng đợi duyệt.
+func (ctrl *AdController) SubmitAd(c *gin.Context) {
+	id := c.Param("id")
+	partnerID := c.GetString("userID")
+
+	ad, err := ctrl.service.SubmitForReview(id, partnerID)
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Đã gửi quảng cáo để duyệt lại", "data": ad})
+}
+
 func (ctrl *AdController) DeleteAd(c *gin.Context) {
 	id := c.Param("id")
 	partnerID := c.GetString("userID")

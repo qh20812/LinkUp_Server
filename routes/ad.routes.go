@@ -60,6 +60,13 @@ func RegisterAdRoutes(
 			ctrl.DeleteAd,
 		)
 
+		adsManagement.POST("/:id/submit",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			middlewares.CheckAdOwnership(db, adService),
+			ctrl.SubmitAd,
+		)
+
 		adsManagement.GET("/overview",
 			middlewares.AuthMiddleware(env, db),
 			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),

@@ -106,6 +106,7 @@ type PartnerAdListItem struct {
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	RejectionReason *string    `json:"rejection_reason,omitempty"`
+	SuspendedReason *string    `json:"suspended_reason,omitempty"`
 }
 
 // JSONStringList đọc một cột JSON (mảng string) của MySQL vào []string.

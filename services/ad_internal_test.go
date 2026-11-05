@@ -51,6 +51,33 @@ type fakeAdRepo struct {
 	deleted    string
 	deleteErr  error
 	mediaPurge string
+
+	updated       *models.Ad
+	updateErr     error
+	updatedFields map[string]interface{}
+}
+
+func (f *fakeAdRepo) Update(ad *models.Ad) error {
+	f.updated = ad
+	return f.updateErr
+}
+
+func (f *fakeAdRepo) UpdateAdFields(ad *models.Ad, fields map[string]interface{}) error {
+	f.updated = ad
+	f.updatedFields = fields
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	// Mô phỏng UPDATE thật để test đọc lại thấy trạng thái mới.
+	if f.existing != nil {
+		if v, ok := fields["status"].(string); ok {
+			f.existing.Status = models.ParseAdStatus(v)
+		}
+		if v, ok := fields["rejection_reason"]; ok && v == nil {
+			f.existing.RejectionReason = nil
+		}
+	}
+	return nil
 }
 
 func (f *fakeAdRepo) Create(ad *models.Ad) error {
@@ -317,6 +344,161 @@ func TestDeleteAd_SkipsSlotWhenNoActiveSubscription(t *testing.T) {
 	}
 	if pkg.slotsUsed != 0 {
 		t.Fatalf("không được giải phóng slot khi không có gói đang hoạt động")
+	}
+}
+
+// ─── P0-1: state machine duyệt quảng cáo ──────────────────────────────────
+
+func TestCreateAdWithMedia_PartnerAdStartsPending(t *testing.T) {
+	repo := &fakeAdRepo{}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ad, err := svc.CreateAdWithMedia(ctx, validCreateInput(), nil, "partner-1", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ad.Status != models.AdStatusPending {
+		t.Fatalf("ad của partner phải chờ duyệt, got %q", ad.Status)
+	}
+}
+
+func TestCreateAdWithMedia_PlatformAdminAdStartsActive(t *testing.T) {
+	repo := &fakeAdRepo{}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: nil})
+
+	ctx, _ := gin.CreateTestContext(nil)
+	ad, err := svc.CreateAdWithMedia(ctx, validCreateInput(), nil, "admin-1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ad.Status != models.AdStatusActive {
+		t.Fatalf("ad do admin tạo phải active ngay, got %q", ad.Status)
+	}
+}
+
+func TestUpdateAd_AllowsPendingAndRejected(t *testing.T) {
+	for _, status := range []models.AdStatus{models.AdStatusPending, models.AdStatusRejected} {
+		repo := &fakeAdRepo{
+			isOwner:  true,
+			existing: &models.Ad{ID: "ad-1", Status: status},
+		}
+		svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+		if _, err := svc.UpdateAd("ad-1", "partner-1", dto.UpdateAdInput{Title: "Tiêu đề mới"}); err != nil {
+			t.Fatalf("status %s phải được sửa: %v", status, err)
+		}
+	}
+}
+
+func TestUpdateAd_BlocksSuspendedAndCompleted(t *testing.T) {
+	for _, status := range []models.AdStatus{models.AdStatusSuspended, models.AdStatusCompleted} {
+		repo := &fakeAdRepo{
+			isOwner:  true,
+			existing: &models.Ad{ID: "ad-1", Status: status},
+		}
+		svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+		if _, err := svc.UpdateAd("ad-1", "partner-1", dto.UpdateAdInput{Title: "x"}); err == nil {
+			t.Fatalf("status %s không được sửa", status)
+		}
+	}
+}
+
+func TestSubmitForReview_ClearsRejectionAndBackToPending(t *testing.T) {
+	reason := "nội dung sai"
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusRejected, RejectionReason: &reason},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	ad, err := svc.SubmitForReview("ad-1", "partner-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ad.Status != models.AdStatusPending {
+		t.Fatalf("expected pending, got %q", ad.Status)
+	}
+	if ad.RejectionReason != nil {
+		t.Fatalf("rejection_reason phải được xoá")
+	}
+}
+
+func TestSubmitForReview_RejectsNonRejectedAd(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	if _, err := svc.SubmitForReview("ad-1", "partner-1"); err == nil {
+		t.Fatalf("chỉ ad bị từ chối mới được gửi duyệt lại")
+	}
+}
+
+func TestUpdateStatus_PartnerCanOnlyTogglePause(t *testing.T) {
+	// active -> paused hợp lệ
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive, Budget: 100},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+	ad, err := svc.UpdateStatus("ad-1", "paused", "partner-1")
+	if err != nil {
+		t.Fatalf("active -> paused phải được phép: %v", err)
+	}
+	if ad.Status != models.AdStatusPaused {
+		t.Fatalf("expected paused, got %q", ad.Status)
+	}
+
+	// active -> completed bị chặn (chỉ admin/hệ thống được set)
+	repo = &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-2", Status: models.AdStatusActive, Budget: 100},
+	}
+	svc = newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+	if _, err := svc.UpdateStatus("ad-2", "completed", "partner-1"); err == nil {
+		t.Fatalf("partner không được tự đánh dấu completed")
+	}
+
+	// pending -> active bị chặn (partner không được tự duyệt)
+	repo = &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-3", Status: models.AdStatusPending, Budget: 100},
+	}
+	svc = newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+	if _, err := svc.UpdateStatus("ad-3", "active", "partner-1"); err == nil {
+		t.Fatalf("partner không được tự duyệt quảng cáo")
+	}
+}
+
+func TestUpdateStatus_ResumeNeedsActiveSubscription(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusPaused, Budget: 100},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: nil})
+
+	if _, err := svc.UpdateStatus("ad-1", "active", "partner-1"); err == nil {
+		t.Fatalf("không có gói đang hoạt động thì không được bật lại")
+	}
+}
+
+func TestUpdateStatus_ResumeRejectedWhenBudgetSpent(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner: true,
+		existing: &models.Ad{
+			ID:         "ad-1",
+			Status:     models.AdStatusPaused,
+			Budget:     100,
+			TotalSpent: 100,
+		},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	if _, err := svc.UpdateStatus("ad-1", "active", "partner-1"); err == nil {
+		t.Fatalf("hết ngân sách thì không được bật lại")
 	}
 }
 

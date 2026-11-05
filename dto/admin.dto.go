@@ -496,8 +496,9 @@ type AdminAdFilterInput struct {
 }
 
 type AdminAdStatusInput struct {
-	Status          string `json:"status" binding:"required,oneof=active paused completed rejected"`
+	Status          string `json:"status" binding:"required,oneof=active paused completed rejected suspended"`
 	RejectionReason string `json:"rejection_reason,omitempty"`
+	SuspendedReason string `json:"suspended_reason,omitempty"`
 }
 
 type AdminAdListItem struct {
@@ -518,6 +519,8 @@ type AdminAdListItem struct {
 	StartedAt          *time.Time `json:"started_at,omitempty"`
 	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
+	RejectionReason    *string    `json:"rejection_reason,omitempty"`
+	SuspendedReason    *string    `json:"suspended_reason,omitempty"`
 }
 
 type AdminAdListResponse struct {
