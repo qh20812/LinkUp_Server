@@ -298,16 +298,23 @@ func (ctrl *AdController) GetAdminList(c *gin.Context) {
 	currentUserID := c.GetString("userID")
 
 	if role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin) {
-		list, err := ctrl.service.GetDashboardList()
+		// Admin xem hàng đợi toàn hệ thống: lọc + phân trang giống /api/admin/ads
+		// thay vì trả toàn bộ bảng (trước đây kéo hết mọi quảng cáo).
+		ads, total, err := ctrl.service.GetAdminAds(input.Page, input.PageSize, input.Keyword, input.Status)
 		if err != nil {
 			errorsapp.Respond(c, http.StatusInternalServerError, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": list})
+		c.JSON(http.StatusOK, gin.H{
+			"data":      ads,
+			"total":     total,
+			"page":      input.Page,
+			"page_size": input.PageSize,
+		})
 		return
 	}
 
-	ads, total, err := ctrl.service.GetPartnerAds(currentUserID, input.Page, input.PageSize)
+	ads, total, err := ctrl.service.GetPartnerAds(currentUserID, input.Page, input.PageSize, input.Keyword, input.Status)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return

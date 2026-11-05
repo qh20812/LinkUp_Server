@@ -22,7 +22,8 @@ type AdService interface {
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
 	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool) (*dto.AdPerformanceResponse, error)
 	GetDashboardList() ([]models.Ad, error)
-	GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error)
+	GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error)
+	GetAdminAds(page, pageSize int, keyword, status string) ([]dto.AdminAdListItem, int64, error)
 	GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error)
 	TrackUserAction(adID string, userID *string, actionType, ip string) error
 	GetAdByID(id string) (*models.Ad, error)
@@ -328,9 +329,10 @@ func (s *adServiceImpl) GetDashboardList() ([]models.Ad, error) {
 	return s.repo.GetAll()
 }
 
-// GetPartnerAds trả về ads của riêng partner với metrics, có phân trang (mục 6.4)
-func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error) {
-	total, err := s.repo.CountByPartnerID(partnerID)
+// GetPartnerAds trả về ads của riêng partner với metrics + lọc keyword/status,
+// có phân trang (mục 6.4).
+func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error) {
+	total, err := s.repo.CountByPartnerID(partnerID, keyword, status)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -340,9 +342,36 @@ func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int) ([]d
 		offset = 0
 	}
 
-	ads, err := s.repo.ListByPartnerID(partnerID, pageSize, offset)
+	ads, err := s.repo.ListByPartnerID(partnerID, keyword, status, pageSize, offset)
 	if err != nil {
 		return nil, 0, err
+	}
+	if ads == nil {
+		ads = []dto.PartnerAdListItem{}
+	}
+	return ads, total, nil
+}
+
+// GetAdminAds trả danh sách quảng cáo cho admin (mọi partner) kèm thông tin chủ
+// quảng cáo và số liệu, có lọc + phân trang. Dùng cho nhánh admin của
+// /api/ads-management thay vì kéo toàn bộ bảng.
+func (s *adServiceImpl) GetAdminAds(page, pageSize int, keyword, status string) ([]dto.AdminAdListItem, int64, error) {
+	total, err := s.repo.CountAds(context.Background(), keyword, status)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * pageSize
+	if offset < 0 {
+		offset = 0
+	}
+
+	ads, err := s.repo.ListAds(context.Background(), keyword, status, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	if ads == nil {
+		ads = []dto.AdminAdListItem{}
 	}
 	return ads, total, nil
 }

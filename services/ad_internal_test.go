@@ -58,6 +58,40 @@ type fakeAdRepo struct {
 
 	actionCounts map[string]int64
 	countsErr    error
+
+	partnerKeyword, partnerStatus string
+	partnerLimit, partnerOffset   int
+	partnerTotal                  int64
+	partnerItems                  []dto.PartnerAdListItem
+
+	adminKeyword, adminStatus string
+	adminLimit, adminOffset   int
+	adminTotal                int64
+	adminItems                []dto.AdminAdListItem
+}
+
+// ─── Bộ lọc danh sách (P0-3) ──────────────────────────────────────────────
+
+func (f *fakeAdRepo) ListByPartnerID(_, keyword, status string, limit, offset int) ([]dto.PartnerAdListItem, error) {
+	f.partnerKeyword, f.partnerStatus = keyword, status
+	f.partnerLimit, f.partnerOffset = limit, offset
+	return f.partnerItems, nil
+}
+
+func (f *fakeAdRepo) CountByPartnerID(_, keyword, status string) (int64, error) {
+	f.partnerKeyword, f.partnerStatus = keyword, status
+	return f.partnerTotal, nil
+}
+
+func (f *fakeAdRepo) ListAds(_ context.Context, keyword, status string, limit, offset int) ([]dto.AdminAdListItem, error) {
+	f.adminKeyword, f.adminStatus = keyword, status
+	f.adminLimit, f.adminOffset = limit, offset
+	return f.adminItems, nil
+}
+
+func (f *fakeAdRepo) CountAds(_ context.Context, keyword, status string) (int64, error) {
+	f.adminKeyword, f.adminStatus = keyword, status
+	return f.adminTotal, nil
 }
 
 func (f *fakeAdRepo) GetActionCounts(string) (map[string]int64, error) {
@@ -543,6 +577,46 @@ func TestGetAdPerformance_PartnerOnlyOwnAds(t *testing.T) {
 
 	if _, err := svc.GetAdPerformance("ad-1", "partner-2", false); err == nil {
 		t.Fatalf("partner không được xem ad của người khác")
+	}
+}
+
+// ─── P0-3: lọc danh sách phía server ──────────────────────────────────────
+
+func TestGetPartnerAds_ForwardsFiltersAndPagination(t *testing.T) {
+	repo := &fakeAdRepo{partnerTotal: 7}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	_, total, err := svc.GetPartnerAds("partner-1", 3, 10, "khuyến mãi", "pending")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 7 {
+		t.Fatalf("expected total 7, got %d", total)
+	}
+	if repo.partnerKeyword != "khuyến mãi" || repo.partnerStatus != "pending" {
+		t.Fatalf("filter không được truyền xuống repo: %q/%q", repo.partnerKeyword, repo.partnerStatus)
+	}
+	if repo.partnerLimit != 10 || repo.partnerOffset != 20 {
+		t.Fatalf("phân trang sai: limit=%d offset=%d", repo.partnerLimit, repo.partnerOffset)
+	}
+}
+
+func TestGetAdminAds_ForwardsFiltersAndReturnsEmptySlice(t *testing.T) {
+	repo := &fakeAdRepo{adminTotal: 2}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	ads, total, err := svc.GetAdminAds(1, 20, "spam", "rejected")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected total 2, got %d", total)
+	}
+	if repo.adminKeyword != "spam" || repo.adminStatus != "rejected" {
+		t.Fatalf("filter admin không được truyền xuống repo")
+	}
+	if ads == nil {
+		t.Fatalf("danh sách admin phải là slice rỗng, không phải nil")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -36,8 +37,8 @@ type AdRepository interface {
 	TrackActionAndDeduct(analytics *models.AdAnalytics, cpmPrice, cpcPrice float64) error
 	ListAds(ctx context.Context, keyword, status string, limit, offset int) ([]dto.AdminAdListItem, error)
 	CountAds(ctx context.Context, keyword, status string) (int64, error)
-	ListByPartnerID(partnerID string, limit, offset int) ([]dto.PartnerAdListItem, error)
-	CountByPartnerID(partnerID string) (int64, error)
+	ListByPartnerID(partnerID, keyword, status string, limit, offset int) ([]dto.PartnerAdListItem, error)
+	CountByPartnerID(partnerID, keyword, status string) (int64, error)
 	FindRankedAdsForUser(now time.Time, gender string, age int, location string, limit int) ([]models.Ad, error)
 	GetUserAdViewCount(adID, userID string, since time.Time) (int, error)
 	FilterByFrequencyCap(ads []models.Ad, userID string, limit int) ([]models.Ad, error)
@@ -107,8 +108,9 @@ func (r *adRepositoryImpl) GetAll() ([]models.Ad, error) {
 	return list, err
 }
 
-// ListByPartnerID trả về danh sách ads của riêng partner với metrics (mục 6.4)
-func (r *adRepositoryImpl) ListByPartnerID(partnerID string, limit, offset int) ([]dto.PartnerAdListItem, error) {
+// ListByPartnerID trả về danh sách ads của riêng partner với metrics, có lọc
+// keyword/status và phân trang (mục 6.4).
+func (r *adRepositoryImpl) ListByPartnerID(partnerID, keyword, status string, limit, offset int) ([]dto.PartnerAdListItem, error) {
 	var items []dto.PartnerAdListItem
 
 	query := `
@@ -124,21 +126,44 @@ func (r *adRepositoryImpl) ListByPartnerID(partnerID string, limit, offset int) 
 		           IFNULL((SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'click') * 100.0 /
 		           NULLIF((SELECT COUNT(*) FROM ad_analytics aa WHERE aa.ad_id = a.id AND aa.action_type = 'impression'), 0), 0), 2) AS ctr
 		FROM ads a
-		WHERE a.partner_id = ?
-		ORDER BY a.created_at DESC
-		LIMIT ? OFFSET ?`
+		WHERE a.partner_id = ?`
 
-	if err := r.db.Raw(query, partnerID, limit, offset).Scan(&items).Error; err != nil {
+	args := []interface{}{partnerID}
+	query, args = appendAdFilters(query, args, keyword, status)
+	query += ` ORDER BY a.created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	if err := r.db.Raw(query, args...).Scan(&items).Error; err != nil {
 		return nil, fmt.Errorf("list partner ads: %w", err)
 	}
 	return items, nil
 }
 
-// CountByPartnerID đếm tổng ads của riêng partner (mục 1.1)
-func (r *adRepositoryImpl) CountByPartnerID(partnerID string) (int64, error) {
+// CountByPartnerID đếm tổng ads của riêng partner, cùng bộ lọc với danh sách.
+func (r *adRepositoryImpl) CountByPartnerID(partnerID, keyword, status string) (int64, error) {
 	var total int64
-	err := r.db.Model(&models.Ad{}).Where("partner_id = ?", partnerID).Count(&total).Error
-	return total, err
+	query := `SELECT COUNT(*) FROM ads a WHERE a.partner_id = ?`
+	args := []interface{}{partnerID}
+	query, args = appendAdFilters(query, args, keyword, status)
+
+	if err := r.db.Raw(query, args...).Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("count partner ads: %w", err)
+	}
+	return total, nil
+}
+
+// appendAdFilters thêm điều kiện keyword/status dùng chung cho list + count.
+func appendAdFilters(query string, args []interface{}, keyword, status string) (string, []interface{}) {
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		query += ` AND (a.title LIKE ? OR a.content LIKE ?)`
+		args = append(args, like, like)
+	}
+	if status = strings.TrimSpace(strings.ToLower(status)); status != "" {
+		query += ` AND a.status = ?`
+		args = append(args, status)
+	}
+	return query, args
 }
 
 func (r *adRepositoryImpl) FindActiveAds(now time.Time) ([]models.Ad, error) {
