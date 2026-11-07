@@ -25,7 +25,7 @@ type AdService interface {
 	GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error)
 	GetAdminAds(page, pageSize int, keyword, status string) ([]dto.AdminAdListItem, int64, error)
 	GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error)
-	TrackUserAction(adID string, userID *string, actionType, ip string) error
+	TrackUserAction(adID string, userID *string, actionType, ip string) (bool, error)
 	GetAdByID(id string) (*models.Ad, error)
 	UpdateAd(id, partnerID string, input dto.UpdateAdInput) (*models.Ad, error)
 	DeleteAd(id, partnerID string) error
@@ -521,22 +521,25 @@ func (s *adServiceImpl) GetAdsForUserFeed(userID string, userGender string, user
 	return filtered, nil
 }
 
-func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType, ip string) error {
+// TrackUserAction ghi nhận một tương tác quảng cáo. Trả recorded=false khi ad
+// không ở trạng thái chạy, gói của partner hết hạn, hoặc bị chặn bởi cap
+// (chống trùng/budget/max impressions) — những trường hợp này không phải lỗi.
+func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType, ip string) (bool, error) {
 	ad, err := s.repo.FindByID(adID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Chỉ ad đang chạy mới được ghi nhận/trừ tiền.
 	if ad.Status != models.AdStatusActive {
-		return nil
+		return false, nil
 	}
 
 	// Ad của partner chỉ hợp lệ khi gói còn hiệu lực. Ad do admin tạo (không
 	// gắn PackageID) vẫn được ghi nhận bình thường.
 	if ad.PackageID != nil {
 		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr != nil || sub == nil {
-			return nil
+			return false, nil
 		}
 	}
 
@@ -546,8 +549,7 @@ func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType,
 
 	// Toàn bộ check chống trùng / daily budget / budget / max impressions nằm
 	// trong transaction của repo.
-	_, err = s.repo.TrackActionAndDeduct(&log)
-	return err
+	return s.repo.TrackActionAndDeduct(&log)
 }
 
 func generateMediaUUID() string {

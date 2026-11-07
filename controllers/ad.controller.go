@@ -10,6 +10,7 @@ import (
 	"linkup/repository"
 	"linkup/services"
 	"linkup/validations"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -364,7 +365,23 @@ func (ctrl *AdController) TrackAction(c *gin.Context) {
 	}
 
 	ipAddress := c.ClientIP()
-	err := ctrl.service.TrackUserAction(adID, userIDPtr, input.ActionType, ipAddress)
+
+	// Rate limit theo user (fallback IP): 60 event/phút. Trước đây endpoint mở
+	// hoàn toàn nên có thể spam impression/click để bòn ngân sách quảng cáo.
+	limitKey := ipAddress
+	if userIDPtr != nil && *userIDPtr != "" {
+		limitKey = *userIDPtr
+	}
+	if !adTrackLimiter.allow(limitKey, time.Now()) {
+		log.Printf("ad track: rate limited %s (action=%s ad=%s)", limitKey, input.ActionType, adID)
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"status":   "rate_limited",
+			"recorded": false,
+		})
+		return
+	}
+
+	recorded, err := ctrl.service.TrackUserAction(adID, userIDPtr, input.ActionType, ipAddress)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
@@ -373,7 +390,12 @@ func (ctrl *AdController) TrackAction(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "recorded"})
+
+	status := "skipped"
+	if recorded {
+		status = "recorded"
+	}
+	c.JSON(http.StatusOK, gin.H{"status": status, "recorded": recorded})
 }
 
 func (ctrl *AdController) UpdateAd(c *gin.Context) {

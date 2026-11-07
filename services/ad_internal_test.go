@@ -648,10 +648,11 @@ func TestTrackUserAction_SkipsInactiveAd(t *testing.T) {
 		repo := &fakeAdRepo{existing: &models.Ad{ID: "ad-1", Status: status}}
 		svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
 
-		if err := svc.TrackUserAction("ad-1", ptrString("u1"), "impression", "127.0.0.1"); err != nil {
+		recorded, err := svc.TrackUserAction("ad-1", ptrString("u1"), "impression", "127.0.0.1")
+		if err != nil {
 			t.Fatalf("status %s: unexpected error: %v", status, err)
 		}
-		if repo.tracked != nil {
+		if recorded {
 			t.Fatalf("status %s không được ghi nhận tracking", status)
 		}
 	}
@@ -662,11 +663,15 @@ func TestTrackUserAction_SkipsExpiredSubscription(t *testing.T) {
 	repo := &fakeAdRepo{existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive, PartnerID: "partner-1", PackageID: &pkgID}}
 	svc := newTestAdService(repo, &fakePackageRepo{sub: nil})
 
-	if err := svc.TrackUserAction("ad-1", ptrString("u1"), "impression", "127.0.0.1"); err != nil {
+	recorded, err := svc.TrackUserAction("ad-1", ptrString("u1"), "impression", "127.0.0.1")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if repo.tracked != nil {
+	if recorded {
 		t.Fatalf("gói hết hạn thì không được ghi nhận tracking")
+	}
+	if repo.tracked != nil {
+		t.Fatalf("repo không được gọi khi gói hết hạn")
 	}
 }
 
@@ -675,10 +680,11 @@ func TestTrackUserAction_RecordsForActiveAd(t *testing.T) {
 	repo := &fakeAdRepo{existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive, PartnerID: "partner-1", PackageID: &pkgID}}
 	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
 
-	if err := svc.TrackUserAction("ad-1", ptrString("u1"), "click", "127.0.0.1"); err != nil {
+	recorded, err := svc.TrackUserAction("ad-1", ptrString("u1"), "click", "127.0.0.1")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if repo.tracked == nil {
+	if !recorded {
 		t.Fatalf("ad active + gói còn hạn phải được ghi nhận")
 	}
 	if repo.tracked.ActionType != "click" || repo.tracked.AdID != "ad-1" {
