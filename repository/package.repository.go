@@ -19,7 +19,6 @@ type PackageRepository interface {
 	GetActiveSubscription(userID string) (*models.PartnerSubscription, error)
 	CreateSubscription(sub *models.PartnerSubscription) error
 	UpdateSubscription(sub *models.PartnerSubscription) error
-	IncrementSlotsUsed(subID string) error
 	// ReserveSlot tăng slots_used một cách nguyên tử nếu còn chỗ
 	// (UPDATE ... WHERE slots_used < max_slots). false = gói đã hết slot.
 	ReserveSlot(subID string) (bool, error)
@@ -93,12 +92,6 @@ func (r *packageRepositoryImpl) CreateSubscription(sub *models.PartnerSubscripti
 
 func (r *packageRepositoryImpl) UpdateSubscription(sub *models.PartnerSubscription) error {
 	return r.db.Save(sub).Error
-}
-
-func (r *packageRepositoryImpl) IncrementSlotsUsed(subID string) error {
-	return r.db.Model(&models.PartnerSubscription{}).
-		Where("id = ?", subID).
-		UpdateColumn("slots_used", gorm.Expr("slots_used + 1")).Error
 }
 
 func (r *packageRepositoryImpl) DecrementSlotsUsed(subID string) error {

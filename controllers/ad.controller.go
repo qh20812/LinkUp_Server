@@ -384,19 +384,10 @@ func (ctrl *AdController) GetAdminList(c *gin.Context) {
 	currentUserID := c.GetString("userID")
 
 	if role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin) {
-		// Admin xem hàng đợi toàn hệ thống: lọc + phân trang giống /api/admin/ads
-		// thay vì trả toàn bộ bảng (trước đây kéo hết mọi quảng cáo).
-		ads, total, err := ctrl.service.GetAdminAds(input.Page, input.PageSize, input.Keyword, input.Status)
-		if err != nil {
-			errorsapp.Respond(c, http.StatusInternalServerError, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"data":      ads,
-			"total":     total,
-			"page":      input.Page,
-			"page_size": input.PageSize,
-		})
+		// Một nguồn duy nhất cho admin là /api/admin/ads. Endpoint này giữ lại
+		// cho partner; admin gọi vào đây sẽ bị hướng dẫn sang endpoint đúng
+		// thay vì trả danh sách trùng shape.
+		errorsapp.Respond(c, http.StatusBadRequest, fmt.Errorf("endpoint này dành cho partner; admin dùng GET /api/admin/ads"))
 		return
 	}
 

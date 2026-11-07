@@ -21,16 +21,13 @@ type AdService interface {
 	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error)
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
 	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool, from, to *time.Time) (*dto.AdPerformanceResponse, error)
-	GetDashboardList() ([]models.Ad, error)
 	GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error)
-	GetAdminAds(page, pageSize int, keyword, status string) ([]dto.AdminAdListItem, int64, error)
 	GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error)
 	TrackUserAction(adID string, userID *string, actionType, ip string) (bool, error)
 	GetAdByID(id string) (*models.Ad, error)
 	UpdateAd(id, partnerID string, input dto.UpdateAdInput) (*models.Ad, error)
 	DeleteAd(id, partnerID string) error
 	SubmitForReview(id, partnerID string) (*models.Ad, error)
-	SetAdStatus(id string, status models.AdStatus) error
 	GetOverview(partnerID string) (*dto.AdOverviewResponse, error)
 	// CompleteFinishedAds chuyển ad active đã hết hạn / hết budget / đạt
 	// max_impressions sang completed (dùng cho worker định kỳ).
@@ -376,10 +373,6 @@ func buildAdPerformanceResponse(ad *models.Ad, counts map[string]int64, uniqueRe
 	}
 }
 
-func (s *adServiceImpl) GetDashboardList() ([]models.Ad, error) {
-	return s.repo.GetAll()
-}
-
 // GetPartnerAds trả về ads của riêng partner với metrics + lọc keyword/status,
 // có phân trang (mục 6.4).
 func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error) {
@@ -399,30 +392,6 @@ func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int, keyw
 	}
 	if ads == nil {
 		ads = []dto.PartnerAdListItem{}
-	}
-	return ads, total, nil
-}
-
-// GetAdminAds trả danh sách quảng cáo cho admin (mọi partner) kèm thông tin chủ
-// quảng cáo và số liệu, có lọc + phân trang. Dùng cho nhánh admin của
-// /api/ads-management thay vì kéo toàn bộ bảng.
-func (s *adServiceImpl) GetAdminAds(page, pageSize int, keyword, status string) ([]dto.AdminAdListItem, int64, error) {
-	total, err := s.repo.CountAds(context.Background(), keyword, status)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	offset := (page - 1) * pageSize
-	if offset < 0 {
-		offset = 0
-	}
-
-	ads, err := s.repo.ListAds(context.Background(), keyword, status, pageSize, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	if ads == nil {
-		ads = []dto.AdminAdListItem{}
 	}
 	return ads, total, nil
 }
@@ -502,16 +471,6 @@ func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) 
 	}
 
 	return s.repo.FindByID(id)
-}
-
-// SetAdStatus cập nhật trạng thái ad trực tiếp (dùng cho moderation khi tạo)
-func (s *adServiceImpl) SetAdStatus(id string, status models.AdStatus) error {
-	ad, err := s.repo.FindByID(id)
-	if err != nil {
-		return err
-	}
-	ad.Status = status
-	return s.repo.Update(ad)
 }
 
 // DeleteAd xóa ad + giải phóng slot (hard delete)

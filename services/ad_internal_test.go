@@ -31,12 +31,6 @@ func (f *fakePackageRepo) GetActiveSubscription(_ string) (*models.PartnerSubscr
 	return f.sub, f.err
 }
 
-func (f *fakePackageRepo) IncrementSlotsUsed(id string) error {
-	f.slotsUsed++
-	f.lastSlots = id
-	return nil
-}
-
 func (f *fakePackageRepo) ReserveSlot(id string) (bool, error) {
 	if f.reserveFail {
 		return false, nil
@@ -651,25 +645,6 @@ func TestGetPartnerAds_ForwardsFiltersAndPagination(t *testing.T) {
 	}
 	if repo.partnerLimit != 10 || repo.partnerOffset != 20 {
 		t.Fatalf("phân trang sai: limit=%d offset=%d", repo.partnerLimit, repo.partnerOffset)
-	}
-}
-
-func TestGetAdminAds_ForwardsFiltersAndReturnsEmptySlice(t *testing.T) {
-	repo := &fakeAdRepo{adminTotal: 2}
-	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
-
-	ads, total, err := svc.GetAdminAds(1, 20, "spam", "rejected")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if total != 2 {
-		t.Fatalf("expected total 2, got %d", total)
-	}
-	if repo.adminKeyword != "spam" || repo.adminStatus != "rejected" {
-		t.Fatalf("filter admin không được truyền xuống repo")
-	}
-	if ads == nil {
-		t.Fatalf("danh sách admin phải là slice rỗng, không phải nil")
 	}
 }
 

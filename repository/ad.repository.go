@@ -29,10 +29,6 @@ type AdRepository interface {
 	// DeleteWithMedia xoá media + ad trong 1 transaction, tránh row mồ côi ở
 	// ad_media (bảng này không có FK nên DB không tự cascade).
 	DeleteWithMedia(ctx context.Context, id string) error
-	FindActiveAds(now time.Time) ([]models.Ad, error)
-	GetAll() ([]models.Ad, error)
-	LogAnalytics(analytics *models.AdAnalytics) error
-	GetCountsByAction(adID string) (impressions, clicks, interactions int64, err error)
 	GetActionCounts(adID string) (map[string]int64, error)
 	GetUniqueReach(adID string) (int64, error)
 	CheckAdOwnership(adID, partnerID string) (bool, error)
@@ -46,8 +42,6 @@ type AdRepository interface {
 	FindRankedAdsForUser(now time.Time, gender string, age int, location string, limit int) ([]models.Ad, error)
 	GetUserAdViewCount(adID, userID string, since time.Time) (int, error)
 	FilterByFrequencyCap(ads []models.Ad, userID string, limit int) ([]models.Ad, error)
-	GetDailySpend(adID string, date time.Time) (float64, error)
-	HasRecentAction(adID, userID, actionType string, within time.Duration) (bool, error)
 	GetOverviewByPartner(partnerID string) (*dto.AdOverviewResponse, error)
 	// GetAdMetricsRange trả số liệu trong khoảng [from,to) kèm chuỗi theo ngày.
 	GetAdMetricsRange(adID string, from, to time.Time) (*AdRangeMetrics, error)
@@ -128,12 +122,6 @@ func (r *adRepositoryImpl) DeleteWithMedia(ctx context.Context, id string) error
 	})
 }
 
-func (r *adRepositoryImpl) GetAll() ([]models.Ad, error) {
-	var list []models.Ad
-	err := r.db.Preload("MediaList").Find(&list).Error
-	return list, err
-}
-
 // ListByPartnerID trả về danh sách ads của riêng partner với metrics, có lọc
 // keyword/status và phân trang (mục 6.4).
 func (r *adRepositoryImpl) ListByPartnerID(partnerID, keyword, status string, limit, offset int) ([]dto.PartnerAdListItem, error) {
@@ -190,33 +178,6 @@ func appendAdFilters(query string, args []interface{}, keyword, status string) (
 		args = append(args, status)
 	}
 	return query, args
-}
-
-func (r *adRepositoryImpl) FindActiveAds(now time.Time) ([]models.Ad, error) {
-	var activeAds []models.Ad
-	err := r.db.Preload("MediaList").Where(
-		"status = ? AND total_spent < budget AND (started_at IS NULL OR started_at <= ?) AND (expires_at IS NULL OR expires_at >= ?)",
-		models.AdStatusActive, now, now,
-	).Find(&activeAds).Error
-
-	return activeAds, err
-}
-
-func (r *adRepositoryImpl) LogAnalytics(analytics *models.AdAnalytics) error {
-	return r.db.Create(analytics).Error
-}
-
-func (r *adRepositoryImpl) GetCountsByAction(adID string) (impressions, clicks, interactions int64, err error) {
-	if err = r.db.Model(&models.AdAnalytics{}).Where("ad_id = ? AND LOWER(action_type) = ?", adID, "impression").Count(&impressions).Error; err != nil {
-		return 0, 0, 0, err
-	}
-	if err = r.db.Model(&models.AdAnalytics{}).Where("ad_id = ? AND LOWER(action_type) = ?", adID, "click").Count(&clicks).Error; err != nil {
-		return 0, 0, 0, err
-	}
-	if err = r.db.Model(&models.AdAnalytics{}).Where("ad_id = ? AND LOWER(action_type) = ?", adID, "interact").Count(&interactions).Error; err != nil {
-		return 0, 0, 0, err
-	}
-	return impressions, clicks, interactions, nil
 }
 
 func (r *adRepositoryImpl) GetActionCounts(adID string) (map[string]int64, error) {
@@ -589,27 +550,6 @@ func (r *adRepositoryImpl) FilterByFrequencyCap(ads []models.Ad, userID string, 
 }
 
 // GetDailySpend lấy tổng chi phí trong ngày (mục 2.4)
-func (r *adRepositoryImpl) GetDailySpend(adID string, date time.Time) (float64, error) {
-	var total float64
-	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	end := start.Add(24 * time.Hour)
-	err := r.db.Model(&models.AdAnalytics{}).
-		Where("ad_id = ? AND created_at >= ? AND created_at < ?", adID, start, end).
-		Select("COALESCE(SUM(cost), 0)").Scan(&total).Error
-	return total, err
-}
-
-// HasRecentAction kiểm tra user có đã thực hiện action này gần đây không (mục 2.2)
-func (r *adRepositoryImpl) HasRecentAction(adID, userID, actionType string, within time.Duration) (bool, error) {
-	var count int64
-	since := time.Now().Add(-within)
-	err := r.db.Model(&models.AdAnalytics{}).
-		Where("ad_id = ? AND user_id = ? AND action_type = ? AND created_at > ?",
-			adID, userID, actionType, since).
-		Count(&count).Error
-	return count > 0, err
-}
-
 func (r *adRepositoryImpl) MarkFinishedAdsCompleted(now time.Time) (int64, error) {
 	res := r.db.Model(&models.Ad{}).
 		Where("status = ?", models.AdStatusActive).
