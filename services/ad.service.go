@@ -32,6 +32,9 @@ type AdService interface {
 	SubmitForReview(id, partnerID string) (*models.Ad, error)
 	SetAdStatus(id string, status models.AdStatus) error
 	GetOverview(partnerID string) (*dto.AdOverviewResponse, error)
+	// CompleteFinishedAds chuyển ad active đã hết hạn / hết budget / đạt
+	// max_impressions sang completed (dùng cho worker định kỳ).
+	CompleteFinishedAds() (int, error)
 }
 
 type adServiceImpl struct {
@@ -551,6 +554,13 @@ func generateMediaUUID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return fmt.Sprintf("media_%x", b)
+}
+
+// CompleteFinishedAds dọn các quảng cáo đã kết thúc vòng đời: quá expires_at,
+// hết budget hoặc đạt max_impressions nhưng vẫn còn status active.
+func (s *adServiceImpl) CompleteFinishedAds() (int, error) {
+	rows, err := s.repo.MarkFinishedAdsCompleted(time.Now())
+	return int(rows), err
 }
 
 // GetOverview trả về tổng quan quảng cáo của partner (mục 6.1)

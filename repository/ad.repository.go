@@ -49,6 +49,9 @@ type AdRepository interface {
 	GetDailySpend(adID string, date time.Time) (float64, error)
 	HasRecentAction(adID, userID, actionType string, within time.Duration) (bool, error)
 	GetOverviewByPartner(partnerID string) (*dto.AdOverviewResponse, error)
+	// MarkFinishedAdsCompleted chuyển các ad active đã hết hạn / hết budget /
+	// đạt max_impressions sang completed. Trả số dòng đã cập nhật.
+	MarkFinishedAdsCompleted(now time.Time) (int64, error)
 }
 
 type adRepositoryImpl struct {
@@ -478,6 +481,14 @@ func (r *adRepositoryImpl) FindRankedAdsForUser(now time.Time, gender string, ag
 		  AND a.total_spent < a.budget
 		  AND (a.started_at IS NULL OR a.started_at <= ?)
 		  AND (a.expires_at IS NULL OR a.expires_at >= ?)
+		  AND (a.max_impressions = 0 OR a.max_impressions > (
+		      SELECT COUNT(*) FROM ad_analytics x
+		      WHERE x.ad_id = a.id AND x.action_type = 'impression'))
+		  AND (a.package_id IS NULL OR EXISTS (
+		      SELECT 1 FROM partner_subscriptions ps
+		      WHERE ps.user_id = a.partner_id
+		        AND ps.status = 'active'
+		        AND ps.expires_at > ?))
 		  AND (a.target_gender = 'all' OR a.target_gender = ?)
 		  AND (a.target_age_min = 0 OR a.target_age_min <= ?)
 		  AND (a.target_age_max = 100 OR a.target_age_max >= ?)
@@ -487,7 +498,7 @@ func (r *adRepositoryImpl) FindRankedAdsForUser(now time.Time, gender string, ag
 		LIMIT ?`
 
 	var ads []models.Ad
-	err := r.db.Raw(query, gender, age, now, now, gender, age, age, location, limit).Scan(&ads).Error
+	err := r.db.Raw(query, gender, age, now, now, now, gender, age, age, location, limit).Scan(&ads).Error
 	if err != nil {
 		return nil, err
 	}
@@ -577,6 +588,18 @@ func (r *adRepositoryImpl) HasRecentAction(adID, userID, actionType string, with
 			adID, userID, actionType, since).
 		Count(&count).Error
 	return count > 0, err
+}
+
+func (r *adRepositoryImpl) MarkFinishedAdsCompleted(now time.Time) (int64, error) {
+	res := r.db.Model(&models.Ad{}).
+		Where("status = ?", models.AdStatusActive).
+		Where(`(expires_at IS NOT NULL AND expires_at < ?)
+		    OR (budget > 0 AND total_spent >= budget)
+		    OR (max_impressions > 0 AND (
+		        SELECT COUNT(*) FROM ad_analytics x
+		        WHERE x.ad_id = ads.id AND x.action_type = 'impression') >= max_impressions)`, now).
+		Update("status", models.AdStatusCompleted)
+	return res.RowsAffected, res.Error
 }
 
 // GetOverviewByPartner lấy tổng quan quảng cáo của partner (mục 6.1)

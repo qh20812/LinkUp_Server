@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -71,6 +72,15 @@ type fakeAdRepo struct {
 
 	tracked  *models.AdAnalytics
 	trackErr error
+
+	completedRows int64
+	completedAt   time.Time
+	completedErr  error
+}
+
+func (f *fakeAdRepo) MarkFinishedAdsCompleted(now time.Time) (int64, error) {
+	f.completedAt = now
+	return f.completedRows, f.completedErr
 }
 
 func (f *fakeAdRepo) TrackActionAndDeduct(analytics *models.AdAnalytics) (bool, error) {
@@ -676,6 +686,25 @@ func TestTrackUserAction_RecordsForActiveAd(t *testing.T) {
 	}
 	if repo.tracked.ID == "" || repo.tracked.CreatedAt.IsZero() {
 		t.Fatalf("analytics phải có ID và thời gian")
+	}
+}
+
+// ─── P0-6: serving theo gói/max impressions + worker ──────────────────────
+
+func TestCompleteFinishedAds_DelegatesToRepo(t *testing.T) {
+	repo := &fakeAdRepo{completedRows: 3}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	before := time.Now()
+	count, err := svc.CompleteFinishedAds()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 ads completed, got %d", count)
+	}
+	if repo.completedAt.Before(before) {
+		t.Fatalf("phải truyền thời điểm hiện tại cho repo")
 	}
 }
 

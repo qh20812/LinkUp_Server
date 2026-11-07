@@ -297,6 +297,7 @@ func main() {
 
 		adService := services.NewAdService(adRepository, packageRepository, mediaService)
 		packageService := services.NewPackageService(packageRepository)
+	packageService.SetNotificationService(notificationService)
 		paymentRepository := repository.NewPaymentRepository(gormDB)
 		paymentService := services.NewPaymentService(paymentRepository, packageRepository, env)
 		momoService := services.NewMoMoService(paymentRepository, packageRepository, env)
@@ -311,6 +312,15 @@ func main() {
 					log.Printf("[AdWorker] expired subscription error: %v", err)
 				} else if count > 0 {
 					log.Printf("[AdWorker] expired %d subscriptions, downgraded roles", count)
+				}
+
+				// Ad hết hạn / hết budget / đạt max_impressions nhưng còn active:
+				// đóng lại để UI và báo cáo phản ánh đúng.
+				completed, err := adService.CompleteFinishedAds()
+				if err != nil {
+					log.Printf("[AdWorker] complete finished ads error: %v", err)
+				} else if completed > 0 {
+					log.Printf("[AdWorker] completed %d ads (expired/budget/max impressions)", completed)
 				}
 			}
 		}()

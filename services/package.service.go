@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/models"
@@ -14,14 +16,21 @@ type PackageService interface {
 	SubscribePackage(userID string, packageID string) (*models.PartnerSubscription, error)
 	GetUserSubscription(userID string) (*dto.SubscriptionResponse, error)
 	ProcessExpiredSubscriptions() (int, error)
+	// SetNotificationService để báo cho partner khi gói hết hạn.
+	SetNotificationService(notifier *NotificationService)
 }
 
 type packageServiceImpl struct {
-	repo repository.PackageRepository
+	repo     repository.PackageRepository
+	notifier *NotificationService
 }
 
 func NewPackageService(repo repository.PackageRepository) PackageService {
 	return &packageServiceImpl{repo: repo}
+}
+
+func (s *packageServiceImpl) SetNotificationService(notifier *NotificationService) {
+	s.notifier = notifier
 }
 
 func (s *packageServiceImpl) GetPackages() ([]models.AdPackage, error) {
@@ -109,6 +118,18 @@ func (s *packageServiceImpl) ProcessExpiredSubscriptions() (int, error) {
 		}
 		if err := s.repo.DowngradePartnerRole(sub.UserID); err != nil {
 			continue
+		}
+		// Gói vừa hết hạn: báo partner để họ biết quảng cáo ngừng phân phối.
+		// Gửi đúng 1 lần tại thời điểm expire (không lặp theo giờ).
+		if s.notifier != nil {
+			_, _ = s.notifier.Create(
+				context.Background(),
+				sub.UserID,
+				nil,
+				models.NotificationTypeMessage,
+				"Gói quảng cáo của bạn đã hết hạn. Quảng cáo sẽ tạm ngưng phân phối cho tới khi bạn gia hạn.",
+				nil, nil, nil,
+			)
 		}
 		count++
 	}
