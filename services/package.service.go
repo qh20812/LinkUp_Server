@@ -223,6 +223,7 @@ func (s *packageServiceImpl) GetUserSubscription(userID string) (*dto.Subscripti
 
 	return &dto.SubscriptionResponse{
 		ID:           sub.ID,
+		PackageID:    sub.PackageID,
 		PackageName:  sub.Package.Name,
 		MaxSlots:     sub.Package.MaxSlots,
 		SlotsUsed:    sub.SlotsUsed,

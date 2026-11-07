@@ -8,6 +8,7 @@ type SubscribePackageInput struct {
 
 type SubscriptionResponse struct {
 	ID           string    `json:"id"`
+	PackageID    string    `json:"package_id"`
 	PackageName  string    `json:"package_name"`
 	MaxSlots     int       `json:"max_slots"`
 	SlotsUsed    int       `json:"slots_used"`
