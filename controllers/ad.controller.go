@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"linkup/dto"
 	errorsapp "linkup/errors"
+	"linkup/internal/locations"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/services"
@@ -21,12 +22,49 @@ import (
 )
 
 type AdController struct {
-	service     services.AdService
-	profileRepo *repository.ProfileRepository
+	service       services.AdService
+	profileRepo   *repository.ProfileRepository
+	locationStore *locations.Store
 }
 
 func NewAdController(service services.AdService, profileRepo *repository.ProfileRepository) *AdController {
 	return &AdController{service: service, profileRepo: profileRepo}
+}
+
+// SetLocationStore cho phép validate target_locations là province ID có thật.
+func (ctrl *AdController) SetLocationStore(store *locations.Store) {
+	ctrl.locationStore = store
+}
+
+// validateTargetLocations chuẩn hoá + kiểm tra danh sách tỉnh/thành.
+// target_locations rỗng = chạy toàn quốc. Chỉ nhận province ID trong danh mục
+// (34 tỉnh/thành) để khớp profiles.current_province.
+func (ctrl *AdController) validateTargetLocations(list []string) error {
+	if len(list) == 0 {
+		return nil
+	}
+	if len(list) > 34 {
+		return fmt.Errorf("target_locations tối đa 34 tỉnh/thành")
+	}
+
+	seen := make(map[string]struct{}, len(list))
+	for _, raw := range list {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if ctrl.locationStore == nil {
+			continue
+		}
+		if _, ok := ctrl.locationStore.ProvinceByID(id); !ok {
+			return fmt.Errorf("target_locations: %q không phải tỉnh/thành hợp lệ", id)
+		}
+	}
+	return nil
 }
 
 // adMaxMultipartMemory giới hạn bộ nhớ cho media quảng cáo (500MB).
@@ -217,6 +255,10 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 		return
 	}
 	if err := validations.ValidateTargeting(input.TargetGender, input.TargetAgeMin, input.TargetAgeMax); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := ctrl.validateTargetLocations(input.TargetLocations); err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
@@ -464,6 +506,12 @@ func (ctrl *AdController) UpdateAd(c *gin.Context) {
 	if err := validations.ValidateTargeting(input.TargetGender, input.TargetAgeMin, input.TargetAgeMax); err != nil {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
+	}
+	if input.TargetLocations != nil {
+		if err := ctrl.validateTargetLocations(input.TargetLocations); err != nil {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+			return
+		}
 	}
 
 	ad, err := ctrl.service.UpdateAd(id, partnerID, input)

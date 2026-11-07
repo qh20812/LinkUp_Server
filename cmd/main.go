@@ -326,6 +326,7 @@ func main() {
 		}()
 
 		adController := controllers.NewAdController(adService, profileRepository)
+	adController.SetLocationStore(locationStore)
 		packageController := controllers.NewPackageController(packageService, authService)
 		paymentController := controllers.NewPaymentController(paymentService, env)
 		momoController := controllers.NewMoMoController(momoService, env)
