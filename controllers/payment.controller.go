@@ -22,6 +22,47 @@ func NewPaymentController(service services.PaymentService, env config.Env) *Paym
 	return &PaymentController{service: service, env: env}
 }
 
+func (ctrl *PaymentController) ListMyPayments(c *gin.Context) {
+	var filter dto.PaymentListFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	filter.UserID = c.GetString("userID")
+	ctrl.respondPaymentList(c, filter)
+}
+
+func (ctrl *PaymentController) ListAllPayments(c *gin.Context) {
+	var filter dto.PaymentListFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	ctrl.respondPaymentList(c, filter)
+}
+
+func (ctrl *PaymentController) respondPaymentList(c *gin.Context, filter dto.PaymentListFilter) {
+	rows, total, err := ctrl.service.ListPayments(filter)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data":      rows,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
 func (ctrl *PaymentController) CreateVNPayPayment(c *gin.Context) {
 	var input dto.CreatePaymentInput
 	if err := c.ShouldBindJSON(&input); err != nil {

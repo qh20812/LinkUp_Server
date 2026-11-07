@@ -21,4 +21,16 @@ func RegisterPaymentRoutes(router *gin.Engine, ctrl *controllers.PaymentControll
 	// Return (trình duyệt) + IPN (server-to-server) — công khai, xác thực bằng chữ ký.
 	router.GET("/api/payments/vnpay/return", ctrl.VNPayReturn)
 	router.GET("/api/payments/vnpay/ipn", ctrl.VNPayIPN)
+
+	// Lịch sử giao dịch: partner xem của mình, admin xem toàn bộ.
+	router.GET("/api/ads-management/payments",
+		middlewares.AuthMiddleware(env, db),
+		middlewares.RequireRoles(db, models.RoleUser, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
+		ctrl.ListMyPayments,
+	)
+	router.GET("/api/admin/payments",
+		middlewares.AuthMiddleware(env, db),
+		middlewares.RequireRoles(db, models.RoleAdmin, models.RoleSuperAdmin),
+		ctrl.ListAllPayments,
+	)
 }

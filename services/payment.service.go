@@ -40,6 +40,8 @@ func (c vnpayConfig) enabled() bool {
 type PaymentService interface {
 	CreateVNPayPayment(userID, packageID, ip string) (*dto.CreatePaymentResponse, error)
 	ProcessVNPayCallback(values url.Values) dto.PaymentCallbackResult
+	// ListPayments trả lịch sử giao dịch (partner: filter.UserID đã bị ép).
+	ListPayments(filter dto.PaymentListFilter) ([]models.PaymentTransaction, int64, error)
 }
 
 type paymentServiceImpl struct {
@@ -240,4 +242,21 @@ func (s *paymentServiceImpl) ProcessVNPayCallback(values url.Values) dto.Payment
 
 func newVNPayTxnRef() string {
 	return "LK" + strings.ToUpper(strings.ReplaceAll(utils.GenerateUUID(), "-", ""))[:24]
+}
+
+func (s *paymentServiceImpl) ListPayments(filter dto.PaymentListFilter) ([]models.PaymentTransaction, int64, error) {
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	size := filter.PageSize
+	if size <= 0 {
+		size = 20
+	}
+	if size > 100 {
+		size = 100
+	}
+	filter.Status = strings.TrimSpace(strings.ToLower(filter.Status))
+	filter.Gateway = strings.TrimSpace(strings.ToLower(filter.Gateway))
+	return s.payments.List(filter, size, (page-1)*size)
 }

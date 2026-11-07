@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"linkup/dto"
 	"linkup/models"
 	"time"
 
@@ -27,6 +28,8 @@ type PaymentRepository interface {
 	// MarkFailed chuyển giao dịch pending → failed. Không ghi đè giao dịch
 	// đã success.
 	MarkFailed(txnRef string, result PaymentResult) (bool, error)
+	// List trả giao dịch (kèm gói) cho partner hoặc admin, có lọc + phân trang.
+	List(filter dto.PaymentListFilter, limit, offset int) ([]models.PaymentTransaction, int64, error)
 }
 
 type paymentRepositoryImpl struct {
@@ -100,4 +103,34 @@ func (r *paymentRepositoryImpl) MarkFailed(txnRef string, result PaymentResult) 
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+func (r *paymentRepositoryImpl) List(filter dto.PaymentListFilter, limit, offset int) ([]models.PaymentTransaction, int64, error) {
+	base := func() *gorm.DB {
+		q := r.db.Model(&models.PaymentTransaction{})
+		if filter.UserID != "" {
+			q = q.Where("user_id = ?", filter.UserID)
+		}
+		if filter.Status != "" {
+			q = q.Where("status = ?", filter.Status)
+		}
+		if filter.Gateway != "" {
+			q = q.Where("gateway = ?", filter.Gateway)
+		}
+		return q
+	}
+
+	var total int64
+	if err := base().Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	rows := make([]models.PaymentTransaction, 0)
+	if err := base().Preload("Package").
+		Order("created_at DESC").
+		Limit(limit).Offset(offset).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
 }
