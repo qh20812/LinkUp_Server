@@ -48,6 +48,7 @@ type AdminService struct {
 	mediaRepo           *repository.MediaRepository
 	adRepo              repository.AdRepository
 	adService           AdService
+	packageRepo         repository.PackageRepository
 	violationRuleRepo   *repository.ViolationRuleRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
@@ -85,6 +86,11 @@ func (s *AdminService) SetViolationRuleRepository(repo *repository.ViolationRule
 // không phải đổi chữ ký NewAdminService (đang được nhiều nơi gọi).
 func (s *AdminService) SetAdService(adService AdService) {
 	s.adService = adService
+}
+
+// SetPackageRepository cho admin xoá ad trả lại slot cho partner.
+func (s *AdminService) SetPackageRepository(repo repository.PackageRepository) {
+	s.packageRepo = repo
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -1560,8 +1566,29 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 		return err
 	}
 
-	if err := s.adRepo.Delete(ctx, adID); err != nil {
+	ad, err := s.adRepo.FindByID(adID)
+	if err != nil {
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
+	}
+
+	// Xoá media + ad trong 1 transaction (ad_media không có FK → nếu chỉ xoá ad
+	// sẽ để lại row mồ côi).
+	if err := s.adRepo.DeleteWithMedia(ctx, adID); err != nil {
 		return fmt.Errorf("xoá quảng cáo thất bại: %w", err)
+	}
+
+	// Trả slot cho gói đang hoạt động của partner — trước đây admin xoá ad làm
+	// slot bị kẹt vĩnh viễn vì không ai decrement.
+	if s.packageRepo != nil {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr == nil && sub != nil {
+			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+		}
+	}
+
+	// Báo cho partner biết quảng cáo bị gỡ.
+	if s.notificationService != nil {
+		msg := fmt.Sprintf("Quảng cáo '%s' của bạn đã bị quản trị viên xoá.", ad.Title)
+		_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, msg, nil, nil, nil)
 	}
 
 	return nil

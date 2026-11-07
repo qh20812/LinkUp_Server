@@ -25,6 +25,9 @@ type AdRepository interface {
 	FindByID(id string) (*models.Ad, error)
 	Update(ad *models.Ad) error
 	Delete(ctx context.Context, id string) error
+	// DeleteWithMedia xoá media + ad trong 1 transaction, tránh row mồ côi ở
+	// ad_media (bảng này không có FK nên DB không tự cascade).
+	DeleteWithMedia(ctx context.Context, id string) error
 	FindActiveAds(now time.Time) ([]models.Ad, error)
 	GetAll() ([]models.Ad, error)
 	LogAnalytics(analytics *models.AdAnalytics) error
@@ -100,6 +103,23 @@ func (r *adRepositoryImpl) Delete(ctx context.Context, id string) error {
 		return errorsapp.New(errorsapp.ErrCodeAdNotDeleted)
 	}
 	return nil
+}
+
+// DeleteWithMedia xoá toàn bộ media của ad rồi xoá ad trong cùng transaction.
+func (r *adRepositoryImpl) DeleteWithMedia(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("ad_id = ?", id).Delete(&models.AdMedia{}).Error; err != nil {
+			return fmt.Errorf("delete ad media: %w", err)
+		}
+		result := tx.Where("id = ?", id).Delete(&models.Ad{})
+		if result.Error != nil {
+			return fmt.Errorf("delete ad: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return errorsapp.New(errorsapp.ErrCodeAdNotDeleted)
+		}
+		return nil
+	})
 }
 
 func (r *adRepositoryImpl) GetAll() ([]models.Ad, error) {

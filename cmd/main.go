@@ -333,6 +333,7 @@ func main() {
 		adminService.SetCloudinary(cldForMedia)
 		adminService.SetViolationRuleRepository(violationRuleRepository)
 	adminService.SetAdService(adService)
+	adminService.SetPackageRepository(packageRepository)
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 
