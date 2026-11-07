@@ -41,3 +41,22 @@ func TestStartOfDayKeepsLocation(t *testing.T) {
 		t.Fatalf("startOfDay phải giữ nguyên timezone")
 	}
 }
+
+func TestActionDedupeWindow(t *testing.T) {
+	tests := []struct {
+		action string
+		want   time.Duration
+	}{
+		{string(models.ActionImpression), 30 * time.Minute},
+		{string(models.ActionClick), 5 * time.Minute},
+		{string(models.ActionView), 0},
+		{string(models.ActionSwipe), 0},
+		{string(models.ActionVideoStart), 0},
+		{string(models.ActionVideoEnd), 0},
+	}
+	for _, tc := range tests {
+		if got := actionDedupeWindow(tc.action); got != tc.want {
+			t.Fatalf("actionDedupeWindow(%q) = %v, want %v", tc.action, got, tc.want)
+		}
+	}
+}

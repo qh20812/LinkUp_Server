@@ -265,9 +265,24 @@ func (r *adRepositoryImpl) DeleteAdMedia(adID string) error {
 	return r.db.Where("ad_id = ?", adID).Delete(&models.AdMedia{}).Error
 }
 
-// ActionDedupeWindow là cửa sổ chống trùng một action/ad/user. P1-3 sẽ tách
-// riêng theo action type (impression/click); hiện giữ 24h như hành vi cũ.
-const ActionDedupeWindow = 24 * time.Hour
+// Cửa sổ chống trùng theo loại hành động: impression 30 phút (tránh đếm lặp
+// khi feed re-render/cuộn qua lại), click 5 phút (chống double-click nhưng vẫn
+// tính CPC thật). Các action còn lại do client gửi 1 lần/session nên không dedupe.
+const (
+	impressionDedupeWindow = 30 * time.Minute
+	clickDedupeWindow      = 5 * time.Minute
+)
+
+func actionDedupeWindow(actionType string) time.Duration {
+	switch actionType {
+	case string(models.ActionImpression):
+		return impressionDedupeWindow
+	case string(models.ActionClick):
+		return clickDedupeWindow
+	default:
+		return 0
+	}
+}
 
 // TrackActionAndDeduct ghi nhận tương tác và trừ ngân sách trong MỘT transaction
 // có khoá dòng ad (SELECT ... FOR UPDATE). Mọi điều kiện chặn (chống trùng,
@@ -289,10 +304,11 @@ func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics) (
 			return nil
 		}
 
-		// 2. Chống trùng theo action/ad/user.
-		if analytics.UserID != nil && *analytics.UserID != "" {
+		// 2. Chống trùng theo action/ad/user (impression 30', click 5').
+		if window := actionDedupeWindow(analytics.ActionType); window > 0 &&
+			analytics.UserID != nil && *analytics.UserID != "" {
 			var recent int64
-			since := time.Now().Add(-ActionDedupeWindow)
+			since := time.Now().Add(-window)
 			if err := tx.Model(&models.AdAnalytics{}).
 				Where("ad_id = ? AND user_id = ? AND action_type = ? AND created_at > ?",
 					analytics.AdID, *analytics.UserID, analytics.ActionType, since).
@@ -553,13 +569,15 @@ func (r *adRepositoryImpl) FilterByFrequencyCap(ads []models.Ad, userID string, 
 		}
 		return ads, nil
 	}
-	startOfDay := time.Now().Truncate(24 * time.Hour)
+	// Đầu ngày theo timezone server (trước đây Truncate(24h) tính theo UTC nên
+	// mốc ngày bị lệch 7 tiếng với giờ Việt Nam).
+	dayStart := startOfDay(time.Now())
 	var filtered []models.Ad
 	for _, ad := range ads {
 		if len(filtered) >= limit {
 			break
 		}
-		count, err := r.GetUserAdViewCount(ad.ID, userID, startOfDay)
+		count, err := r.GetUserAdViewCount(ad.ID, userID, dayStart)
 		if err != nil {
 			continue
 		}
