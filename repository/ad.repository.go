@@ -12,6 +12,7 @@ import (
 	"linkup/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ActionCount struct {
@@ -37,7 +38,7 @@ type AdRepository interface {
 	CheckAdOwnership(adID, partnerID string) (bool, error)
 	UpdateAdFields(ad *models.Ad, fields map[string]interface{}) error
 	DeleteAdMedia(adID string) error
-	TrackActionAndDeduct(analytics *models.AdAnalytics, cpmPrice, cpcPrice float64) error
+	TrackActionAndDeduct(analytics *models.AdAnalytics) (bool, error)
 	ListAds(ctx context.Context, keyword, status string, limit, offset int) ([]dto.AdminAdListItem, error)
 	CountAds(ctx context.Context, keyword, status string) (int64, error)
 	ListByPartnerID(partnerID, keyword, status string, limit, offset int) ([]dto.PartnerAdListItem, error)
@@ -259,50 +260,124 @@ func (r *adRepositoryImpl) DeleteAdMedia(adID string) error {
 	return r.db.Where("ad_id = ?", adID).Delete(&models.AdMedia{}).Error
 }
 
-// TrackActionAndDeduct lưu log analytics và tính toán trừ ngân sách thực tế (mục 2.4 & 2.5)
-func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics, cpmPrice, cpcPrice float64) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Lưu log analytics
+// ActionDedupeWindow là cửa sổ chống trùng một action/ad/user. P1-3 sẽ tách
+// riêng theo action type (impression/click); hiện giữ 24h như hành vi cũ.
+const ActionDedupeWindow = 24 * time.Hour
+
+// TrackActionAndDeduct ghi nhận tương tác và trừ ngân sách trong MỘT transaction
+// có khoá dòng ad (SELECT ... FOR UPDATE). Mọi điều kiện chặn (chống trùng,
+// daily budget, budget còn lại, max_impressions) đều kiểm tra bên trong
+// transaction để nhiều request đồng thời không vượt ngân sách.
+// Trả recorded=false khi bị chặn (không phải lỗi).
+func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics) (bool, error) {
+	recorded := false
+
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// 1. Khoá dòng ad: GORM v1 dùng Set("gorm:query_option") đã bị bỏ ở v2
+		//    nên trước đây không hề khoá.
+		var ad models.Ad
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&ad, "id = ?", analytics.AdID).Error; err != nil {
+			return err
+		}
+		if ad.Status != models.AdStatusActive {
+			return nil
+		}
+
+		// 2. Chống trùng theo action/ad/user.
+		if analytics.UserID != nil && *analytics.UserID != "" {
+			var recent int64
+			since := time.Now().Add(-ActionDedupeWindow)
+			if err := tx.Model(&models.AdAnalytics{}).
+				Where("ad_id = ? AND user_id = ? AND action_type = ? AND created_at > ?",
+					analytics.AdID, *analytics.UserID, analytics.ActionType, since).
+				Count(&recent).Error; err != nil {
+				return err
+			}
+			if recent > 0 {
+				return nil
+			}
+		}
+
+		// 3. Đếm impression hiện có (phục vụ max_impressions).
+		var impressions int64
+		if err := tx.Model(&models.AdAnalytics{}).
+			Where("ad_id = ? AND action_type = ?", analytics.AdID, string(models.ActionImpression)).
+			Count(&impressions).Error; err != nil {
+			return err
+		}
+		if ad.MaxImpressions > 0 && impressions >= int64(ad.MaxImpressions) {
+			ad.Status = models.AdStatusCompleted
+			return tx.Model(&models.Ad{}).Where("id = ?", ad.ID).Update("status", ad.Status).Error
+		}
+
+		cost := actionCost(&ad, analytics.ActionType)
+		if cost > 0 {
+			// 4. Budget còn lại: chặn trước khi ghi để không vượt ngân sách.
+			if ad.Budget > 0 && ad.TotalSpent+cost > ad.Budget {
+				return nil
+			}
+			// 5. Daily budget.
+			if ad.DailyBudget > 0 {
+				start := startOfDay(time.Now())
+				var daily float64
+				if err := tx.Model(&models.AdAnalytics{}).
+					Where("ad_id = ? AND created_at >= ? AND created_at < ?", ad.ID, start, start.Add(24*time.Hour)).
+					Select("COALESCE(SUM(cost), 0)").Scan(&daily).Error; err != nil {
+					return err
+				}
+				if daily+cost > ad.DailyBudget {
+					return nil
+				}
+			}
+		}
+
+		// 6. Ghi log tương tác + cost của chính hành động này.
 		if err := tx.Create(analytics).Error; err != nil {
 			return err
 		}
+		if cost > 0 {
+			if err := tx.Model(&models.AdAnalytics{}).Where("id = ?", analytics.ID).
+				Update("cost", cost).Error; err != nil {
+				return err
+			}
+		}
 
-		// 2. Khóa dòng Ad để tính chi phí
-		var ad models.Ad
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&ad, "id = ?", analytics.AdID).Error; err != nil {
+		// 7. Cập nhật chi tiêu; tự hoàn thành khi chạm budget hoặc max impressions.
+		ad.TotalSpent += cost
+		reachedMax := ad.MaxImpressions > 0 &&
+			analytics.ActionType == string(models.ActionImpression) &&
+			impressions+1 >= int64(ad.MaxImpressions)
+		if (ad.Budget > 0 && ad.TotalSpent >= ad.Budget) || reachedMax {
+			ad.Status = models.AdStatusCompleted
+		}
+		if err := tx.Model(&models.Ad{}).Where("id = ?", ad.ID).
+			Updates(map[string]interface{}{
+				"total_spent": ad.TotalSpent,
+				"status":      ad.Status,
+			}).Error; err != nil {
 			return err
 		}
 
-		var cost float64 = 0
-		switch analytics.ActionType {
-		case string(models.ActionImpression), string(models.ActionView):
-			if cpmPrice > 0 {
-				cost = cpmPrice / 1000.0
-			} else if ad.CPMPrice > 0 {
-				cost = ad.CPMPrice / 1000.0
-			}
-		case string(models.ActionClick):
-			if cpcPrice > 0 {
-				cost = cpcPrice
-			} else if ad.CPCPrice > 0 {
-				cost = ad.CPCPrice
-			}
-		}
-
-		// Lưu cost vào analytics row (mục 2.4)
-		if cost > 0 {
-			tx.Model(&models.AdAnalytics{}).Where("id = ?", analytics.ID).Update("cost", cost)
-		}
-
-		ad.TotalSpent += cost
-
-		// 3. Tự ngưng quảng cáo khi chạm Budget (mục 2.5)[cite: 2]
-		if ad.Budget > 0 && ad.TotalSpent >= ad.Budget {
-			ad.Status = models.AdStatusCompleted
-		}
-
-		return tx.Save(&ad).Error
+		recorded = true
+		return nil
 	})
+
+	return recorded, err
+}
+
+func actionCost(ad *models.Ad, actionType string) float64 {
+	switch actionType {
+	case string(models.ActionImpression), string(models.ActionView):
+		return ad.CPMPrice / 1000.0
+	case string(models.ActionClick):
+		return ad.CPCPrice
+	}
+	return 0
+}
+
+func startOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
 func (r *adRepositoryImpl) ListAds(ctx context.Context, keyword, status string, limit, offset int) ([]dto.AdminAdListItem, error) {

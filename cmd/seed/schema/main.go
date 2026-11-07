@@ -279,7 +279,9 @@ func Run(env config.Env) error {
             FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE CASCADE,
             INDEX idx_ads_partner_id (partner_id),
             INDEX idx_ads_package_id (package_id),
-            INDEX idx_ads_status (status)
+            INDEX idx_ads_status (status),
+            INDEX idx_ads_partner_created (partner_id, created_at),
+            INDEX idx_ads_status_window (status, started_at, expires_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 8. Depends on users, posts
@@ -566,7 +568,8 @@ func Run(env config.Env) error {
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (ad_id) REFERENCES ads(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-			INDEX idx_ad_analytics_ad_id (ad_id)
+			INDEX idx_ad_analytics_ad_id (ad_id),
+			INDEX idx_ad_analytics_action_time (ad_id, action_type, created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 25. Depends on users, roles
@@ -1015,7 +1018,8 @@ func Run(env config.Env) error {
 			created_at DATETIME(3) NULL,
 			updated_at DATETIME(3) NULL,
 			INDEX idx_partner_subscriptions_user_id (user_id),
-			INDEX idx_partner_subscriptions_package_id (package_id)
+			INDEX idx_partner_subscriptions_package_id (package_id),
+			INDEX idx_ps_user_status (user_id, status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// payment_transactions — giao dịch thanh toán gói quảng cáo qua VNPay.

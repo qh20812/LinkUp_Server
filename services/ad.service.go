@@ -524,18 +524,15 @@ func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType,
 		return err
 	}
 
-	// Anti-fraud: skip nếu user đã track cùng action trong 24h (mục 2.2)
-	if userID != nil && *userID != "" {
-		hasRecent, _ := s.repo.HasRecentAction(adID, *userID, actionType, 24*time.Hour)
-		if hasRecent {
-			return nil
-		}
+	// Chỉ ad đang chạy mới được ghi nhận/trừ tiền.
+	if ad.Status != models.AdStatusActive {
+		return nil
 	}
 
-	// Daily budget check (mục 2.4)
-	if ad.DailyBudget > 0 {
-		dailySpend, _ := s.repo.GetDailySpend(adID, time.Now())
-		if dailySpend >= ad.DailyBudget {
+	// Ad của partner chỉ hợp lệ khi gói còn hiệu lực. Ad do admin tạo (không
+	// gắn PackageID) vẫn được ghi nhận bình thường.
+	if ad.PackageID != nil {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr != nil || sub == nil {
 			return nil
 		}
 	}
@@ -544,8 +541,10 @@ func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType,
 	log.ID = utils.GenerateUUID()
 	log.CreatedAt = time.Now()
 
-	// Ghi nhận tương tác và tính toán khấu trừ ngân sách
-	return s.repo.TrackActionAndDeduct(&log, ad.CPMPrice, ad.CPCPrice)
+	// Toàn bộ check chống trùng / daily budget / budget / max impressions nằm
+	// trong transaction của repo.
+	_, err = s.repo.TrackActionAndDeduct(&log)
+	return err
 }
 
 func generateMediaUUID() string {

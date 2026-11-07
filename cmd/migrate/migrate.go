@@ -63,6 +63,13 @@ func Run(db *gorm.DB) {
 	// Lý do admin hạ quảng cáo (status = suspended). Idempotent, không mất dữ liệu.
 	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
 
+	// Index hỗ trợ tracking/serving: dedupe theo (ad, action, thời gian), lọc ad
+	// theo cửa sổ chạy, danh sách theo partner và gói đang hoạt động.
+	ensureIndex(db, "ad_analytics", "idx_ad_analytics_action_time", "ad_id, action_type, created_at")
+	ensureIndex(db, "ads", "idx_ads_status_window", "status, started_at, expires_at")
+	ensureIndex(db, "ads", "idx_ads_partner_created", "partner_id, created_at")
+	ensureIndex(db, "partner_subscriptions", "idx_ps_user_status", "user_id, status")
+
 	// Thêm cột messages.forwarded_from/forwards_count cho tính năng chuyển tiếp
 	// (forward) tin nhắn: trỏ về tin gốc + số lần chuỗi đã được chuyển tiếp.
 	ensureColumn(db, "messages", "forwarded_from", "VARCHAR(36) NULL")

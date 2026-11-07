@@ -68,6 +68,17 @@ type fakeAdRepo struct {
 	adminLimit, adminOffset   int
 	adminTotal                int64
 	adminItems                []dto.AdminAdListItem
+
+	tracked  *models.AdAnalytics
+	trackErr error
+}
+
+func (f *fakeAdRepo) TrackActionAndDeduct(analytics *models.AdAnalytics) (bool, error) {
+	f.tracked = analytics
+	if f.trackErr != nil {
+		return false, f.trackErr
+	}
+	return true, nil
 }
 
 // ─── Bộ lọc danh sách (P0-3) ──────────────────────────────────────────────
@@ -617,6 +628,54 @@ func TestGetAdminAds_ForwardsFiltersAndReturnsEmptySlice(t *testing.T) {
 	}
 	if ads == nil {
 		t.Fatalf("danh sách admin phải là slice rỗng, không phải nil")
+	}
+}
+
+// ─── P0-5: tracking nguyên tử ─────────────────────────────────────────────
+
+func TestTrackUserAction_SkipsInactiveAd(t *testing.T) {
+	for _, status := range []models.AdStatus{models.AdStatusPaused, models.AdStatusPending, models.AdStatusSuspended, models.AdStatusCompleted} {
+		repo := &fakeAdRepo{existing: &models.Ad{ID: "ad-1", Status: status}}
+		svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+		if err := svc.TrackUserAction("ad-1", ptrString("u1"), "impression", "127.0.0.1"); err != nil {
+			t.Fatalf("status %s: unexpected error: %v", status, err)
+		}
+		if repo.tracked != nil {
+			t.Fatalf("status %s không được ghi nhận tracking", status)
+		}
+	}
+}
+
+func TestTrackUserAction_SkipsExpiredSubscription(t *testing.T) {
+	pkgID := "pkg-1"
+	repo := &fakeAdRepo{existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive, PartnerID: "partner-1", PackageID: &pkgID}}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: nil})
+
+	if err := svc.TrackUserAction("ad-1", ptrString("u1"), "impression", "127.0.0.1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.tracked != nil {
+		t.Fatalf("gói hết hạn thì không được ghi nhận tracking")
+	}
+}
+
+func TestTrackUserAction_RecordsForActiveAd(t *testing.T) {
+	pkgID := "pkg-1"
+	repo := &fakeAdRepo{existing: &models.Ad{ID: "ad-1", Status: models.AdStatusActive, PartnerID: "partner-1", PackageID: &pkgID}}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	if err := svc.TrackUserAction("ad-1", ptrString("u1"), "click", "127.0.0.1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.tracked == nil {
+		t.Fatalf("ad active + gói còn hạn phải được ghi nhận")
+	}
+	if repo.tracked.ActionType != "click" || repo.tracked.AdID != "ad-1" {
+		t.Fatalf("analytics sai: %+v", repo.tracked)
+	}
+	if repo.tracked.ID == "" || repo.tracked.CreatedAt.IsZero() {
+		t.Fatalf("analytics phải có ID và thời gian")
 	}
 }
 
