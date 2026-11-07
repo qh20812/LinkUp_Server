@@ -184,7 +184,7 @@ func (p adPayload) toCreateInput() (dto.CreateAdInput, error) {
 	return dto.CreateAdInput{
 		Title:           p.Title,
 		Content:         p.Content,
-		TargetURL:       p.TargetURL,
+		TargetURL:       strings.TrimSpace(p.TargetURL),
 		Format:          format,
 		Budget:          p.Budget,
 		DailyBudget:     p.DailyBudget,
@@ -213,7 +213,7 @@ func (p adPayload) toUpdateInput() (dto.UpdateAdInput, error) {
 	return dto.UpdateAdInput{
 		Title:           p.Title,
 		Content:         p.Content,
-		TargetURL:       p.TargetURL,
+		TargetURL:       strings.TrimSpace(p.TargetURL),
 		Budget:          p.Budget,
 		DailyBudget:     p.DailyBudget,
 		CPMPrice:        p.CPMPrice,
@@ -431,7 +431,30 @@ func (ctrl *AdController) GetUserFeed(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": ads})
+	c.JSON(http.StatusOK, gin.H{"data": toFeedAdItems(ads)})
+}
+
+// toFeedAdItems map model nội bộ sang DTO công khai: chỉ giữ field cần render
+// quảng cáo, không trả budget/total_spent/CPM/CPC/partner_id/package_id.
+func toFeedAdItems(ads []models.Ad) []dto.FeedAdItem {
+	items := make([]dto.FeedAdItem, 0, len(ads))
+	for _, ad := range ads {
+		item := dto.FeedAdItem{
+			ID:        ad.ID,
+			Title:     ad.Title,
+			Content:   ad.Content,
+			Format:    string(ad.Format),
+			TargetURL: ad.TargetURL,
+		}
+		for _, media := range ad.MediaList {
+			item.MediaList = append(item.MediaList, dto.FeedAdMedia{
+				URL:       media.URL,
+				MediaType: media.MediaType,
+			})
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (ctrl *AdController) TrackAction(c *gin.Context) {

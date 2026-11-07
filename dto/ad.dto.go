@@ -101,6 +101,22 @@ type TrackActionInput struct {
 	ActionType string `json:"action_type" binding:"required,oneof=impression view click swipe video_start video_end"`
 }
 
+// FeedAdItem là DTO CÔNG KHAI cho feed: chỉ field cần để render, không lộ
+// partner_id/budget/total_spent/CPM/CPC/package của đối tác.
+type FeedAdItem struct {
+	ID        string        `json:"id"`
+	Title     string        `json:"title"`
+	Content   string        `json:"content"`
+	Format    string        `json:"format"`
+	TargetURL string        `json:"target_url"`
+	MediaList []FeedAdMedia `json:"media_list,omitempty"`
+}
+
+type FeedAdMedia struct {
+	URL       string `json:"url"`
+	MediaType string `json:"media_type,omitempty"`
+}
+
 type PartnerAdListItem struct {
 	ID              string     `json:"id"`
 	Title           string     `json:"title"`
