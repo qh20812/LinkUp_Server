@@ -65,6 +65,7 @@ func Run(db *gorm.DB) {
 
 	// Index hỗ trợ tracking/serving: dedupe theo (ad, action, thời gian), lọc ad
 	// theo cửa sổ chạy, danh sách theo partner và gói đang hoạt động.
+	ensureColumn(db, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0")
 	ensureIndex(db, "ad_analytics", "idx_ad_analytics_action_time", "ad_id, action_type, created_at")
 	ensureIndex(db, "ads", "idx_ads_status_window", "status, started_at, expires_at")
 	ensureIndex(db, "ads", "idx_ads_partner_created", "partner_id, created_at")

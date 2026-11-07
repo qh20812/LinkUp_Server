@@ -815,7 +815,13 @@ func (ctrl *AdminController) GetAdAnalytics(c *gin.Context) {
 	}
 
 	userID := c.GetString("userID")
-	report, err := ctrl.adminService.GetAdPerformance(c.Request.Context(), userID, adID)
+	from, to, parseErr := parseAdRange(c)
+	if parseErr != nil {
+		errors.Respond(c, http.StatusBadRequest, parseErr)
+		return
+	}
+
+	report, err := ctrl.adminService.GetAdPerformance(c.Request.Context(), userID, adID, from, to)
 	if err != nil {
 		errors.Respond(c, http.StatusForbidden, err)
 		return

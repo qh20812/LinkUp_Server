@@ -75,6 +75,26 @@ type AdPerformanceResponse struct {
 	VideoCompletions int64      `json:"video_completions,omitempty"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+
+	// Cost là chi phí trong khoảng thời gian được hỏi (legacy: toàn đời).
+	Cost float64 `json:"cost"`
+	// From/To/Limited/Series chỉ có khi client truyền from & to.
+	From    string          `json:"from,omitempty"`
+	To      string          `json:"to,omitempty"`
+	Limited bool            `json:"limited,omitempty"`
+	Series  []AdDailyMetric `json:"series,omitempty"`
+}
+
+// AdDailyMetric là một điểm trong chuỗi thời gian của analytics.
+type AdDailyMetric struct {
+	Date             string  `json:"date"`
+	Impressions      int64   `json:"impressions"`
+	Clicks           int64   `json:"clicks"`
+	Views            int64   `json:"views"`
+	Swipes           int64   `json:"swipes"`
+	VideoStarts      int64   `json:"video_starts"`
+	VideoCompletions int64   `json:"video_completions"`
+	Cost             float64 `json:"cost"`
 }
 
 type TrackActionInput struct {

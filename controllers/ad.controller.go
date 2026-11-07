@@ -261,13 +261,56 @@ func (ctrl *AdController) UpdateStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Status updated successfully", "data": ad})
 }
 
+// parseAdRange đọc query from/to (RFC3339 hoặc YYYY-MM-DD). Không truyền gì →
+// nil, nil (analytics toàn đời). Chỉ truyền một đầu → mặc định 30 ngày/now.
+func parseAdRange(c *gin.Context) (from, to *time.Time, err error) {
+	fromRaw := strings.TrimSpace(c.Query("from"))
+	toRaw := strings.TrimSpace(c.Query("to"))
+	if fromRaw == "" && toRaw == "" {
+		return nil, nil, nil
+	}
+
+	parse := func(raw string) (*time.Time, error) {
+		for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+			if t, parseErr := time.ParseInLocation(layout, raw, time.Local); parseErr == nil {
+				return &t, nil
+			}
+		}
+		return nil, fmt.Errorf("thời gian %q không hợp lệ (YYYY-MM-DD hoặc RFC3339)", raw)
+	}
+
+	now := time.Now()
+	if fromRaw != "" {
+		if from, err = parse(fromRaw); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		d := now.AddDate(0, 0, -30)
+		from = &d
+	}
+	if toRaw != "" {
+		if to, err = parse(toRaw); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		to = &now
+	}
+	return from, to, nil
+}
+
 func (ctrl *AdController) GetAnalytics(c *gin.Context) {
 	id := c.Param("id")
 	partnerID := c.GetString("userID")
 	role := c.GetString("userRole")
 	isAdmin := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
-	report, err := ctrl.service.GetAdPerformance(id, partnerID, isAdmin)
+	from, to, err := parseAdRange(c)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	report, err := ctrl.service.GetAdPerformance(id, partnerID, isAdmin, from, to)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)

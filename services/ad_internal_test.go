@@ -76,6 +76,21 @@ type fakeAdRepo struct {
 	completedRows int64
 	completedAt   time.Time
 	completedErr  error
+
+	rangeMetrics     *repository.AdRangeMetrics
+	rangeErr         error
+	rangeFrom, rangeTo time.Time
+}
+
+func (f *fakeAdRepo) GetAdMetricsRange(_ string, from, to time.Time) (*repository.AdRangeMetrics, error) {
+	f.rangeFrom, f.rangeTo = from, to
+	if f.rangeErr != nil {
+		return nil, f.rangeErr
+	}
+	if f.rangeMetrics == nil {
+		return &repository.AdRangeMetrics{Counts: map[string]int64{}}, nil
+	}
+	return f.rangeMetrics, nil
 }
 
 func (f *fakeAdRepo) MarkFinishedAdsCompleted(now time.Time) (int64, error) {
@@ -580,7 +595,7 @@ func TestGetAdPerformance_AdminBypassesOwnership(t *testing.T) {
 	}
 	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
 
-	report, err := svc.GetAdPerformance("ad-1", "admin-1", true)
+	report, err := svc.GetAdPerformance("ad-1", "admin-1", true, nil, nil)
 	if err != nil {
 		t.Fatalf("admin phải xem được ad của partner: %v", err)
 	}
@@ -596,7 +611,7 @@ func TestGetAdPerformance_PartnerOnlyOwnAds(t *testing.T) {
 	}
 	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
 
-	if _, err := svc.GetAdPerformance("ad-1", "partner-2", false); err == nil {
+	if _, err := svc.GetAdPerformance("ad-1", "partner-2", false, nil, nil); err == nil {
 		t.Fatalf("partner không được xem ad của người khác")
 	}
 }
@@ -711,6 +726,64 @@ func TestCompleteFinishedAds_DelegatesToRepo(t *testing.T) {
 	}
 	if repo.completedAt.Before(before) {
 		t.Fatalf("phải truyền thời điểm hiện tại cho repo")
+	}
+}
+
+// ─── P1-2: analytics theo khoảng thời gian ────────────────────────────────
+
+func TestGetAdPerformance_RangeAdminNotLimited(t *testing.T) {
+	repo := &fakeAdRepo{
+		existing: &models.Ad{ID: "ad-1", PartnerID: "partner-1", Status: models.AdStatusActive},
+		rangeMetrics: &repository.AdRangeMetrics{
+			Counts:      map[string]int64{"impression": 100, "click": 5},
+			Cost:        12.5,
+			UniqueReach: 80,
+			Series: []dto.AdDailyMetric{
+				{Date: "2026-11-01", Impressions: 100, Clicks: 5, Cost: 12.5},
+			},
+		},
+	}
+	svc := newTestAdService(repo, &fakePackageRepo{sub: nil})
+
+	from := time.Now().AddDate(0, 0, -90)
+	to := time.Now()
+	resp, err := svc.GetAdPerformance("ad-1", "admin-1", true, &from, &to)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Limited {
+		t.Fatalf("admin không bị giới hạn thời gian")
+	}
+	if len(resp.Series) != 1 || resp.Series[0].Date != "2026-11-01" {
+		t.Fatalf("series không đúng: %+v", resp.Series)
+	}
+	if resp.Cost != 12.5 || resp.UniqueReach != 80 {
+		t.Fatalf("cost/unique reach không đúng: %+v", resp)
+	}
+}
+
+func TestGetAdPerformance_RangeLimitedForBasicPackage(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", PartnerID: "partner-1", Status: models.AdStatusActive},
+		rangeMetrics: &repository.AdRangeMetrics{
+			Counts: map[string]int64{"impression": 10},
+		},
+	}
+	// Gói hiện tại không có advanced analytics.
+	svc := newTestAdService(repo, &fakePackageRepo{sub: newActiveSubscription()})
+
+	from := time.Now().AddDate(0, 0, -90)
+	to := time.Now()
+	resp, err := svc.GetAdPerformance("ad-1", "partner-1", false, &from, &to)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Limited {
+		t.Fatalf("gói BASIC phải bị giới hạn 30 ngày")
+	}
+	if !repo.rangeFrom.After(from) {
+		t.Fatalf("from phải được kéo về mốc 30 ngày, got %v", repo.rangeFrom)
 	}
 }
 

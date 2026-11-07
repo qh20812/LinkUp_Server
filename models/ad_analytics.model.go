@@ -19,7 +19,10 @@ type AdAnalytics struct {
 	UserID     *string   `json:"user_id,omitempty" gorm:"type:varchar(36);index"`
 	ActionType string    `json:"action_type"`
 	IPAddress  string    `json:"ip_address"`
-	CreatedAt  time.Time `json:"created_at"`
+	// Cost là chi phí của riêng hành động này (CPM/1000 hoặc CPC). Cột đã có
+	// trong DB từ trước; bổ sung vào model để API/analytics đọc được.
+	Cost      float64   `json:"cost" gorm:"default:0"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewAdAnalytics(adID string, userID *string, actionType string, ipAddress string) AdAnalytics {

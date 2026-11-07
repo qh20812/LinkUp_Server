@@ -49,6 +49,8 @@ type AdRepository interface {
 	GetDailySpend(adID string, date time.Time) (float64, error)
 	HasRecentAction(adID, userID, actionType string, within time.Duration) (bool, error)
 	GetOverviewByPartner(partnerID string) (*dto.AdOverviewResponse, error)
+	// GetAdMetricsRange trả số liệu trong khoảng [from,to) kèm chuỗi theo ngày.
+	GetAdMetricsRange(adID string, from, to time.Time) (*AdRangeMetrics, error)
 	// MarkFinishedAdsCompleted chuyển các ad active đã hết hạn / hết budget /
 	// đạt max_impressions sang completed. Trả số dòng đã cập nhật.
 	MarkFinishedAdsCompleted(now time.Time) (int64, error)
@@ -600,6 +602,89 @@ func (r *adRepositoryImpl) MarkFinishedAdsCompleted(now time.Time) (int64, error
 		        WHERE x.ad_id = ads.id AND x.action_type = 'impression') >= max_impressions)`, now).
 		Update("status", models.AdStatusCompleted)
 	return res.RowsAffected, res.Error
+}
+
+// AdRangeMetrics là số liệu tổng hợp + chuỗi ngày trong một khoảng thời gian.
+type AdRangeMetrics struct {
+	Counts      map[string]int64
+	Cost        float64
+	UniqueReach int64
+	Series      []dto.AdDailyMetric
+}
+
+// GetAdMetricsRange tổng hợp ad_analytics trong [from, to): đếm theo action,
+// tổng cost, unique reach (chỉ tính impression) và chuỗi theo ngày cho biểu đồ.
+func (r *adRepositoryImpl) GetAdMetricsRange(adID string, from, to time.Time) (*AdRangeMetrics, error) {
+	out := &AdRangeMetrics{Counts: map[string]int64{}}
+
+	type actionRow struct {
+		ActionType string  `gorm:"column:action_type"`
+		Count      int64   `gorm:"column:count"`
+		Cost       float64 `gorm:"column:cost"`
+	}
+	var rows []actionRow
+	if err := r.db.Raw(`
+		SELECT LOWER(action_type) AS action_type, COUNT(*) AS count, COALESCE(SUM(cost), 0) AS cost
+		FROM ad_analytics
+		WHERE ad_id = ? AND created_at >= ? AND created_at < ?
+		GROUP BY LOWER(action_type)`, adID, from, to).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("ad metrics range: %w", err)
+	}
+	for _, row := range rows {
+		out.Counts[row.ActionType] = row.Count
+		out.Cost += row.Cost
+	}
+
+	// Unique reach chỉ tính người đã thực sự thấy quảng cáo (impression).
+	if err := r.db.Model(&models.AdAnalytics{}).
+		Where("ad_id = ? AND action_type = ? AND user_id IS NOT NULL AND created_at >= ? AND created_at < ?",
+			adID, string(models.ActionImpression), from, to).
+		Distinct("user_id").
+		Count(&out.UniqueReach).Error; err != nil {
+		return nil, fmt.Errorf("ad unique reach range: %w", err)
+	}
+
+	type dayRow struct {
+		Date             string  `gorm:"column:date"`
+		Impressions      int64   `gorm:"column:impressions"`
+		Clicks           int64   `gorm:"column:clicks"`
+		Views            int64   `gorm:"column:views"`
+		Swipes           int64   `gorm:"column:swipes"`
+		VideoStarts      int64   `gorm:"column:video_starts"`
+		VideoCompletions int64   `gorm:"column:video_completions"`
+		Cost             float64 `gorm:"column:cost"`
+	}
+	var days []dayRow
+	if err := r.db.Raw(`
+		SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date,
+		       SUM(action_type = 'impression') AS impressions,
+		       SUM(action_type = 'click') AS clicks,
+		       SUM(action_type = 'view') AS views,
+		       SUM(action_type = 'swipe') AS swipes,
+		       SUM(action_type = 'video_start') AS video_starts,
+		       SUM(action_type = 'video_end') AS video_completions,
+		       COALESCE(SUM(cost), 0) AS cost
+		FROM ad_analytics
+		WHERE ad_id = ? AND created_at >= ? AND created_at < ?
+		GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+		ORDER BY date`, adID, from, to).Scan(&days).Error; err != nil {
+		return nil, fmt.Errorf("ad daily series: %w", err)
+	}
+	out.Series = make([]dto.AdDailyMetric, 0, len(days))
+	for _, d := range days {
+		out.Series = append(out.Series, dto.AdDailyMetric{
+			Date:             d.Date,
+			Impressions:      d.Impressions,
+			Clicks:           d.Clicks,
+			Views:            d.Views,
+			Swipes:           d.Swipes,
+			VideoStarts:      d.VideoStarts,
+			VideoCompletions: d.VideoCompletions,
+			Cost:             d.Cost,
+		})
+	}
+
+	return out, nil
 }
 
 // GetOverviewByPartner lấy tổng quan quảng cáo của partner (mục 6.1)

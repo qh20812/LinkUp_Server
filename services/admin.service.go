@@ -1551,14 +1551,14 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 }
 
 // GetAdPerformance cho admin xem thống kê của bất kỳ quảng cáo nào.
-func (s *AdminService) GetAdPerformance(ctx context.Context, adminID, adID string) (*dto.AdPerformanceResponse, error) {
+func (s *AdminService) GetAdPerformance(ctx context.Context, adminID, adID string, from, to *time.Time) (*dto.AdPerformanceResponse, error) {
 	if err := s.ensureAdmin(ctx, adminID); err != nil {
 		return nil, err
 	}
 	if s.adService == nil {
 		return nil, fmt.Errorf("admin: ad service chưa được khởi tạo")
 	}
-	return s.adService.GetAdPerformance(adID, "", true)
+	return s.adService.GetAdPerformance(adID, "", true, from, to)
 }
 
 func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error {

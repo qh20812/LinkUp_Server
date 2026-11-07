@@ -20,7 +20,7 @@ import (
 type AdService interface {
 	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error)
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
-	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool) (*dto.AdPerformanceResponse, error)
+	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool, from, to *time.Time) (*dto.AdPerformanceResponse, error)
 	GetDashboardList() ([]models.Ad, error)
 	GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error)
 	GetAdminAds(page, pageSize int, keyword, status string) ([]dto.AdminAdListItem, int64, error)
@@ -251,7 +251,11 @@ func (s *adServiceImpl) SubmitForReview(id, partnerID string) (*models.Ad, error
 // GetAdPerformance trả số liệu của một quảng cáo. Partner chỉ xem được ad của
 // mình; admin (viewerIsAdmin) xem được mọi ad — trước đây admin bị chặn 403 vì
 // service kiểm tra ownership bằng userID của admin.
-func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdmin bool) (*dto.AdPerformanceResponse, error) {
+//
+// from/to nil = số liệu toàn đời (tương thích client cũ). Khi có khoảng thời
+// gian, trả thêm chuỗi theo ngày; gói không có advanced analytics bị giới hạn
+// 30 ngày gần nhất (cờ limited).
+func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdmin bool, from, to *time.Time) (*dto.AdPerformanceResponse, error) {
 	if !viewerIsAdmin && viewerID != "" {
 		isOwner, err := s.repo.CheckAdOwnership(id, viewerID)
 		if err != nil || !isOwner {
@@ -264,16 +268,52 @@ func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdm
 		return nil, err
 	}
 
-	counts, err := s.repo.GetActionCounts(id)
+	if from == nil || to == nil {
+		counts, err := s.repo.GetActionCounts(id)
+		if err != nil {
+			return nil, err
+		}
+		uniqueReach, err := s.repo.GetUniqueReach(id)
+		if err != nil {
+			uniqueReach = 0
+		}
+		return buildAdPerformanceResponse(ad, counts, uniqueReach, ad.TotalSpent), nil
+	}
+
+	start, end := *from, *to
+	if !end.After(start) {
+		return nil, errorsapp.New(errorsapp.ErrCodeInvalidInput)
+	}
+
+	limited := false
+	if !viewerIsAdmin {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr != nil ||
+			sub == nil || sub.Package == nil || !sub.Package.HasAdvancedAnalytics {
+			maxStart := time.Now().AddDate(0, 0, -30)
+			if start.Before(maxStart) {
+				start = maxStart
+				limited = true
+			}
+		}
+	}
+
+	metrics, err := s.repo.GetAdMetricsRange(id, start, end)
 	if err != nil {
 		return nil, err
 	}
 
-	uniqueReach, err := s.repo.GetUniqueReach(id)
-	if err != nil {
-		uniqueReach = 0
-	}
+	resp := buildAdPerformanceResponse(ad, metrics.Counts, metrics.UniqueReach, metrics.Cost)
+	resp.Cost = metrics.Cost
+	resp.From = start.Format(time.RFC3339)
+	resp.To = end.Format(time.RFC3339)
+	resp.Limited = limited
+	resp.Series = metrics.Series
+	return resp, nil
+}
 
+// buildAdPerformanceResponse dựng response từ counts + chi phí của phạm vi đang
+// xem (toàn đời hoặc một khoảng). Budget/remaining luôn tính trên toàn đời.
+func buildAdPerformanceResponse(ad *models.Ad, counts map[string]int64, uniqueReach int64, spent float64) *dto.AdPerformanceResponse {
 	impressions := counts[string(models.ActionImpression)]
 	clicks := counts[string(models.ActionClick)]
 	videoStarts := counts[string(models.ActionVideoStart)]
@@ -281,28 +321,24 @@ func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdm
 	views := counts[string(models.ActionView)]
 	swipeCount := counts[string(models.ActionSwipe)]
 
-	// Interactions = views + clicks + swipes + video_start (tất cả tương tác có ý nghĩa)
 	interactions := views + clicks + swipeCount + videoStarts
 
-	// Chi phí đã sử dụng
-	totalSpent := ad.TotalSpent
-	if totalSpent > ad.Budget && ad.Budget > 0 {
-		totalSpent = ad.Budget
+	lifetimeSpent := ad.TotalSpent
+	if ad.Budget > 0 && lifetimeSpent > ad.Budget {
+		lifetimeSpent = ad.Budget
 	}
-
-	remainingBudget := ad.Budget - totalSpent
+	remainingBudget := ad.Budget - lifetimeSpent
 	if remainingBudget < 0 {
 		remainingBudget = 0
 	}
 
-	// Tính toán CTR, CPC, CPM chuẩn xác (mục 2.4)[cite: 2]
 	var ctr, cpc, cpm float64
 	if impressions > 0 {
 		ctr = (float64(clicks) / float64(impressions)) * 100.0
-		cpm = (totalSpent / float64(impressions)) * 1000.0
+		cpm = (spent / float64(impressions)) * 1000.0
 	}
 	if clicks > 0 {
-		cpc = totalSpent / float64(clicks)
+		cpc = spent / float64(clicks)
 	}
 
 	return &dto.AdPerformanceResponse{
@@ -312,7 +348,7 @@ func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdm
 		Format:           string(ad.Format),
 		Budget:           ad.Budget,
 		DailyBudget:      ad.DailyBudget,
-		TotalSpent:       totalSpent,
+		TotalSpent:       lifetimeSpent,
 		RemainingBudget:  remainingBudget,
 		Impressions:      impressions,
 		UniqueReach:      uniqueReach,
@@ -325,7 +361,8 @@ func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdm
 		VideoCompletions: videoEnds,
 		StartedAt:        ad.StartedAt,
 		ExpiresAt:        ad.ExpiresAt,
-	}, nil
+		Cost:             spent,
+	}
 }
 
 func (s *adServiceImpl) GetDashboardList() ([]models.Ad, error) {
