@@ -8,7 +8,7 @@ import (
 
 var (
 	ErrTargetTypeRequired = errors.New("target_type là bắt buộc")
-	ErrTargetTypeInvalid  = errors.New("target_type phải là 'user', 'post', 'comment' hoặc 'community'")
+	ErrTargetTypeInvalid  = errors.New("target_type phải là 'user', 'post', 'comment', 'community' hoặc 'ad'")
 	ErrTargetIDRequired   = errors.New("target_id là bắt buộc")
 	ErrReportTypeRequired = errors.New("report_type là bắt buộc")
 	ErrReasonRequired     = errors.New("reason_detail là bắt buộc")
@@ -31,7 +31,7 @@ func (v *ReportValidation) ValidateCreateReport(targetType, targetID, reportType
 	if targetType == "" {
 		return ErrTargetTypeRequired
 	}
-	if targetType != "user" && targetType != "post" && targetType != "comment" && targetType != "community" {
+	if targetType != "user" && targetType != "post" && targetType != "comment" && targetType != "community" && targetType != "ad" {
 		return ErrTargetTypeInvalid
 	}
 

@@ -21,6 +21,7 @@ type ReportService struct {
 	authRepo         *repository.AuthRepository
 	postRepo         *repository.PostRepository
 	communityRepo    *repository.CommunityRepository
+	adRepo           repository.AdRepository
 	violationRuleSvc *ViolationRuleService
 	validation       *validations.ReportValidation
 }
@@ -43,6 +44,11 @@ func (s *ReportService) SetViolationRuleService(svc *ViolationRuleService) {
 // (khởi tạo muộn hơn report service trong main.go).
 func (s *ReportService) SetCommunityRepo(repo *repository.CommunityRepository) {
 	s.communityRepo = repo
+}
+
+// SetAdRepository cho phép báo cáo quảng cáo (target_type = "ad").
+func (s *ReportService) SetAdRepository(repo repository.AdRepository) {
+	s.adRepo = repo
 }
 
 func (s *ReportService) CreateReport(ctx context.Context, reporterID string, input dto.CreateReportInput) (dto.CreateReportResponse, error) {
@@ -114,6 +120,13 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 		if comment.Status == models.CommentStatusHidden {
 			return dto.CreateReportResponse{}, errors.New("không thể báo cáo bình luận đã bị ẩn")
 		}
+	case "ad":
+		if s.adRepo == nil {
+			return dto.CreateReportResponse{}, errors.New("tính năng báo cáo quảng cáo chưa sẵn sàng")
+		}
+		if _, err := s.adRepo.FindByID(input.TargetID); err != nil {
+			return dto.CreateReportResponse{}, errors.New("không tìm thấy quảng cáo")
+		}
 	case "community":
 		if s.communityRepo == nil {
 			return dto.CreateReportResponse{}, errors.New("tính năng báo cáo cộng đồng chưa sẵn sàng")
@@ -154,6 +167,8 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 		report.TargetCommentID = &input.TargetID
 	case "community":
 		report.TargetCommunityID = &input.TargetID
+	case "ad":
+		report.TargetAdID = &input.TargetID
 	}
 
 	if err := s.reportRepo.Create(ctx, &report); err != nil {
@@ -195,6 +210,8 @@ func (s *ReportService) UpdateReport(ctx context.Context, reporterID, reportID s
 		targetType = "comment"
 	case report.TargetCommunityID != nil:
 		targetType = "community"
+	case report.TargetAdID != nil:
+		targetType = "ad"
 	}
 	if s.violationRuleSvc != nil {
 		if err := s.violationRuleSvc.ValidateForReport(ctx, input.ViolationRuleID, targetType); err != nil {

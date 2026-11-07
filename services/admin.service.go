@@ -49,6 +49,7 @@ type AdminService struct {
 	adRepo              repository.AdRepository
 	adService           AdService
 	packageRepo         repository.PackageRepository
+	auditRepo           *repository.AdminAuditRepository
 	violationRuleRepo   *repository.ViolationRuleRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
@@ -91,6 +92,31 @@ func (s *AdminService) SetAdService(adService AdService) {
 // SetPackageRepository cho admin xoá ad trả lại slot cho partner.
 func (s *AdminService) SetPackageRepository(repo repository.PackageRepository) {
 	s.packageRepo = repo
+}
+
+// SetAuditRepository ghi nhật ký hành động quản trị trên quảng cáo.
+func (s *AdminService) SetAuditRepository(repo *repository.AdminAuditRepository) {
+	s.auditRepo = repo
+}
+
+// logAudit ghi audit best-effort: lỗi ghi log không được làm hỏng hành động chính.
+func (s *AdminService) logAudit(ctx context.Context, adminID, action, targetType, targetID, reason, metadata string) {
+	if s.auditRepo == nil {
+		return
+	}
+	entry := &models.AdminAuditLog{
+		ID:         utils.GenerateUUID(),
+		AdminID:    adminID,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Reason:     reason,
+		Metadata:   metadata,
+		CreatedAt:  time.Now(),
+	}
+	if err := s.auditRepo.Create(ctx, entry); err != nil {
+		log.Printf("[audit] %s %s/%s failed: %v", action, targetType, targetID, err)
+	}
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -896,6 +922,7 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 		TargetPostID:      report.TargetPostID,
 		TargetCommentID:   report.TargetCommentID,
 		TargetCommunityID: report.TargetCommunityID,
+		TargetAdID:        report.TargetAdID,
 		ReportType:       report.ReportType,
 		ViolationRuleID:  report.ViolationRuleID,
 		ReasonDetail:     report.ReasonDetail,
@@ -906,6 +933,23 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 	if report.ViolationRuleID != nil && s.violationRuleRepo != nil {
 		if rule, err := s.violationRuleRepo.FindByID(ctx, *report.ViolationRuleID); err == nil {
 			detail.ViolationRuleTitle = &rule.Title
+		}
+	}
+
+	if report.TargetAdID != nil {
+		detail.TargetType = "ad"
+		if ad, err := s.adRepo.FindByID(*report.TargetAdID); err == nil {
+			mediaURI := ""
+			if len(ad.MediaList) > 0 {
+				mediaURI = ad.MediaList[0].URL
+			}
+			detail.TargetAd = &dto.AdminReportTargetAd{
+				AdID:      ad.ID,
+				Title:     ad.Title,
+				Status:    string(ad.Status),
+				PartnerID: ad.PartnerID,
+				MediaURI:  mediaURI,
+			}
 		}
 	}
 
@@ -1547,6 +1591,12 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	}
 	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
 
+	reason := rejectionReason
+	if newStatus == string(models.AdStatusSuspended) {
+		reason = suspendedReason
+	}
+	s.logAudit(ctx, adminID, "ad."+newStatus, "ad", ad.ID, reason, "")
+
 	return nil
 }
 
@@ -1590,6 +1640,8 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 		msg := fmt.Sprintf("Quảng cáo '%s' của bạn đã bị quản trị viên xoá.", ad.Title)
 		_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, msg, nil, nil, nil)
 	}
+
+	s.logAudit(ctx, adminID, "ad.delete", "ad", ad.ID, "", "")
 
 	return nil
 }

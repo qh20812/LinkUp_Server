@@ -294,10 +294,11 @@ func main() {
 		// ===== KHỞI TẠO TẦNG ADVERTISEMENT & PACKAGES (QUẢNG CÁO & GÓI ĐĂNG KÝ) =====
 		adRepository := repository.NewAdRepository(gormDB)
 		packageRepository := repository.NewPackageRepository(gormDB)
+		reportService.SetAdRepository(adRepository)
 
 		adService := services.NewAdService(adRepository, packageRepository, mediaService)
 		packageService := services.NewPackageService(packageRepository)
-	packageService.SetNotificationService(notificationService)
+		packageService.SetNotificationService(notificationService)
 		paymentRepository := repository.NewPaymentRepository(gormDB)
 		paymentService := services.NewPaymentService(paymentRepository, packageRepository, env)
 		momoService := services.NewMoMoService(paymentRepository, packageRepository, env)
@@ -351,8 +352,9 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminService.SetViolationRuleRepository(violationRuleRepository)
-	adminService.SetAdService(adService)
-	adminService.SetPackageRepository(packageRepository)
+		adminService.SetAdService(adService)
+		adminService.SetPackageRepository(packageRepository)
+		adminService.SetAuditRepository(repository.NewAdminAuditRepository(gormDB))
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 

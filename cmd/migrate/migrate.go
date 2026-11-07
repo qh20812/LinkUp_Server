@@ -63,6 +63,8 @@ func Run(db *gorm.DB) {
 	// Lý do admin hạ quảng cáo (status = suspended). Idempotent, không mất dữ liệu.
 	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
 	ensureColumn(db, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
+	ensureColumn(db, "reports", "target_ad_id", "VARCHAR(36) NULL")
+	ensureAdminAuditLogTable(db)
 
 	// Index hỗ trợ tracking/serving: dedupe theo (ad, action, thời gian), lọc ad
 	// theo cửa sổ chạy, danh sách theo partner và gói đang hoạt động.
@@ -487,6 +489,29 @@ func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn st
 	if err := db.Exec("ALTER TABLE " + table + " ADD CONSTRAINT " + fkName +
 		" FOREIGN KEY (" + column + ") REFERENCES " + refTable + "(" + refColumn + ")").Error; err != nil {
 		log.Printf("Warning: ensure FK %s: %v", fkName, err)
+	}
+}
+
+// ensureAdminAuditLogTable tạo bảng audit bằng SQL thuần (AutoMigrate có thể
+// abort sớm ở comment_reactions nên không dựa vào nó).
+func ensureAdminAuditLogTable(db *gorm.DB) {
+	if db.Migrator().HasTable("admin_audit_logs") {
+		return
+	}
+	err := db.Exec(`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+		id VARCHAR(36) PRIMARY KEY,
+		admin_id VARCHAR(36) NOT NULL,
+		action VARCHAR(50) NOT NULL,
+		target_type VARCHAR(30) NOT NULL,
+		target_id VARCHAR(36) NOT NULL,
+		reason TEXT NULL,
+		metadata TEXT NULL,
+		created_at DATETIME(3) NOT NULL,
+		INDEX idx_admin_audit_admin (admin_id),
+		INDEX idx_admin_audit_target (target_type, target_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error
+	if err != nil {
+		log.Printf("Warning: ensure admin_audit_logs: %v", err)
 	}
 }
 

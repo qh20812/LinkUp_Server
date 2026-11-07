@@ -495,6 +495,7 @@ func Run(env config.Env) error {
 			target_post_id VARCHAR(36) NULL,
 			target_comment_id VARCHAR(36) NULL,
 			target_community_id VARCHAR(36) NULL,
+			target_ad_id VARCHAR(36) NULL,
 			violation_rule_id VARCHAR(36) NULL,
 			reason_detail TEXT,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -507,6 +508,19 @@ func Run(env config.Env) error {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 21. Depends on users
+		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+			id VARCHAR(36) PRIMARY KEY,
+			admin_id VARCHAR(36) NOT NULL,
+			action VARCHAR(50) NOT NULL,
+			target_type VARCHAR(30) NOT NULL,
+			target_id VARCHAR(36) NOT NULL,
+			reason TEXT NULL,
+			metadata TEXT NULL,
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_admin_audit_admin (admin_id),
+			INDEX idx_admin_audit_target (target_type, target_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		`CREATE TABLE IF NOT EXISTS moderation_logs (
 			id VARCHAR(36) PRIMARY KEY,
 			moderator_id VARCHAR(36) NOT NULL,
@@ -1162,6 +1176,9 @@ func Run(env config.Env) error {
 	}
 	if err := addColumnIfMissing(database, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
 		return fmt.Errorf("schema: add ad_packages.is_active: %w", err)
+	}
+	if err := addColumnIfMissing(database, "reports", "target_ad_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add reports.target_ad_id: %w", err)
 	}
 
 	// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE

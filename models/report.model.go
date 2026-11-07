@@ -22,6 +22,7 @@ type Report struct {
 	TargetPostID      *string    `json:"target_post_id,omitempty"`
 	TargetCommentID   *string    `json:"target_comment_id,omitempty"`
 	TargetCommunityID *string    `json:"target_community_id,omitempty"`
+	TargetAdID        *string    `json:"target_ad_id,omitempty"`
 	ViolationRuleID *string      `json:"violation_rule_id,omitempty"`
 	ReasonDetail    string       `json:"reason_detail"`
 	Status          ReportStatus `json:"status"`
