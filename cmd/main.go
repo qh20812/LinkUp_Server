@@ -322,6 +322,14 @@ func main() {
 				} else if completed > 0 {
 					log.Printf("[AdWorker] completed %d ads (expired/budget/max impressions)", completed)
 				}
+
+				// Nhắc gia hạn gói sắp hết hạn (<=3 ngày), tối đa 1 lần/ngày/gói.
+				reminded, err := packageService.RemindExpiringSubscriptions()
+				if err != nil {
+					log.Printf("[AdWorker] remind expiring subscriptions error: %v", err)
+				} else if reminded > 0 {
+					log.Printf("[AdWorker] sent %d subscription renewal reminders", reminded)
+				}
 			}
 		}()
 

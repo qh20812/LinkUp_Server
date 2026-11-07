@@ -62,6 +62,7 @@ func Run(db *gorm.DB) {
 
 	// Lý do admin hạ quảng cáo (status = suspended). Idempotent, không mất dữ liệu.
 	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
+	ensureColumn(db, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
 
 	// Index hỗ trợ tracking/serving: dedupe theo (ad, action, thời gian), lọc ad
 	// theo cửa sổ chạy, danh sách theo partner và gói đang hoạt động.

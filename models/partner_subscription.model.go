@@ -18,7 +18,7 @@ type PartnerSubscription struct {
 	StartedAt time.Time          `json:"started_at" gorm:"not null"`
 	ExpiresAt time.Time          `json:"expires_at" gorm:"not null"`
 	Status    SubscriptionStatus `json:"status" gorm:"default:'active'"`
-	AutoRenew bool               `json:"auto_renew" gorm:"default:true"`
+	AutoRenew bool               `json:"auto_renew" gorm:"default:false"`
 	CreatedAt time.Time          `json:"created_at"`
 	UpdatedAt time.Time          `json:"updated_at"`
 

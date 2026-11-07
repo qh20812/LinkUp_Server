@@ -31,4 +31,24 @@ func RegisterPackageRoutes(router *gin.Engine, ctrl *controllers.PackageControll
 			ctrl.GetMySubscription,
 		)
 	}
+
+	// ── Admin quản trị gói quảng cáo ──
+	adminPackages := router.Group("/api/admin/packages")
+	{
+		adminPackages.GET("",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleAdmin, models.RoleSuperAdmin),
+			ctrl.AdminListPackages,
+		)
+		adminPackages.POST("",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleAdmin, models.RoleSuperAdmin),
+			ctrl.AdminCreatePackage,
+		)
+		adminPackages.PATCH("/:id",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleAdmin, models.RoleSuperAdmin),
+			ctrl.AdminUpdatePackage,
+		)
+	}
 }

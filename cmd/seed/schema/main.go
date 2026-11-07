@@ -993,6 +993,7 @@ func Run(env config.Env) error {
 			supports_carousel TINYINT(1) DEFAULT 0,
 			has_advanced_analytics TINYINT(1) DEFAULT 0,
 			sort_order BIGINT DEFAULT 0,
+			is_active TINYINT(1) NOT NULL DEFAULT 1,
 			created_at DATETIME(3) NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -1014,7 +1015,7 @@ func Run(env config.Env) error {
 			started_at DATETIME(3) NULL,
 			expires_at DATETIME(3) NULL,
 			status VARCHAR(20) DEFAULT 'active',
-			auto_renew TINYINT(1) DEFAULT 1,
+			auto_renew TINYINT(1) DEFAULT 0,
 			created_at DATETIME(3) NULL,
 			updated_at DATETIME(3) NULL,
 			INDEX idx_partner_subscriptions_user_id (user_id),
@@ -1158,6 +1159,9 @@ func Run(env config.Env) error {
 	}
 	if err := addColumnIfMissing(database, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0"); err != nil {
 		return fmt.Errorf("schema: add ad_analytics.cost: %w", err)
+	}
+	if err := addColumnIfMissing(database, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add ad_packages.is_active: %w", err)
 	}
 
 	// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE

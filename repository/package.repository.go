@@ -12,7 +12,10 @@ import (
 
 type PackageRepository interface {
 	GetAllPackages() ([]models.AdPackage, error)
+	GetActivePackages() ([]models.AdPackage, error)
 	GetPackageByID(id string) (*models.AdPackage, error)
+	CreatePackage(pkg *models.AdPackage) error
+	UpdatePackage(pkg *models.AdPackage) error
 	GetActiveSubscription(userID string) (*models.PartnerSubscription, error)
 	CreateSubscription(sub *models.PartnerSubscription) error
 	UpdateSubscription(sub *models.PartnerSubscription) error
@@ -21,6 +24,7 @@ type PackageRepository interface {
 	UpdateUserRole(userID string, roleName models.RoleName) error
 	SubscribeWithTransaction(activeSub *models.PartnerSubscription, newSub *models.PartnerSubscription) error
 	FindExpiredSubscriptions() ([]models.PartnerSubscription, error)
+	FindExpiringSubscriptions(until time.Time) ([]models.PartnerSubscription, error)
 	ExpireSubscription(subID string) error
 	DowngradePartnerRole(userID string) error
 }
@@ -37,6 +41,21 @@ func (r *packageRepositoryImpl) GetAllPackages() ([]models.AdPackage, error) {
 	var packages []models.AdPackage
 	err := r.db.Order("sort_order ASC").Find(&packages).Error
 	return packages, err
+}
+
+// GetActivePackages chỉ trả gói đang bán (dùng cho danh sách công khai).
+func (r *packageRepositoryImpl) GetActivePackages() ([]models.AdPackage, error) {
+	var packages []models.AdPackage
+	err := r.db.Where("is_active = ?", true).Order("sort_order ASC").Find(&packages).Error
+	return packages, err
+}
+
+func (r *packageRepositoryImpl) CreatePackage(pkg *models.AdPackage) error {
+	return r.db.Create(pkg).Error
+}
+
+func (r *packageRepositoryImpl) UpdatePackage(pkg *models.AdPackage) error {
+	return r.db.Save(pkg).Error
 }
 
 func (r *packageRepositoryImpl) GetPackageByID(id string) (*models.AdPackage, error) {
@@ -175,6 +194,15 @@ func subscribeWithTx(tx *gorm.DB, activeSub *models.PartnerSubscription, newSub 
 func (r *packageRepositoryImpl) FindExpiredSubscriptions() ([]models.PartnerSubscription, error) {
 	var subs []models.PartnerSubscription
 	err := r.db.Where("status = ? AND expires_at < ?", models.SubscriptionStatusActive, time.Now()).
+		Find(&subs).Error
+	return subs, err
+}
+
+// FindExpiringSubscriptions tìm subscription active sắp hết hạn trước `until`.
+func (r *packageRepositoryImpl) FindExpiringSubscriptions(until time.Time) ([]models.PartnerSubscription, error) {
+	var subs []models.PartnerSubscription
+	err := r.db.Where("status = ? AND expires_at > ? AND expires_at <= ?",
+		models.SubscriptionStatusActive, time.Now(), until).
 		Find(&subs).Error
 	return subs, err
 }

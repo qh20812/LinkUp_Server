@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"linkup/config"
+	"linkup/dto"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/services"
@@ -19,6 +20,14 @@ type fakePackageRepository struct {
 }
 
 func (f *fakePackageRepository) GetAllPackages() ([]models.AdPackage, error) { return nil, nil }
+func (f *fakePackageRepository) GetActivePackages() ([]models.AdPackage, error) {
+	return nil, nil
+}
+func (f *fakePackageRepository) CreatePackage(*models.AdPackage) error { return nil }
+func (f *fakePackageRepository) UpdatePackage(*models.AdPackage) error { return nil }
+func (f *fakePackageRepository) FindExpiringSubscriptions(time.Time) ([]models.PartnerSubscription, error) {
+	return nil, nil
+}
 func (f *fakePackageRepository) GetPackageByID(id string) (*models.AdPackage, error) {
 	return f.pkg, nil
 }
@@ -64,6 +73,9 @@ func (f *fakePaymentRepository) CompletePayment(
 }
 func (f *fakePaymentRepository) MarkFailed(string, repository.PaymentResult) (bool, error) {
 	return true, nil
+}
+func (f *fakePaymentRepository) List(dto.PaymentListFilter, int, int) ([]models.PaymentTransaction, int64, error) {
+	return nil, 0, nil
 }
 
 func vnpayTestEnv() config.Env {
