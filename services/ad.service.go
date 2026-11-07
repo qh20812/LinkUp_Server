@@ -73,8 +73,16 @@ func NewAdService(
 // platformAdmin = true khi ADMIN/SUPER_ADMIN tạo hộ: bỏ qua kiểm tra gói và
 // slot (admin không mua gói), ad không gắn PackageID. PARTNER vẫn bị ràng buộc
 // bởi gói đang hoạt động và số slot còn lại.
-func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error) {
+func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (out *models.Ad, retErr error) {
 	adFormat := models.AdFormat(input.Format)
+	reservedSubID := ""
+	defer func() {
+		// Nếu đã giữ slot nhưng tạo ad/upload thất bại thì phải trả slot lại,
+		// nếu không gói của partner bị kẹt slot vĩnh viễn.
+		if retErr != nil && reservedSubID != "" {
+			_ = s.packageRepo.DecrementSlotsUsed(reservedSubID)
+		}
+	}()
 
 	// 1. Kiểm tra Subscription & Slot Limit (mục 2.1)[cite: 2]
 	var sub *models.PartnerSubscription
@@ -88,10 +96,6 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 			return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
 		}
 
-		if sub.SlotsUsed >= sub.Package.MaxSlots {
-			return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
-		}
-
 		// 2. Kiểm tra Format có được gói hỗ trợ không
 		if adFormat == models.AdFormatVideo && !sub.Package.SupportsVideo {
 			return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotVideo)
@@ -99,6 +103,16 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		if adFormat == models.AdFormatCarousel && !sub.Package.SupportsCarousel {
 			return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotCarousel)
 		}
+
+		// 3. Giữ slot nguyên tử (tránh 2 request đồng thời cùng vượt max_slots).
+		ok, err := s.packageRepo.ReserveSlot(sub.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
+		}
+		reservedSubID = sub.ID
 	}
 
 	// 3. Khởi tạo Quảng cáo
@@ -168,11 +182,8 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		ad.MediaList = mediaList
 	}
 
-	// 5. Cập nhật slot (chỉ partner có gói mới có slot)
-	if sub != nil {
-		_ = s.packageRepo.IncrementSlotsUsed(sub.ID)
-	}
-
+	// 5. Slot đã được giữ nguyên tử ở bước 3 (ReserveSlot); thành công thì giữ,
+	// thất bại đã được defer trả lại.
 	return &ad, nil
 }
 

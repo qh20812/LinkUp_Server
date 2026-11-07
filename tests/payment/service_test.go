@@ -25,6 +25,7 @@ func (f *fakePackageRepository) GetActivePackages() ([]models.AdPackage, error) 
 }
 func (f *fakePackageRepository) CreatePackage(*models.AdPackage) error { return nil }
 func (f *fakePackageRepository) UpdatePackage(*models.AdPackage) error { return nil }
+func (f *fakePackageRepository) ReserveSlot(string) (bool, error)      { return true, nil }
 func (f *fakePackageRepository) FindExpiringSubscriptions(time.Time) ([]models.PartnerSubscription, error) {
 	return nil, nil
 }

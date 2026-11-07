@@ -20,6 +20,9 @@ type PackageRepository interface {
 	CreateSubscription(sub *models.PartnerSubscription) error
 	UpdateSubscription(sub *models.PartnerSubscription) error
 	IncrementSlotsUsed(subID string) error
+	// ReserveSlot tăng slots_used một cách nguyên tử nếu còn chỗ
+	// (UPDATE ... WHERE slots_used < max_slots). false = gói đã hết slot.
+	ReserveSlot(subID string) (bool, error)
 	DecrementSlotsUsed(subID string) error
 	UpdateUserRole(userID string, roleName models.RoleName) error
 	SubscribeWithTransaction(activeSub *models.PartnerSubscription, newSub *models.PartnerSubscription) error
@@ -102,6 +105,21 @@ func (r *packageRepositoryImpl) DecrementSlotsUsed(subID string) error {
 	return r.db.Model(&models.PartnerSubscription{}).
 		Where("id = ? AND slots_used > 0", subID).
 		UpdateColumn("slots_used", gorm.Expr("slots_used - 1")).Error
+}
+
+// ReserveSlot là check-and-increment nguyên tử: hai request tạo ad đồng thời
+// không thể cùng vượt max_slots (trước đây check rồi increment ở 2 bước).
+func (r *packageRepositoryImpl) ReserveSlot(subID string) (bool, error) {
+	res := r.db.Exec(`
+		UPDATE partner_subscriptions ps
+		JOIN ad_packages p ON p.id = ps.package_id
+		SET ps.slots_used = ps.slots_used + 1, ps.updated_at = ?
+		WHERE ps.id = ? AND ps.status = ? AND ps.slots_used < p.max_slots`,
+		time.Now(), subID, models.SubscriptionStatusActive)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // UpdateUserRole cập nhật hoặc gán platform role mới cho user (ScopeID = NULL)

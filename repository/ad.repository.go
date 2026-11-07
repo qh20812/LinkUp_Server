@@ -241,7 +241,7 @@ func (r *adRepositoryImpl) GetActionCounts(adID string) (map[string]int64, error
 func (r *adRepositoryImpl) GetUniqueReach(adID string) (int64, error) {
 	var count int64
 	err := r.db.Model(&models.AdAnalytics{}).
-		Where("ad_id = ? AND user_id IS NOT NULL", adID).
+		Where("ad_id = ? AND action_type = ? AND user_id IS NOT NULL", adID, string(models.ActionImpression)).
 		Distinct("user_id").
 		Count(&count).Error
 

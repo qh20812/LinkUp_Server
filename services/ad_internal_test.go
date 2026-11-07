@@ -18,10 +18,13 @@ import (
 
 type fakePackageRepo struct {
 	repository.PackageRepository
-	sub       *models.PartnerSubscription
-	err       error
-	slotsUsed int
-	lastSlots string
+	sub *models.PartnerSubscription
+	err error
+
+	reserveFail bool
+	slotsUsed   int
+	released    int
+	lastSlots   string
 }
 
 func (f *fakePackageRepo) GetActiveSubscription(_ string) (*models.PartnerSubscription, error) {
@@ -34,8 +37,20 @@ func (f *fakePackageRepo) IncrementSlotsUsed(id string) error {
 	return nil
 }
 
-func (f *fakePackageRepo) DecrementSlotsUsed(id string) error {
+func (f *fakePackageRepo) ReserveSlot(id string) (bool, error) {
+	if f.reserveFail {
+		return false, nil
+	}
 	f.slotsUsed++
+	f.lastSlots = id
+	return true, nil
+}
+
+func (f *fakePackageRepo) DecrementSlotsUsed(id string) error {
+	if f.slotsUsed > 0 {
+		f.slotsUsed--
+	}
+	f.released++
 	f.lastSlots = id
 	return nil
 }
@@ -310,10 +325,9 @@ func TestCreateAdWithMedia_NoSubscription(t *testing.T) {
 }
 
 func TestCreateAdWithMedia_SlotsExhausted(t *testing.T) {
-	sub := newActiveSubscription()
-	sub.SlotsUsed = sub.Package.MaxSlots
 	repo := &fakeAdRepo{}
-	svc := newTestAdService(repo, &fakePackageRepo{sub: sub})
+	pkg := &fakePackageRepo{sub: newActiveSubscription(), reserveFail: true}
+	svc := newTestAdService(repo, pkg)
 
 	ctx, _ := gin.CreateTestContext(nil)
 	if _, err := svc.CreateAdWithMedia(ctx, validCreateInput(), nil, "partner-1", false); err == nil {
@@ -374,6 +388,9 @@ func TestCreateAdWithMedia_RepoErrorPropagates(t *testing.T) {
 	if pkg.slotsUsed != 0 {
 		t.Fatalf("không được tăng slot khi ghi ad thất bại")
 	}
+	if pkg.released != 1 {
+		t.Fatalf("phải trả slot đã giữ khi ghi ad thất bại, got released=%d", pkg.released)
+	}
 }
 
 // ─── DeleteAd ─────────────────────────────────────────────────────────────
@@ -397,8 +414,8 @@ func TestDeleteAd_AllowsActiveAdAndFreesSlot(t *testing.T) {
 	if repo.mediaPurge != "ad-1" {
 		t.Fatalf("media chưa bị xoá")
 	}
-	if pkg.slotsUsed != 1 {
-		t.Fatalf("expected slot được giải phóng, got %d", pkg.slotsUsed)
+	if pkg.released != 1 {
+		t.Fatalf("expected slot được giải phóng, got released=%d", pkg.released)
 	}
 	// Phải giải phóng theo ID subscription, không phải ID gói — nếu không câu
 	// UPDATE không khớp dòng nào và slot không bao giờ được trả lại.
