@@ -504,7 +504,8 @@ func Run(env config.Env) error {
 			FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_reports_reporter (reporter_id),
 			INDEX idx_reports_status (status),
-			INDEX idx_reports_reporter_status (reporter_id, status)
+			INDEX idx_reports_reporter_status (reporter_id, status),
+			INDEX idx_reports_target_ad (target_ad_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 21. Depends on users

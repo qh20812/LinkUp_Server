@@ -51,12 +51,18 @@
 | 41 | GET /api/admin/settings | Đọc cấu hình site settings |
 | 42 | PUT /api/admin/settings | Cập nhật cấu hình site settings |
 | 43 | POST /api/ads-management | Tạo quảng cáo (ads-management) |
-| 44 | GET /api/ads-management | Danh sách quảng cáo (ads-management, admin hoặc partner) |
+| 44 | GET /api/ads-management | Danh sách quảng cáo của partner (admin dùng `/api/admin/ads`) |
 | 45 | GET /api/ads-management/:id/analytics | Phân tích hiệu quả 1 quảng cáo (analytics) |
 | 46 | PATCH /api/ads-management/:id/status | Đổi trạng thái quảng cáo (partner/admin) |
 | 47 | PATCH /api/ads-management/:id | Cập nhật nội dung quảng cáo |
 | 48 | DELETE /api/ads-management/:id | Xoá quảng cáo (ads-management) |
 | 49 | GET /api/ads-management/overview | Tổng quan quảng cáo (overview) |
+
+> **Bổ sung từ đợt hoàn thiện Ads:** `POST /api/ads-management/:id/submit` (partner gửi duyệt lại
+> quảng cáo bị từ chối); `GET /api/admin/ads/:id/analytics` (admin xem analytics mọi quảng cáo);
+> `GET /api/ads-management/payments` / `GET /api/admin/payments` (lịch sử giao dịch);
+> `GET/POST/PATCH /api/admin/packages` (quản trị gói). `GET /api/ads-management` chỉ dành cho
+> partner — admin gọi vào sẽ nhận 400 kèm hướng dẫn dùng `/api/admin/ads`.
 | 50 | GET /api/admin/violation-rules | Liệt kê toàn bộ quy tắc vi phạm (admin) |
 | 51 | POST /api/admin/violation-rules | Tạo quy tắc vi phạm mới |
 | 52 | PUT /api/admin/violation-rules/:id | Cập nhật quy tắc vi phạm |
@@ -678,14 +684,19 @@ Nguồn: `routes/admin.routes.go`, `routes/ad.routes.go`, `routes/violation_rule
   2. Kiểm tra quyền quản trị (SUPER_ADMIN hoặc ADMIN).
   3. Tìm quảng cáo theo id, không tồn tại thì báo lỗi không tìm thấy.
   4. Nếu trạng thái mới trùng trạng thái hiện tại thì trả về thành công mà không thay đổi gì.
-  5. Chỉ được chuyển quảng cáo đang chờ sang trạng thái đang hoạt động hoặc từ chối; sai trạng thái thì báo lỗi trạng thái không hợp lệ.
-  6. Kiểm tra lý do từ chối là bắt buộc khi từ chối quảng cáo, thiếu thì báo lỗi yêu cầu lý do.
-  7. Lưu trạng thái mới và lý do từ chối (nếu có) vào database.
-  8. Gửi thông báo cho Partner về việc quảng cáo được phê duyệt hoặc từ chối, kèm lý do nếu từ chối; lỗi gửi thông báo được bỏ qua.
-  9. Trả về thông báo cập nhật trạng thái quảng cáo thành công.
+  5. Chỉ chấp nhận các chuyển trạng thái hợp lệ: `pending → active|rejected` (duyệt/từ chối);
+     `paused → active` (bỏ tạm dừng); `active|paused → suspended` (tạm ngưng do vi phạm);
+     `active|paused → paused|completed`. Các chuyển khác trả lỗi trạng thái không hợp lệ.
+  6. Từ chối bắt buộc có lý do; tạm ngưng (`suspended`) cũng bắt buộc lý do và được lưu vào
+     `suspended_reason`, đồng thời xoá lý do từ chối cũ khi duyệt lại.
+  7. Lưu trạng thái mới và lý do tương ứng vào database.
+  8. Ghi audit log hành động quản trị vào bảng `admin_audit_logs` (hành động, đối tượng, lý do).
+  9. Gửi thông báo cho Partner về việc phê duyệt / từ chối / tạm ngưng, kèm lý do; lỗi gửi
+     thông báo được bỏ qua.
+  10. Trả về thông báo cập nhật trạng thái quảng cáo thành công.
 - **Entity**: Admin/SuperAdmin (người duyệt), Partner (nhận thông báo)
-- **Model**: models.Ad, models.Notification
-- **Databases**: ads, notifications
+- **Model**: models.Ad, models.Notification, models.AdminAuditLog
+- **Databases**: ads, notifications, admin_audit_logs
 
 ### 40. Xoá quảng cáo (admin)
 
@@ -693,13 +704,14 @@ Nguồn: `routes/admin.routes.go`, `routes/ad.routes.go`, `routes/violation_rule
 - **Description**:
   1. Admin gọi API với id quảng cáo cần xoá.
   2. Kiểm tra người dùng có quyền SUPER_ADMIN, nếu không thì báo lỗi không đủ quyền.
-  3. Xoá vĩnh viễn quảng cáo khỏi database; nếu không xoá được thì báo lỗi.
-  4. Các file media liên kết với quảng cáo cũng bị xoá theo.
-  5. Ở nhánh admin hệ thống không giải phóng slot gói đăng ký (khác với nhánh Partner).
-  6. Trả về thông báo xoá quảng cáo thành công.
+  3. Xoá vĩnh viễn quảng cáo khỏi database trong cùng transaction với media; nếu không xoá được thì báo lỗi.
+  4. Các file media liên kết với quảng cáo cũng bị xoá theo (bảng `ad_media` không có FK cascade).
+  5. Giải phóng 1 slot của gói đang hoạt động của Partner (nếu có) — trước đây nhánh admin không trả slot khiến Partner bị kẹt slot.
+  6. Gửi thông báo cho Partner biết quảng cáo bị quản trị viên xoá và ghi audit log.
+  7. Trả về thông báo xoá quảng cáo thành công.
 - **Entity**: SuperAdmin
-- **Model**: models.Ad, models.AdMedia
-- **Databases**: ads, ad_media
+- **Model**: models.Ad, models.AdMedia, models.AdminAuditLog
+- **Databases**: ads, ad_media, partner_subscriptions, notifications, admin_audit_logs
 
 ### 41. Đọc cấu hình site settings
 
