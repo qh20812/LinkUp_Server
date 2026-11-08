@@ -36,7 +36,7 @@ type MediaValidation struct {
 
 func NewMediaValidation() *MediaValidation {
 	return &MediaValidation{
-		MaxImageSize:      20971520, // 20MB
+		MaxImageSize:      10485760, // 10MB — trần của Cloudinary Free
 		MaxVideoSize:      104857600, // 100MB
 		MaxAudioSize:      10485760,  // 10MB — tin nhắn thoại (voice notes)
 		MaxAudioDuration:  300,       // 5 phút

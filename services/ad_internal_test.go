@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"net/textproto"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"linkup/dto"
+	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
 )
@@ -65,6 +70,9 @@ type fakeAdRepo struct {
 	updated       *models.Ad
 	updateErr     error
 	updatedFields map[string]interface{}
+
+	mediaBatch []models.AdMedia
+	mediaErr   error
 
 	actionCounts map[string]int64
 	countsErr    error
@@ -179,6 +187,11 @@ func (f *fakeAdRepo) Create(ad *models.Ad) error {
 	return f.createErr
 }
 
+func (f *fakeAdRepo) CreateMediaBatch(items []models.AdMedia) error {
+	f.mediaBatch = items
+	return f.mediaErr
+}
+
 func (f *fakeAdRepo) FindByID(_ string) (*models.Ad, error) {
 	if f.findErr != nil {
 		return nil, f.findErr
@@ -202,6 +215,31 @@ func (f *fakeAdRepo) DeleteAdMedia(id string) error {
 
 type fakeAdMediaService struct {
 	MediaService
+}
+
+// uploadFakeMediaService cho phép test luồng upload ad (thành công/lỗi) mà
+// không cần Cloudinary.
+type uploadFakeMediaService struct {
+	MediaService
+	upload   func(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
+	duration func(ctx context.Context, publicID string) (float64, error)
+	deleted  []string
+}
+
+func (f *uploadFakeMediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
+	return f.upload(ctx, userID, file)
+}
+
+func (f *uploadFakeMediaService) GetVideoDurationSeconds(ctx context.Context, publicID string) (float64, error) {
+	if f.duration == nil {
+		return 0, errors.New("không có metadata")
+	}
+	return f.duration(ctx, publicID)
+}
+
+func (f *uploadFakeMediaService) DeleteMedia(_ context.Context, _ string, mediaID string) error {
+	f.deleted = append(f.deleted, mediaID)
+	return nil
 }
 
 func newActiveSubscription() *models.PartnerSubscription {
@@ -780,3 +818,118 @@ func TestGetAdPerformance_RangeLimitedForBasicPackage(t *testing.T) {
 }
 
 func ptrString(v string) *string { return &v }
+
+// ─── C8: upload media, duration và cleanup ────────────────────────────────
+
+func adUploadFile(name, contentType string) *multipart.FileHeader {
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Type", contentType)
+	return &multipart.FileHeader{Filename: name, Size: 1024, Header: header}
+}
+
+// adUploadContext cần Request thật: service gọi ctx.Request.Context() khi upload.
+func adUploadContext() *gin.Context {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/ads-management", nil)
+	return ctx
+}
+
+func TestCreateAdWithMedia_RejectsVideoOverLimitAndCleansUp(t *testing.T) {
+	repo := &fakeAdRepo{}
+	pkg := &fakePackageRepo{sub: newActiveSubscription()}
+	mediaSvc := &uploadFakeMediaService{
+		upload: func(context.Context, string, *multipart.FileHeader) (*models.Media, error) {
+			return &models.Media{ID: "media-1", FileURI: "https://cdn/v.mp4", FileType: "video/mp4"}, nil
+		},
+		duration: func(context.Context, string) (float64, error) { return 61, nil },
+	}
+	svc := NewAdService(repo, pkg, mediaSvc)
+
+	input := validCreateInput()
+	input.Format = "video"
+	ctx := adUploadContext()
+
+	_, err := svc.CreateAdWithMedia(ctx, input, []*multipart.FileHeader{adUploadFile("v.mp4", "video/mp4")}, "partner-1", false)
+	if err == nil {
+		t.Fatal("expected error khi video dài quá giới hạn")
+	}
+	appErr, ok := errorsapp.IsAppError(err)
+	if !ok || appErr.Code != errorsapp.ErrCodeAdVideoTooLong {
+		t.Fatalf("expected ad.VIDEO_TOO_LONG, got %v", err)
+	}
+	if repo.deleted == "" {
+		t.Fatal("ad phải được xoá khi upload thất bại")
+	}
+	if len(mediaSvc.deleted) != 1 || mediaSvc.deleted[0] != "media-1" {
+		t.Fatalf("media đã upload phải được dọn, got %v", mediaSvc.deleted)
+	}
+	if pkg.slotsUsed != 0 {
+		t.Fatalf("slot phải được trả lại, slotsUsed = %d", pkg.slotsUsed)
+	}
+}
+
+func TestCreateAdWithMedia_FailsOpenWhenDurationUnavailable(t *testing.T) {
+	repo := &fakeAdRepo{}
+	pkg := &fakePackageRepo{sub: newActiveSubscription()}
+	mediaSvc := &uploadFakeMediaService{
+		upload: func(context.Context, string, *multipart.FileHeader) (*models.Media, error) {
+			return &models.Media{ID: "media-1", FileURI: "https://cdn/v.mp4", FileType: "video/mp4"}, nil
+		},
+		duration: func(context.Context, string) (float64, error) {
+			return 0, errors.New("admin api down")
+		},
+	}
+	svc := NewAdService(repo, pkg, mediaSvc)
+
+	input := validCreateInput()
+	input.Format = "video"
+	ctx := adUploadContext()
+
+	ad, err := svc.CreateAdWithMedia(ctx, input, []*multipart.FileHeader{adUploadFile("v.mp4", "video/mp4")}, "partner-1", false)
+	if err != nil {
+		t.Fatalf("không đọc được duration phải fail-open, got %v", err)
+	}
+	if ad == nil || len(repo.mediaBatch) != 1 {
+		t.Fatalf("ad và media phải được tạo, mediaBatch = %d", len(repo.mediaBatch))
+	}
+	if len(mediaSvc.deleted) != 0 {
+		t.Fatalf("không được xoá media khi fail-open, got %v", mediaSvc.deleted)
+	}
+}
+
+func TestCreateAdWithMedia_CleansUpWhenSecondUploadFails(t *testing.T) {
+	repo := &fakeAdRepo{}
+	pkg := &fakePackageRepo{sub: newActiveSubscription()}
+	calls := 0
+	mediaSvc := &uploadFakeMediaService{
+		upload: func(context.Context, string, *multipart.FileHeader) (*models.Media, error) {
+			calls++
+			if calls == 2 {
+				return nil, errors.New("upload boom")
+			}
+			return &models.Media{ID: "media-1", FileURI: "https://cdn/1.jpg", FileType: "image/jpeg"}, nil
+		},
+	}
+	svc := NewAdService(repo, pkg, mediaSvc)
+
+	input := validCreateInput()
+	input.Format = "carousel"
+	files := []*multipart.FileHeader{
+		adUploadFile("1.jpg", "image/jpeg"),
+		adUploadFile("2.jpg", "image/jpeg"),
+	}
+	ctx := adUploadContext()
+
+	if _, err := svc.CreateAdWithMedia(ctx, input, files, "partner-1", false); err == nil {
+		t.Fatal("expected error khi file thứ hai upload lỗi")
+	}
+	if repo.deleted == "" {
+		t.Fatal("ad phải được xoá")
+	}
+	if len(mediaSvc.deleted) != 1 || mediaSvc.deleted[0] != "media-1" {
+		t.Fatalf("file đầu phải được dọn, got %v", mediaSvc.deleted)
+	}
+	if pkg.slotsUsed != 0 {
+		t.Fatalf("slot phải được trả lại, slotsUsed = %d", pkg.slotsUsed)
+	}
+}

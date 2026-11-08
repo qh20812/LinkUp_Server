@@ -395,6 +395,11 @@ const (
 	ErrCodeAdBudgetExceeded    = "ad.BUDGET_EXCEEDED"
 	ErrCodeAdDailyLimitReached = "ad.DAILY_LIMIT_REACHED"
 	ErrCodeAdPendingApproval   = "ad.PENDING_APPROVAL"
+	ErrCodeAdMediaTooLarge     = "ad.MEDIA_TOO_LARGE"
+	ErrCodeAdVideoTooLong      = "ad.VIDEO_TOO_LONG"
+	ErrCodeAdMediaCountInvalid = "ad.MEDIA_COUNT_INVALID"
+	ErrCodeAdCarouselTotalSize = "ad.CAROUSEL_TOTAL_TOO_LARGE"
+	ErrCodeAdMediaTypeMismatch = "ad.MEDIA_TYPE_MISMATCH"
 
 	// ── Package ────────────────────────────────────────────────
 	ErrCodePackageSubscribeFailed = "package.SUBSCRIBE_FAILED"

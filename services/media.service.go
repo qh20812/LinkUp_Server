@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
+	"github.com/cloudinary/cloudinary-go/v2/api"
+	"github.com/cloudinary/cloudinary-go/v2/api/admin"
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 	"gorm.io/gorm"
 )
@@ -43,6 +45,9 @@ type MediaService interface {
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
 	GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error)
+	// GetVideoDurationSeconds đọc thời lượng video (giây) từ metadata Cloudinary.
+	// Trả lỗi khi không lấy được metadata để caller quyết định fail-open.
+	GetVideoDurationSeconds(ctx context.Context, publicID string) (float64, error)
 }
 
 type mediaService struct {
@@ -329,6 +334,37 @@ func (s *mediaService) GetUserMedia(ctx context.Context, userID string) ([]model
 
 func (s *mediaService) GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error) {
 	return s.repo.GetByPostIDs(ctx, postIDs)
+}
+
+// GetVideoDurationSeconds lấy duration (giây) từ Cloudinary Admin API.
+// Metadata được trả trong VideoMetadata khi bật MediaMetadata.
+func (s *mediaService) GetVideoDurationSeconds(ctx context.Context, publicID string) (float64, error) {
+	if s.cloudinary == nil {
+		return 0, fmt.Errorf("cloudinary chưa được cấu hình")
+	}
+
+	withMetadata := true
+	res, err := s.cloudinary.Admin.Asset(ctx, admin.AssetParams{
+		PublicID:      publicID,
+		AssetType:     api.Video,
+		MediaMetadata: &withMetadata,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("admin asset: %w", err)
+	}
+	if res == nil || res.VideoMetadata == nil {
+		return 0, fmt.Errorf("không có metadata video")
+	}
+
+	raw, ok := res.VideoMetadata["duration"]
+	if !ok {
+		return 0, fmt.Errorf("metadata thiếu duration")
+	}
+	duration, ok := raw.(float64)
+	if !ok || duration <= 0 {
+		return 0, fmt.Errorf("duration không hợp lệ: %v", raw)
+	}
+	return duration, nil
 }
 
 func parseCloudinaryPublicID(fileURI string) (string, string, error) {

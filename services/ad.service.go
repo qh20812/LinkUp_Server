@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"mime/multipart"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -13,6 +15,7 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 
 	"github.com/gin-gonic/gin"
 )
@@ -152,6 +155,20 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		return nil, err
 	}
 
+	// Upload/ghi media lỗi giữa chừng thì dọn ad + media đã tạo, tránh dữ liệu
+	// mồ côi trong DB/Cloudinary (slot đã được defer phía trên trả lại).
+	var uploadedMediaRows []*models.Media
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		cleanupCtx := context.Background()
+		for _, media := range uploadedMediaRows {
+			_ = s.mediaService.DeleteMedia(cleanupCtx, partnerID, media.ID)
+		}
+		_ = s.repo.Delete(cleanupCtx, ad.ID)
+	}()
+
 	// 4. Upload file đính kèm
 	var mediaList []models.AdMedia
 	for idx, fileHeader := range files {
@@ -160,6 +177,20 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx.Request.Context(), partnerID, fileHeader)
 		if err != nil {
 			return nil, fmt.Errorf("lỗi upload file %s: %w", fileHeader.Filename, err)
+		}
+		uploadedMediaRows = append(uploadedMediaRows, uploadedMedia)
+
+		// Video: chặn thời lượng quá dài. Lỗi Admin API/thiếu metadata thì
+		// fail-open (log) để không chặn oan upload hợp lệ.
+		if strings.HasPrefix(uploadedMedia.FileType, "video/") {
+			duration, durationErr := s.mediaService.GetVideoDurationSeconds(ctx.Request.Context(), uploadedMedia.ID)
+			if durationErr != nil {
+				log.Printf("[Ad] không đọc được duration của %s: %v", uploadedMedia.ID, durationErr)
+			} else if duration > float64(validations.MaxAdVideoSeconds) {
+				return nil, errorsapp.Newf(errorsapp.ErrCodeAdVideoTooLong, map[string]any{
+					"max": validations.MaxAdVideoSeconds,
+				})
+			}
 		}
 
 		mediaList = append(mediaList, models.AdMedia{

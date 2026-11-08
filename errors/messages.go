@@ -395,6 +395,11 @@ var Messages = map[string]string{
 	"ad.BUDGET_EXCEEDED":               "Ngân sách đã hết",
 	"ad.DAILY_LIMIT_REACHED":           "Đã đạt giới hạn ngân sách hôm nay",
 	"ad.PENDING_APPROVAL":              "Quảng cáo đang chờ duyệt",
+	"ad.MEDIA_TOO_LARGE":               "File media vượt quá {{max}} MB",
+	"ad.VIDEO_TOO_LONG":                "Video dài quá {{max}} giây",
+	"ad.MEDIA_COUNT_INVALID":           "Số lượng media không hợp lệ ({{min}}–{{max}} file)",
+	"ad.CAROUSEL_TOTAL_TOO_LARGE":      "Tổng dung lượng ảnh carousel vượt quá {{max}} MB",
+	"ad.MEDIA_TYPE_MISMATCH":           "Định dạng media không khớp với định dạng quảng cáo",
 
 	// ── Package ────────────────────────────────────────────────
 	"package.SUBSCRIBE_FAILED": "Không thể đăng ký gói",

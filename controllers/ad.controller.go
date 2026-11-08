@@ -67,8 +67,10 @@ func (ctrl *AdController) validateTargetLocations(list []string) error {
 	return nil
 }
 
-// adMaxMultipartMemory giới hạn bộ nhớ cho media quảng cáo (500MB).
-const adMaxMultipartMemory = 500 << 20
+// adMaxMultipartMemory giới hạn phần multipart giữ trong RAM; phần vượt sẽ
+// được Go spill ra file tạm. Trước đây đặt 500 MB nên vài upload đồng thời có
+// thể làm OOM VPS 2–4 GB.
+const adMaxMultipartMemory = 32 << 20
 
 // adTimeLayouts: input datetime-local của trình duyệt gửi "2006-01-02T15:04"
 // (không kèm timezone) nên time.RFC3339 không parse được. Trước đây lỗi bị bỏ
@@ -263,11 +265,19 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 		return
 	}
 
+	// Kiểm tra media trước khi service giữ slot: sai số lượng/loại/dung lượng
+	// thì trả lỗi ngay, không upload lên Cloudinary.
+	mediaFiles := adMediaFiles(c)
+	if err := validations.ValidateAdMedia(mediaFiles, input.Format); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
 	currentUserID := c.GetString("userID")
 	role := c.GetString("userRole")
 	platformAdmin := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
-	ad, err := ctrl.service.CreateAdWithMedia(c, input, adMediaFiles(c), currentUserID, platformAdmin)
+	ad, err := ctrl.service.CreateAdWithMedia(c, input, mediaFiles, currentUserID, platformAdmin)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
