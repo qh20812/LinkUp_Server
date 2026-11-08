@@ -22,6 +22,8 @@ import (
 
 type AdService interface {
 	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error)
+	// ReplaceMedia thay toàn bộ media của ad (giữ nguyên nội dung/format).
+	ReplaceMedia(ctx context.Context, id, partnerID string, files []*multipart.FileHeader) (*models.Ad, error)
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
 	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool, from, to *time.Time) (*dto.AdPerformanceResponse, error)
 	GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error)
@@ -217,6 +219,101 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 
 func (s *adServiceImpl) GetAdByID(id string) (*models.Ad, error) {
 	return s.repo.FindByID(id)
+}
+
+// ReplaceMedia thay toàn bộ media của ad đang sửa. Validate theo đúng format
+// hiện tại của ad (không đổi format ở đây), upload mới trước rồi mới thay DB;
+// nếu thay DB lỗi thì dọn media vừa upload. Media cũ được xoá best-effort sau
+// khi DB đã commit (asset hotlink/seed không có row media sẽ bị bỏ qua).
+func (s *adServiceImpl) ReplaceMedia(
+	ctx context.Context,
+	id, partnerID string,
+	files []*multipart.FileHeader,
+) (out *models.Ad, retErr error) {
+	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+	if err != nil || !isOwner {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
+	}
+
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	switch ad.Status {
+	case models.AdStatusPending, models.AdStatusRejected, models.AdStatusActive, models.AdStatusPaused:
+	default:
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	if err := validations.ValidateAdMedia(files, string(ad.Format)); err != nil {
+		return nil, err
+	}
+
+	oldMedia, err := s.repo.ListAdMedia(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Media thuộc về partner sở hữu ad (kể cả khi admin thao tác hộ) để quota
+	// và việc dọn asset cũ đi đúng chủ.
+	ownerID := ad.PartnerID
+	if ownerID == "" {
+		ownerID = partnerID
+	}
+
+	var uploaded []*models.Media
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		cleanupCtx := context.Background()
+		for _, media := range uploaded {
+			_ = s.mediaService.DeleteMedia(cleanupCtx, ownerID, media.ID)
+		}
+	}()
+
+	mediaList := make([]models.AdMedia, 0, len(files))
+	for idx, fileHeader := range files {
+		uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx, ownerID, fileHeader)
+		if err != nil {
+			return nil, fmt.Errorf("lỗi upload file %s: %w", fileHeader.Filename, err)
+		}
+		uploaded = append(uploaded, uploadedMedia)
+
+		if strings.HasPrefix(uploadedMedia.FileType, "video/") {
+			duration, durationErr := s.mediaService.GetVideoDurationSeconds(ctx, uploadedMedia.ID)
+			if durationErr != nil {
+				log.Printf("[Ad] không đọc được duration của %s: %v", uploadedMedia.ID, durationErr)
+			} else if duration > float64(validations.MaxAdVideoSeconds) {
+				return nil, errorsapp.Newf(errorsapp.ErrCodeAdVideoTooLong, map[string]any{
+					"max": validations.MaxAdVideoSeconds,
+				})
+			}
+		}
+
+		mediaList = append(mediaList, models.AdMedia{
+			ID:        generateMediaUUID(),
+			AdID:      id,
+			URL:       uploadedMedia.FileURI,
+			MediaType: uploadedMedia.FileType,
+			SortOrder: idx,
+			CreatedAt: time.Now(),
+		})
+	}
+
+	if err := s.repo.ReplaceAdMedia(id, mediaList); err != nil {
+		return nil, err
+	}
+
+	for _, media := range oldMedia {
+		if err := s.mediaService.DeleteByURL(context.Background(), ownerID, media.URL); err != nil {
+			log.Printf("[Ad] không xoá được media cũ của ad %s: %v", id, err)
+		}
+	}
+
+	ad.MediaList = mediaList
+	return ad, nil
 }
 
 // UpdateStatus cho partner tạm dừng / bật lại quảng cáo của mình.

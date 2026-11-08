@@ -291,6 +291,30 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Tạo quảng cáo thành công", "data": ad})
 }
 
+// ReplaceAdMedia thay toàn bộ ảnh/video của ad (multipart field `media`).
+// Ownership do middleware CheckAdOwnership đảm bảo; admin cũng đi qua được.
+func (ctrl *AdController) ReplaceAdMedia(c *gin.Context) {
+	id := c.Param("id")
+	partnerID := c.GetString("userID")
+
+	if err := c.Request.ParseMultipartForm(adMaxMultipartMemory); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		errorsapp.Respond(c, http.StatusBadRequest, fmt.Errorf("dữ liệu multipart không hợp lệ: %w", err))
+		return
+	}
+
+	ad, err := ctrl.service.ReplaceMedia(c.Request.Context(), id, partnerID, adMediaFiles(c))
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật media quảng cáo thành công", "data": ad})
+}
+
 func (ctrl *AdController) UpdateStatus(c *gin.Context) {
 	id := c.Param("id")
 	partnerID := c.GetString("userID")

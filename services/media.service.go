@@ -42,6 +42,9 @@ type MediaService interface {
 	// giữa chừng). Gọi 1 lần lúc boot.
 	ReconcileStaleStaging()
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
+	// DeleteByURL xoá media theo URL Cloudinary; bỏ qua nếu không tìm thấy
+	// (dữ liệu seed/hotlink) hoặc media thuộc user khác.
+	DeleteByURL(ctx context.Context, userID, fileURI string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
 	GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error)
@@ -314,6 +317,25 @@ func (s *mediaService) DeleteMedia(ctx context.Context, userID string, mediaID s
 	}
 
 	return nil
+}
+
+// DeleteByURL xoá media theo URL Cloudinary. Bỏ qua khi không tìm thấy row
+// (media hotlink/seed) hoặc row thuộc user khác — tránh xoá nhầm dữ liệu.
+func (s *mediaService) DeleteByURL(ctx context.Context, userID, fileURI string) error {
+	if fileURI == "" {
+		return nil
+	}
+	media, err := s.repo.GetByFileURI(ctx, fileURI)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get media by url: %w", err)
+	}
+	if media.UserID != userID {
+		return nil
+	}
+	return s.DeleteMedia(ctx, userID, media.ID)
 }
 
 func (s *mediaService) GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error) {

@@ -34,6 +34,9 @@ type AdRepository interface {
 	CheckAdOwnership(adID, partnerID string) (bool, error)
 	UpdateAdFields(ad *models.Ad, fields map[string]interface{}) error
 	DeleteAdMedia(adID string) error
+	// ListAdMedia/ReplaceAdMedia phục vụ thay toàn bộ media của ad (C2).
+	ListAdMedia(adID string) ([]models.AdMedia, error)
+	ReplaceAdMedia(adID string, mediaList []models.AdMedia) error
 	TrackActionAndDeduct(analytics *models.AdAnalytics) (bool, error)
 	ListAds(ctx context.Context, keyword, status string, limit, offset int) ([]dto.AdminAdListItem, error)
 	CountAds(ctx context.Context, keyword, status string) (int64, error)
@@ -150,6 +153,30 @@ func (r *adRepositoryImpl) ListByPartnerID(partnerID, keyword, status string, li
 	if err := r.db.Raw(query, args...).Scan(&items).Error; err != nil {
 		return nil, fmt.Errorf("list partner ads: %w", err)
 	}
+
+	// Gắn toàn bộ media để trang edit hiển thị/thay thế đúng cả carousel.
+	if len(items) > 0 {
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			ids = append(ids, item.ID)
+		}
+		var media []models.AdMedia
+		if err := r.db.Where("ad_id IN ?", ids).
+			Order("sort_order ASC, created_at ASC").
+			Find(&media).Error; err != nil {
+			return nil, fmt.Errorf("load partner ad media: %w", err)
+		}
+		byAd := make(map[string][]dto.FeedAdMedia, len(ids))
+		for _, item := range media {
+			byAd[item.AdID] = append(byAd[item.AdID], dto.FeedAdMedia{
+				URL:       item.URL,
+				MediaType: item.MediaType,
+			})
+		}
+		for i := range items {
+			items[i].MediaList = byAd[items[i].ID]
+		}
+	}
 	return items, nil
 }
 
@@ -224,6 +251,34 @@ func (r *adRepositoryImpl) UpdateAdFields(ad *models.Ad, fields map[string]inter
 // DeleteAdMedia xóa tất cả media của ad
 func (r *adRepositoryImpl) DeleteAdMedia(adID string) error {
 	return r.db.Where("ad_id = ?", adID).Delete(&models.AdMedia{}).Error
+}
+
+// ListAdMedia trả media hiện tại theo đúng thứ tự hiển thị.
+func (r *adRepositoryImpl) ListAdMedia(adID string) ([]models.AdMedia, error) {
+	var media []models.AdMedia
+	err := r.db.Where("ad_id = ?", adID).
+		Order("sort_order ASC, created_at ASC").
+		Find(&media).Error
+	if err != nil {
+		return nil, fmt.Errorf("list ad media: %w", err)
+	}
+	return media, nil
+}
+
+// ReplaceAdMedia thay toàn bộ ad_media trong 1 transaction: xoá cũ rồi chèn mới.
+func (r *adRepositoryImpl) ReplaceAdMedia(adID string, mediaList []models.AdMedia) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("ad_id = ?", adID).Delete(&models.AdMedia{}).Error; err != nil {
+			return fmt.Errorf("delete old ad media: %w", err)
+		}
+		if len(mediaList) == 0 {
+			return nil
+		}
+		if err := tx.Create(&mediaList).Error; err != nil {
+			return fmt.Errorf("insert new ad media: %w", err)
+		}
+		return nil
+	})
 }
 
 // Cửa sổ chống trùng theo loại hành động: impression 30 phút (tránh đếm lặp

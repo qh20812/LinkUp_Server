@@ -73,6 +73,8 @@ type fakeAdRepo struct {
 
 	mediaBatch []models.AdMedia
 	mediaErr   error
+	adMedia    []models.AdMedia
+	replaced   []models.AdMedia
 
 	actionCounts map[string]int64
 	countsErr    error
@@ -192,6 +194,15 @@ func (f *fakeAdRepo) CreateMediaBatch(items []models.AdMedia) error {
 	return f.mediaErr
 }
 
+func (f *fakeAdRepo) ListAdMedia(_ string) ([]models.AdMedia, error) {
+	return f.adMedia, nil
+}
+
+func (f *fakeAdRepo) ReplaceAdMedia(_ string, items []models.AdMedia) error {
+	f.replaced = items
+	return f.mediaErr
+}
+
 func (f *fakeAdRepo) FindByID(_ string) (*models.Ad, error) {
 	if f.findErr != nil {
 		return nil, f.findErr
@@ -224,6 +235,7 @@ type uploadFakeMediaService struct {
 	upload   func(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error)
 	duration func(ctx context.Context, publicID string) (float64, error)
 	deleted  []string
+	cleaned  []string
 }
 
 func (f *uploadFakeMediaService) AutoApproveUpload(ctx context.Context, userID string, file *multipart.FileHeader) (*models.Media, error) {
@@ -239,6 +251,11 @@ func (f *uploadFakeMediaService) GetVideoDurationSeconds(ctx context.Context, pu
 
 func (f *uploadFakeMediaService) DeleteMedia(_ context.Context, _ string, mediaID string) error {
 	f.deleted = append(f.deleted, mediaID)
+	return nil
+}
+
+func (f *uploadFakeMediaService) DeleteByURL(_ context.Context, _ string, fileURI string) error {
+	f.cleaned = append(f.cleaned, fileURI)
 	return nil
 }
 
@@ -818,6 +835,88 @@ func TestGetAdPerformance_RangeLimitedForBasicPackage(t *testing.T) {
 }
 
 func ptrString(v string) *string { return &v }
+
+// ─── C2: thay media khi sửa ad ────────────────────────────────────────────
+
+func TestReplaceMedia_SwapsAndCleansOld(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner: true,
+		existing: &models.Ad{
+			ID:     "ad-1",
+			Status: models.AdStatusActive,
+			Format: models.AdFormatImage,
+		},
+		adMedia: []models.AdMedia{{ID: "old", AdID: "ad-1", URL: "https://cdn/old.jpg"}},
+	}
+	pkg := &fakePackageRepo{sub: newActiveSubscription()}
+	mediaSvc := &uploadFakeMediaService{
+		upload: func(context.Context, string, *multipart.FileHeader) (*models.Media, error) {
+			return &models.Media{ID: "media-new", FileURI: "https://cdn/new.jpg", FileType: "image/jpeg"}, nil
+		},
+	}
+	svc := NewAdService(repo, pkg, mediaSvc)
+
+	ad, err := svc.ReplaceMedia(context.Background(), "ad-1", "partner-1", []*multipart.FileHeader{
+		adUploadFile("new.jpg", "image/jpeg"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(repo.replaced) != 1 || repo.replaced[0].URL != "https://cdn/new.jpg" {
+		t.Fatalf("media mới chưa được ghi: %+v", repo.replaced)
+	}
+	if ad.MediaList == nil || len(ad.MediaList) != 1 {
+		t.Fatalf("ad trả về phải kèm media mới")
+	}
+	if len(mediaSvc.cleaned) != 1 || mediaSvc.cleaned[0] != "https://cdn/old.jpg" {
+		t.Fatalf("media cũ phải được dọn, got %v", mediaSvc.cleaned)
+	}
+	if len(mediaSvc.deleted) != 0 {
+		t.Fatalf("không được xoá media mới, got %v", mediaSvc.deleted)
+	}
+}
+
+func TestReplaceMedia_BlocksCompletedAd(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-2", Status: models.AdStatusCompleted, Format: models.AdFormatImage},
+	}
+	svc := NewAdService(repo, &fakePackageRepo{sub: newActiveSubscription()}, &uploadFakeMediaService{})
+
+	_, err := svc.ReplaceMedia(context.Background(), "ad-2", "partner-1", []*multipart.FileHeader{
+		adUploadFile("new.jpg", "image/jpeg"),
+	})
+	if err == nil {
+		t.Fatal("expected error for completed ad")
+	}
+	appErr, ok := errorsapp.IsAppError(err)
+	if !ok || appErr.Code != errorsapp.ErrCodeAdCannotEdit {
+		t.Fatalf("expected ad.CANNOT_EDIT, got %v", err)
+	}
+}
+
+func TestReplaceMedia_RejectsInvalidCount(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-3", Status: models.AdStatusPending, Format: models.AdFormatImage},
+	}
+	svc := NewAdService(repo, &fakePackageRepo{sub: newActiveSubscription()}, &uploadFakeMediaService{})
+
+	_, err := svc.ReplaceMedia(context.Background(), "ad-3", "partner-1", []*multipart.FileHeader{
+		adUploadFile("1.jpg", "image/jpeg"),
+		adUploadFile("2.jpg", "image/jpeg"),
+	})
+	if err == nil {
+		t.Fatal("expected error for 2 files with image format")
+	}
+	appErr, ok := errorsapp.IsAppError(err)
+	if !ok || appErr.Code != errorsapp.ErrCodeAdMediaCountInvalid {
+		t.Fatalf("expected ad.MEDIA_COUNT_INVALID, got %v", err)
+	}
+	if len(repo.replaced) != 0 {
+		t.Fatal("không được thay media khi validate lỗi")
+	}
+}
 
 // ─── C8: upload media, duration và cleanup ────────────────────────────────
 

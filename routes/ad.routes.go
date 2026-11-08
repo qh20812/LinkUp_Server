@@ -53,6 +53,13 @@ func RegisterAdRoutes(
 			ctrl.UpdateAd,
 		)
 
+		adsManagement.PUT("/:id/media",
+			middlewares.AuthMiddleware(env, db),
+			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),
+			middlewares.CheckAdOwnership(db, adService),
+			ctrl.ReplaceAdMedia,
+		)
+
 		adsManagement.DELETE("/:id",
 			middlewares.AuthMiddleware(env, db),
 			middlewares.RequireRoles(db, models.RoleSuperAdmin, models.RoleAdmin, models.RolePartner),

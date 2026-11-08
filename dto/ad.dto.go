@@ -134,6 +134,7 @@ type PartnerAdListItem struct {
 	Clicks          int64      `json:"clicks"`
 	CTR             float64    `json:"ctr"`
 	MediaURI        string     `json:"media_uri"`
+	MediaList       []FeedAdMedia `json:"media_list,omitempty"`
 	TargetGender    string     `json:"target_gender"`
 	TargetAgeMin    int        `json:"target_age_min"`
 	TargetAgeMax    int        `json:"target_age_max"`
