@@ -1002,9 +1002,18 @@ func (s *ChatService) ReactToMessage(ctx context.Context, userID, chatID, messag
 
 	reactions := s.GetMessageReactions(ctx, []string{messageID})[messageID]
 
-	// Thông báo "thích" tin nhắn cho người gửi (chỉ khi thêm reaction mới).
+	// Thông báo "thích" tin nhắn cho người gửi — CHỈ lần reaction ĐẦU TIÊN của
+	// user trên tin này (user được thả nhiều emoji → tránh spam notif).
 	if action == "added" && userID != msg.SenderID && s.notifService != nil {
-		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+		mine := 0
+		for _, r := range reactions {
+			if r.UserID == userID {
+				mine++
+			}
+		}
+		if mine == 1 {
+			_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+		}
 	}
 
 	return action, reactions, nil

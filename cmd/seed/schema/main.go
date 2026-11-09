@@ -453,7 +453,7 @@ func Run(env config.Env) error {
 			emoji_id VARCHAR(36) NOT NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
-			PRIMARY KEY (message_id, user_id),
+			PRIMARY KEY (message_id, user_id, emoji_id),
 			FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			FOREIGN KEY (emoji_id) REFERENCES emojis(id) ON DELETE CASCADE,
