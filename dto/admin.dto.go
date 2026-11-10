@@ -158,6 +158,7 @@ type AdminReportDetailResponse struct {
 	TargetPostID      *string   `json:"target_post_id,omitempty"`
 	TargetCommentID   *string   `json:"target_comment_id,omitempty"`
 	TargetCommunityID *string   `json:"target_community_id,omitempty"`
+	TargetAdID        *string   `json:"target_ad_id,omitempty"`
 	ReportType        string    `json:"report_type"`
 	ViolationRuleID   *string   `json:"violation_rule_id,omitempty"`
 	ViolationRuleTitle *string  `json:"violation_rule_title,omitempty"`
@@ -172,6 +173,16 @@ type AdminReportDetailResponse struct {
 	TargetComment   *AdminReportTargetComment   `json:"target_comment,omitempty"`
 	TargetUser      *AdminReportTargetUser      `json:"target_user,omitempty"`
 	TargetCommunity *AdminReportTargetCommunity `json:"target_community,omitempty"`
+	TargetAd        *AdminReportTargetAd        `json:"target_ad,omitempty"`
+}
+
+// AdminReportTargetAd snapshot quảng cáo bị báo cáo (để admin takedown 1 click).
+type AdminReportTargetAd struct {
+	AdID      string `json:"ad_id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	PartnerID string `json:"partner_id"`
+	MediaURI  string `json:"media_uri,omitempty"`
 }
 
 // AdminReportTargetPost snapshot bài viết bị báo cáo.
@@ -496,8 +507,9 @@ type AdminAdFilterInput struct {
 }
 
 type AdminAdStatusInput struct {
-	Status          string `json:"status" binding:"required,oneof=active paused completed rejected"`
+	Status          string `json:"status" binding:"required,oneof=active paused completed rejected suspended"`
 	RejectionReason string `json:"rejection_reason,omitempty"`
+	SuspendedReason string `json:"suspended_reason,omitempty"`
 }
 
 type AdminAdListItem struct {
@@ -518,6 +530,8 @@ type AdminAdListItem struct {
 	StartedAt          *time.Time `json:"started_at,omitempty"`
 	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
+	RejectionReason    *string    `json:"rejection_reason,omitempty"`
+	SuspendedReason    *string    `json:"suspended_reason,omitempty"`
 }
 
 type AdminAdListResponse struct {

@@ -65,6 +65,7 @@ func RegisterAdminRoutes(router *gin.Engine, adminController *controllers.AdminC
 
 	// ── Admin Ads ──
 	adminGroup.GET("/ads", adminController.ListAds)
+	adminGroup.GET("/ads/:id/analytics", adminController.GetAdAnalytics)
 	adminGroup.PATCH("/ads/:id/status", adminController.UpdateAdStatus)
 	adminGroup.DELETE("/ads/:id", adminController.DeleteAd)
 

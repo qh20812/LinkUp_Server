@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
+	"github.com/cloudinary/cloudinary-go/v2/api"
+	"github.com/cloudinary/cloudinary-go/v2/api/admin"
 	"github.com/cloudinary/cloudinary-go/v2/api/uploader"
 	"gorm.io/gorm"
 )
@@ -40,9 +42,15 @@ type MediaService interface {
 	// giữa chừng). Gọi 1 lần lúc boot.
 	ReconcileStaleStaging()
 	DeleteMedia(ctx context.Context, userID string, mediaID string) error
+	// DeleteByURL xoá media theo URL Cloudinary; bỏ qua nếu không tìm thấy
+	// (dữ liệu seed/hotlink) hoặc media thuộc user khác.
+	DeleteByURL(ctx context.Context, userID, fileURI string) error
 	GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error)
 	GetUserMedia(ctx context.Context, userID string) ([]models.Media, error)
 	GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error)
+	// GetVideoDurationSeconds đọc thời lượng video (giây) từ metadata Cloudinary.
+	// Trả lỗi khi không lấy được metadata để caller quyết định fail-open.
+	GetVideoDurationSeconds(ctx context.Context, publicID string) (float64, error)
 }
 
 type mediaService struct {
@@ -311,6 +319,25 @@ func (s *mediaService) DeleteMedia(ctx context.Context, userID string, mediaID s
 	return nil
 }
 
+// DeleteByURL xoá media theo URL Cloudinary. Bỏ qua khi không tìm thấy row
+// (media hotlink/seed) hoặc row thuộc user khác — tránh xoá nhầm dữ liệu.
+func (s *mediaService) DeleteByURL(ctx context.Context, userID, fileURI string) error {
+	if fileURI == "" {
+		return nil
+	}
+	media, err := s.repo.GetByFileURI(ctx, fileURI)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get media by url: %w", err)
+	}
+	if media.UserID != userID {
+		return nil
+	}
+	return s.DeleteMedia(ctx, userID, media.ID)
+}
+
 func (s *mediaService) GetUserStorageStatus(ctx context.Context, userID string) (quota, used, available float64, err error) {
 	quota, used, err = s.repo.GetUserStorageInfo(ctx, userID)
 	if err != nil {
@@ -329,6 +356,37 @@ func (s *mediaService) GetUserMedia(ctx context.Context, userID string) ([]model
 
 func (s *mediaService) GetByPostIDs(ctx context.Context, postIDs []string) (map[string][]models.Media, error) {
 	return s.repo.GetByPostIDs(ctx, postIDs)
+}
+
+// GetVideoDurationSeconds lấy duration (giây) từ Cloudinary Admin API.
+// Metadata được trả trong VideoMetadata khi bật MediaMetadata.
+func (s *mediaService) GetVideoDurationSeconds(ctx context.Context, publicID string) (float64, error) {
+	if s.cloudinary == nil {
+		return 0, fmt.Errorf("cloudinary chưa được cấu hình")
+	}
+
+	withMetadata := true
+	res, err := s.cloudinary.Admin.Asset(ctx, admin.AssetParams{
+		PublicID:      publicID,
+		AssetType:     api.Video,
+		MediaMetadata: &withMetadata,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("admin asset: %w", err)
+	}
+	if res == nil || res.VideoMetadata == nil {
+		return 0, fmt.Errorf("không có metadata video")
+	}
+
+	raw, ok := res.VideoMetadata["duration"]
+	if !ok {
+		return 0, fmt.Errorf("metadata thiếu duration")
+	}
+	duration, ok := raw.(float64)
+	if !ok || duration <= 0 {
+		return 0, fmt.Errorf("duration không hợp lệ: %v", raw)
+	}
+	return duration, nil
 }
 
 func parseCloudinaryPublicID(fileURI string) (string, string, error) {

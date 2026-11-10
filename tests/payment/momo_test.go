@@ -16,12 +16,13 @@ import (
 
 func momoTestEnv(endpoint string) config.Env {
 	return config.Env{
-		MoMoPartnerCode: "PC",
-		MoMoAccessKey:   "AK",
-		MoMoSecretKey:   "SECRET",
-		MoMoEndpoint:    endpoint,
-		MoMoRedirectURL: "https://example.test/return",
-		MoMoIPNURL:      "https://example.test/ipn",
+		MoMoPartnerCode:     "PC",
+		MoMoAccessKey:       "AK",
+		MoMoSecretKey:       "SECRET",
+		MoMoEndpoint:        endpoint,
+		MoMoRedirectURL:     "https://example.test/return",
+		MoMoIPNURL:          "https://example.test/ipn",
+		PaymentMoMoEnabled:  true,
 	}
 }
 

@@ -75,10 +75,46 @@ type AdPerformanceResponse struct {
 	VideoCompletions int64      `json:"video_completions,omitempty"`
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+
+	// Cost là chi phí trong khoảng thời gian được hỏi (legacy: toàn đời).
+	Cost float64 `json:"cost"`
+	// From/To/Limited/Series chỉ có khi client truyền from & to.
+	From    string          `json:"from,omitempty"`
+	To      string          `json:"to,omitempty"`
+	Limited bool            `json:"limited,omitempty"`
+	Series  []AdDailyMetric `json:"series,omitempty"`
+}
+
+// AdDailyMetric là một điểm trong chuỗi thời gian của analytics.
+type AdDailyMetric struct {
+	Date             string  `json:"date"`
+	Impressions      int64   `json:"impressions"`
+	Clicks           int64   `json:"clicks"`
+	Views            int64   `json:"views"`
+	Swipes           int64   `json:"swipes"`
+	VideoStarts      int64   `json:"video_starts"`
+	VideoCompletions int64   `json:"video_completions"`
+	Cost             float64 `json:"cost"`
 }
 
 type TrackActionInput struct {
 	ActionType string `json:"action_type" binding:"required,oneof=impression view click swipe video_start video_end"`
+}
+
+// FeedAdItem là DTO CÔNG KHAI cho feed: chỉ field cần để render, không lộ
+// partner_id/budget/total_spent/CPM/CPC/package của đối tác.
+type FeedAdItem struct {
+	ID        string        `json:"id"`
+	Title     string        `json:"title"`
+	Content   string        `json:"content"`
+	Format    string        `json:"format"`
+	TargetURL string        `json:"target_url"`
+	MediaList []FeedAdMedia `json:"media_list,omitempty" gorm:"-"`
+}
+
+type FeedAdMedia struct {
+	URL       string `json:"url"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 type PartnerAdListItem struct {
@@ -98,6 +134,7 @@ type PartnerAdListItem struct {
 	Clicks          int64      `json:"clicks"`
 	CTR             float64    `json:"ctr"`
 	MediaURI        string     `json:"media_uri"`
+	MediaList       []FeedAdMedia `json:"media_list,omitempty" gorm:"-"`
 	TargetGender    string     `json:"target_gender"`
 	TargetAgeMin    int        `json:"target_age_min"`
 	TargetAgeMax    int        `json:"target_age_max"`
@@ -106,6 +143,7 @@ type PartnerAdListItem struct {
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	RejectionReason *string    `json:"rejection_reason,omitempty"`
+	SuspendedReason *string    `json:"suspended_reason,omitempty"`
 }
 
 // JSONStringList đọc một cột JSON (mảng string) của MySQL vào []string.

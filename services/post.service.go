@@ -1118,7 +1118,7 @@ func (s *postService) DeletePost(ctx context.Context, userID, postID string) err
 					bgCtx,
 					targetUserID,
 					&senderID,
-					models.NotificationTypeMessage,
+					models.NotificationTypeModeration,
 					"Một bài viết trong danh sách dấu trang (Bookmark) của bạn đã bị chủ sở hữu xóa.",
 					nil, nil, nil,
 				)

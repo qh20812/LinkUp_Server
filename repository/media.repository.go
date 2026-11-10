@@ -44,6 +44,16 @@ func (r *MediaRepository) GetByID(ctx context.Context, id string) (*models.Media
 	return &media, nil
 }
 
+// GetByFileURI tìm media theo URL Cloudinary (dùng khi thay media quảng cáo).
+func (r *MediaRepository) GetByFileURI(ctx context.Context, fileURI string) (*models.Media, error) {
+	var media models.Media
+	err := r.db.WithContext(ctx).Where("file_uri = ?", fileURI).First(&media).Error
+	if err != nil {
+		return nil, err
+	}
+	return &media, nil
+}
+
 func (r *MediaRepository) GetFileTypesByIDs(ctx context.Context, ids []string) (map[string]string, error) {
 	if len(ids) == 0 {
 		return map[string]string{}, nil

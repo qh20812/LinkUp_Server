@@ -213,7 +213,7 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 			return
 		}
 		senderID := userID
-		s.notifService.Create(context.Background(), story.UserID, &senderID, notifType, content, nil, nil, nil, opts...)
+		s.notifService.CreateWithRedirects(context.Background(), story.UserID, &senderID, notifType, content, NotificationRedirects{UserID: &senderID}, opts...)
 	}
 
 	if req.Type == "react" {

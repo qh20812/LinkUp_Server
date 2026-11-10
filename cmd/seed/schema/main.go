@@ -273,13 +273,16 @@ func Run(env config.Env) error {
             cpm_price DOUBLE NOT NULL DEFAULT 0,
             cpc_price DOUBLE NOT NULL DEFAULT 0,
             max_impressions INT NOT NULL DEFAULT 0,
+            wallet_reserved BIGINT NOT NULL DEFAULT 0,
             started_at DATETIME NULL,
             expires_at DATETIME NULL,
             created_at DATETIME NOT NULL,
             FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE CASCADE,
             INDEX idx_ads_partner_id (partner_id),
             INDEX idx_ads_package_id (package_id),
-            INDEX idx_ads_status (status)
+            INDEX idx_ads_status (status),
+            INDEX idx_ads_partner_created (partner_id, created_at),
+            INDEX idx_ads_status_window (status, started_at, expires_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 8. Depends on users, posts
@@ -493,6 +496,7 @@ func Run(env config.Env) error {
 			target_post_id VARCHAR(36) NULL,
 			target_comment_id VARCHAR(36) NULL,
 			target_community_id VARCHAR(36) NULL,
+			target_ad_id VARCHAR(36) NULL,
 			violation_rule_id VARCHAR(36) NULL,
 			reason_detail TEXT,
 			status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -501,10 +505,73 @@ func Run(env config.Env) error {
 			FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_reports_reporter (reporter_id),
 			INDEX idx_reports_status (status),
-			INDEX idx_reports_reporter_status (reporter_id, status)
+			INDEX idx_reports_reporter_status (reporter_id, status),
+			INDEX idx_reports_target_ad (target_ad_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 21. Depends on users
+		`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+			id VARCHAR(36) PRIMARY KEY,
+			admin_id VARCHAR(36) NOT NULL,
+			action VARCHAR(50) NOT NULL,
+			target_type VARCHAR(30) NOT NULL,
+			target_id VARCHAR(36) NOT NULL,
+			reason TEXT NULL,
+			metadata TEXT NULL,
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_admin_audit_admin (admin_id),
+			INDEX idx_admin_audit_target (target_type, target_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// 21b. Ví trả trước + nạp tiền chuyển khoản (Track E)
+		`CREATE TABLE IF NOT EXISTS wallets (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			balance BIGINT NOT NULL DEFAULT 0,
+			reserved BIGINT NOT NULL DEFAULT 0,
+			currency VARCHAR(3) NOT NULL DEFAULT 'VND',
+			created_at DATETIME(3) NOT NULL,
+			updated_at DATETIME(3) NOT NULL,
+			UNIQUE INDEX idx_wallets_user (user_id),
+			INDEX idx_wallets_updated (updated_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		`CREATE TABLE IF NOT EXISTS wallet_transactions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			type VARCHAR(20) NOT NULL,
+			amount BIGINT NOT NULL,
+			balance_after BIGINT NOT NULL,
+			reserved_after BIGINT NOT NULL,
+			ref_type VARCHAR(30) NOT NULL DEFAULT '',
+			ref_id VARCHAR(36) NOT NULL DEFAULT '',
+			note VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_wallet_tx_user_created (user_id, created_at),
+			INDEX idx_wallet_tx_ref (ref_type, ref_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		`CREATE TABLE IF NOT EXISTS wallet_topups (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			code VARCHAR(20) NOT NULL,
+			amount BIGINT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			expires_at DATETIME(3) NOT NULL,
+			user_reported_at DATETIME(3) NULL,
+			proof_url VARCHAR(500) NOT NULL DEFAULT '',
+			confirmed_amount BIGINT NULL,
+			confirmed_by VARCHAR(36) NULL,
+			admin_note VARCHAR(500) NOT NULL DEFAULT '',
+			paid_at DATETIME(3) NULL,
+			created_at DATETIME(3) NOT NULL,
+			updated_at DATETIME(3) NOT NULL,
+			UNIQUE INDEX idx_wallet_topups_code (code),
+			INDEX idx_wallet_topups_user (user_id),
+			INDEX idx_wallet_topups_status_expires (status, expires_at),
+			INDEX idx_wallet_topups_reported (user_reported_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		`CREATE TABLE IF NOT EXISTS moderation_logs (
 			id VARCHAR(36) PRIMARY KEY,
 			moderator_id VARCHAR(36) NOT NULL,
@@ -526,6 +593,8 @@ func Run(env config.Env) error {
 			redirect_post_id VARCHAR(36) NULL,
 			redirect_user_id VARCHAR(36) NULL,
 			redirect_comment_id VARCHAR(36) NULL,
+			redirect_community_id VARCHAR(36) NULL,
+			redirect_ad_id VARCHAR(36) NULL,
 			content TEXT,
 			is_read TINYINT(1) NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
@@ -566,7 +635,8 @@ func Run(env config.Env) error {
 			created_at DATETIME NOT NULL,
 			FOREIGN KEY (ad_id) REFERENCES ads(id) ON DELETE CASCADE,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-			INDEX idx_ad_analytics_ad_id (ad_id)
+			INDEX idx_ad_analytics_ad_id (ad_id),
+			INDEX idx_ad_analytics_action_time (ad_id, action_type, created_at)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// 25. Depends on users, roles
@@ -990,6 +1060,7 @@ func Run(env config.Env) error {
 			supports_carousel TINYINT(1) DEFAULT 0,
 			has_advanced_analytics TINYINT(1) DEFAULT 0,
 			sort_order BIGINT DEFAULT 0,
+			is_active TINYINT(1) NOT NULL DEFAULT 1,
 			created_at DATETIME(3) NULL
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -1011,11 +1082,12 @@ func Run(env config.Env) error {
 			started_at DATETIME(3) NULL,
 			expires_at DATETIME(3) NULL,
 			status VARCHAR(20) DEFAULT 'active',
-			auto_renew TINYINT(1) DEFAULT 1,
+			auto_renew TINYINT(1) DEFAULT 0,
 			created_at DATETIME(3) NULL,
 			updated_at DATETIME(3) NULL,
 			INDEX idx_partner_subscriptions_user_id (user_id),
-			INDEX idx_partner_subscriptions_package_id (package_id)
+			INDEX idx_partner_subscriptions_package_id (package_id),
+			INDEX idx_ps_user_status (user_id, status)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
 		// payment_transactions — giao dịch thanh toán gói quảng cáo qua VNPay.
@@ -1146,6 +1218,8 @@ func Run(env config.Env) error {
 		{"target_age_max", "INT NOT NULL DEFAULT 100"},
 		{"target_locations", "JSON NULL"},
 		{"rejection_reason", "TEXT NULL"},
+		{"suspended_reason", "TEXT NULL"},
+		{"wallet_reserved", "BIGINT NOT NULL DEFAULT 0"},
 	} {
 		if err := addColumnIfMissing(database, "ads", col.name, col.def); err != nil {
 			return fmt.Errorf("schema: add ads.%s: %w", col.name, err)
@@ -1153,6 +1227,12 @@ func Run(env config.Env) error {
 	}
 	if err := addColumnIfMissing(database, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0"); err != nil {
 		return fmt.Errorf("schema: add ad_analytics.cost: %w", err)
+	}
+	if err := addColumnIfMissing(database, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("schema: add ad_packages.is_active: %w", err)
+	}
+	if err := addColumnIfMissing(database, "reports", "target_ad_id", "VARCHAR(36) NULL"); err != nil {
+		return fmt.Errorf("schema: add reports.target_ad_id: %w", err)
 	}
 
 	// Phase 4 fix: Idempotent ALTER TABLE statements (previously raw ALTER TABLE

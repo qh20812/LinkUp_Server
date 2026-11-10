@@ -802,7 +802,7 @@ func (s *ContributionService) checkAndPromoteToMod(ctx context.Context, contribu
 			return nil
 		}
 
-		s.notificationService.Create(ctx, contribution.UserID, nil, models.NotificationTypeCommunityRoleChanged, "bạn đã được thăng chức lên Moderator nhờ điểm đóng góp", nil, nil, nil)
+		s.notificationService.CreateWithRedirects(ctx, contribution.UserID, nil, models.NotificationTypeCommunityRoleChanged, "bạn đã được thăng chức lên Moderator nhờ điểm đóng góp", NotificationRedirects{CommunityID: &contribution.CommunityID})
 		contribution.PromotedToMod = true
 	}
 	return nil

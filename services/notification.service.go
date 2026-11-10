@@ -40,11 +40,21 @@ type PushOption func(*pushConfig)
 
 type pushConfig struct {
 	body string
+	skip bool
 }
 
 func WithPushBody(body string) PushOption {
 	return func(c *pushConfig) {
 		c.body = body
+	}
+}
+
+// WithoutPush lưu notification trong DB + đẩy realtime qua WS nhưng không gửi
+// push FCM/APNs. Dùng cho thông báo xác nhận ngay sau một thao tác của chính
+// người dùng (vd: vừa gửi báo cáo) — họ đã thấy toast, push thêm là nhiễu.
+func WithoutPush() PushOption {
+	return func(c *pushConfig) {
+		c.skip = true
 	}
 }
 
@@ -60,7 +70,7 @@ func applyPushOptions(opts []PushOption) pushConfig {
 // type 'message' mang chat id trong redirect_comment_id (chat.service.go,
 // group_message.service.go).
 func pushThreadID(notifType models.NotificationType, redirectCommentID *string) string {
-	if notifType == models.NotificationTypeMessage && redirectCommentID != nil {
+	if (notifType == models.NotificationTypeMessage || notifType == models.NotificationTypeMessageReact) && redirectCommentID != nil {
 		return *redirectCommentID
 	}
 	return ""
@@ -84,7 +94,28 @@ func truncateRunes(s string, max int) string {
 	return string(runes[:max]) + "…"
 }
 
+// NotificationRedirects — đích điều hướng của notification.
+// CommentID mang comment ID (report) hoặc chat ID (type message, message_react,
+// moderation của nhóm) theo convention hiện có của hệ thống.
+type NotificationRedirects struct {
+	PostID      *string
+	UserID      *string
+	CommentID   *string
+	CommunityID *string
+	AdID        *string
+}
+
+// Create giữ signature cũ (3 redirect) để không phải sửa toàn bộ call site.
 func (s *NotificationService) Create(ctx context.Context, receiverID string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string, opts ...PushOption) (*models.Notification, error) {
+	return s.CreateWithRedirects(ctx, receiverID, senderID, notifType, content, NotificationRedirects{
+		PostID:    redirectPostID,
+		UserID:    redirectUserID,
+		CommentID: redirectCommentID,
+	}, opts...)
+}
+
+// CreateWithRedirects tạo notification với đầy đủ 5 field điều hướng.
+func (s *NotificationService) CreateWithRedirects(ctx context.Context, receiverID string, senderID *string, notifType models.NotificationType, content string, r NotificationRedirects, opts ...PushOption) (*models.Notification, error) {
 	pref, err := s.prefRepo.GetByUserID(ctx, receiverID)
 	if err != nil {
 		return nil, errorsapp.Wrap(errorsapp.ErrCodeNotificationCreateFailed, err)
@@ -104,23 +135,26 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 		return nil, nil
 	}
 
-	pushBody := applyPushOptions(opts).body
+	pushCfg := applyPushOptions(opts)
+	pushBody := pushCfg.body
 	if pushBody == "" {
 		pushBody = content
 	}
 
 	now := time.Now().UTC()
 	notification := &models.Notification{
-		ID:                utils.GenerateUUID(),
-		ReceiverID:        receiverID,
-		SenderID:          senderID,
-		Type:              notifType,
-		RedirectPostID:    redirectPostID,
-		RedirectUserID:    redirectUserID,
-		RedirectCommentID: redirectCommentID,
-		Content:           content,
-		IsRead:            false,
-		CreatedAt:         now,
+		ID:                  utils.GenerateUUID(),
+		ReceiverID:          receiverID,
+		SenderID:            senderID,
+		Type:                notifType,
+		RedirectPostID:      r.PostID,
+		RedirectUserID:      r.UserID,
+		RedirectCommentID:   r.CommentID,
+		RedirectCommunityID: r.CommunityID,
+		RedirectAdID:        r.AdID,
+		Content:             content,
+		IsRead:              false,
+		CreatedAt:           now,
 	}
 
 	if err := s.notifRepo.Create(ctx, notification); err != nil {
@@ -135,17 +169,32 @@ func (s *NotificationService) Create(ctx context.Context, receiverID string, sen
 	})
 
 	senderName, senderAvatar := senderProfileFields(senderMap, senderID)
-	s.sendPush(ctx, receiverID, senderName, senderAvatar, pushBody, pushThreadID(notifType, redirectCommentID), map[string]interface{}{
-		"type":               string(notifType),
-		"redirect_post_id":    redirectPostID,
-		"redirect_user_id":    redirectUserID,
-		"redirect_comment_id": redirectCommentID,
+	if pushCfg.skip {
+		return notification, nil
+	}
+	s.sendPush(ctx, receiverID, senderName, senderAvatar, pushBody, pushThreadID(notifType, r.CommentID), map[string]interface{}{
+		"type":                 string(notifType),
+		"redirect_post_id":      r.PostID,
+		"redirect_user_id":      r.UserID,
+		"redirect_comment_id":   r.CommentID,
+		"redirect_community_id": r.CommunityID,
+		"redirect_ad_id":        r.AdID,
 	})
 
 	return notification, nil
 }
 
+// CreateBulk giữ signature cũ (3 redirect) cho các call site hiện có.
 func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []string, senderID *string, notifType models.NotificationType, content string, redirectPostID, redirectUserID, redirectCommentID *string, opts ...PushOption) ([]models.Notification, error) {
+	return s.CreateBulkWithRedirects(ctx, receiverIDs, senderID, notifType, content, NotificationRedirects{
+		PostID:    redirectPostID,
+		UserID:    redirectUserID,
+		CommentID: redirectCommentID,
+	}, opts...)
+}
+
+// CreateBulkWithRedirects tạo notification hàng loạt với đầy đủ 5 field điều hướng.
+func (s *NotificationService) CreateBulkWithRedirects(ctx context.Context, receiverIDs []string, senderID *string, notifType models.NotificationType, content string, r NotificationRedirects, opts ...PushOption) ([]models.Notification, error) {
 	if len(receiverIDs) == 0 {
 		return nil, nil
 	}
@@ -168,16 +217,18 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 		}
 
 		notifications = append(notifications, models.Notification{
-			ID:                utils.GenerateUUID(),
-			ReceiverID:        receiverID,
-			SenderID:          senderID,
-			Type:              notifType,
-			RedirectPostID:    redirectPostID,
-			RedirectUserID:    redirectUserID,
-			RedirectCommentID: redirectCommentID,
-			Content:           content,
-			IsRead:            false,
-			CreatedAt:         now,
+			ID:                  utils.GenerateUUID(),
+			ReceiverID:          receiverID,
+			SenderID:            senderID,
+			Type:                notifType,
+			RedirectPostID:      r.PostID,
+			RedirectUserID:      r.UserID,
+			RedirectCommentID:   r.CommentID,
+			RedirectCommunityID: r.CommunityID,
+			RedirectAdID:        r.AdID,
+			Content:             content,
+			IsRead:              false,
+			CreatedAt:           now,
 		})
 	}
 
@@ -191,7 +242,7 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 
 	senderMap := s.loadSenderProfiles(ctx, senderID)
 	senderName, senderAvatar := senderProfileFields(senderMap, senderID)
-	threadID := pushThreadID(notifType, redirectCommentID)
+	threadID := pushThreadID(notifType, r.CommentID)
 	for i := range notifications {
 		resp := dto.ToNotificationResponseList([]models.Notification{notifications[i]}, senderMap)[0]
 		s.hub.SendToUser(notifications[i].ReceiverID, ws.OutgoingMessage{
@@ -200,10 +251,12 @@ func (s *NotificationService) CreateBulk(ctx context.Context, receiverIDs []stri
 		})
 
 		s.sendPush(ctx, notifications[i].ReceiverID, senderName, senderAvatar, pushBody, threadID, map[string]interface{}{
-			"type":               string(notifType),
-			"redirect_post_id":    redirectPostID,
-			"redirect_user_id":    redirectUserID,
-			"redirect_comment_id": redirectCommentID,
+			"type":                 string(notifType),
+			"redirect_post_id":      r.PostID,
+			"redirect_user_id":      r.UserID,
+			"redirect_comment_id":   r.CommentID,
+			"redirect_community_id": r.CommunityID,
+			"redirect_ad_id":        r.AdID,
 		})
 	}
 
@@ -375,6 +428,16 @@ func isNotificationEnabled(pref *models.NotificationPreference, notifType models
 		return pref.CommunityEnabled
 	case models.NotificationTypeVoiceCall:
 		return pref.VoiceCallEnabled
+	case models.NotificationTypeReportSubmitted, models.NotificationTypeReportResult:
+		// Báo cáo luôn bật: chưa có preference riêng và không được phụ thuộc
+		// vào "Tin nhắn" (trước đây dùng type message nên bị tắt theo).
+		return true
+	case models.NotificationTypeMessageReact:
+		// Reaction tin nhắn là hoạt động chat → đi theo preference Tin nhắn.
+		return pref.MessageEnabled
+	case models.NotificationTypeModeration, models.NotificationTypeWallet, models.NotificationTypePackage:
+		// Thông báo kiểm duyệt / ví / gói luôn bật: chưa có preference riêng.
+		return true
 	default:
 		return true
 	}

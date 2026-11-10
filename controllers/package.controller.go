@@ -35,6 +35,44 @@ func (ctrl *PackageController) GetPackages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": list})
 }
 
+func (ctrl *PackageController) AdminListPackages(c *gin.Context) {
+	list, err := ctrl.service.AdminListPackages()
+	if err != nil {
+		errorsapp.Respond(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": list})
+}
+
+func (ctrl *PackageController) AdminCreatePackage(c *gin.Context) {
+	var input dto.PackageInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	pkg, err := ctrl.service.AdminCreatePackage(input)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"message": "Tạo gói quảng cáo thành công", "data": pkg})
+}
+
+func (ctrl *PackageController) AdminUpdatePackage(c *gin.Context) {
+	id := c.Param("id")
+	var input dto.PackageInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	pkg, err := ctrl.service.AdminUpdatePackage(id, input)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật gói quảng cáo thành công", "data": pkg})
+}
+
 func (ctrl *PackageController) Subscribe(c *gin.Context) {
 	var input dto.SubscribePackageInput
 	if err := c.ShouldBindJSON(&input); err != nil {

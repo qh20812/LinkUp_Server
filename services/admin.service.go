@@ -47,6 +47,9 @@ type AdminService struct {
 	adminRepo           repository.AdminRepository
 	mediaRepo           *repository.MediaRepository
 	adRepo              repository.AdRepository
+	adService           AdService
+	packageRepo         repository.PackageRepository
+	auditRepo           *repository.AdminAuditRepository
 	violationRuleRepo   *repository.ViolationRuleRepository
 	notificationService *NotificationService
 	cloudinary          *cloudinary.Cloudinary
@@ -78,6 +81,42 @@ func (s *AdminService) SetCloudinary(cld *cloudinary.Cloudinary) {
 // SetViolationRuleRepository gán repo để tra cứu tên rule trong report detail.
 func (s *AdminService) SetViolationRuleRepository(repo *repository.ViolationRuleRepository) {
 	s.violationRuleRepo = repo
+}
+
+// SetAdService cho admin xem thống kê quảng cáo của mọi partner. Dùng setter để
+// không phải đổi chữ ký NewAdminService (đang được nhiều nơi gọi).
+func (s *AdminService) SetAdService(adService AdService) {
+	s.adService = adService
+}
+
+// SetPackageRepository cho admin xoá ad trả lại slot cho partner.
+func (s *AdminService) SetPackageRepository(repo repository.PackageRepository) {
+	s.packageRepo = repo
+}
+
+// SetAuditRepository ghi nhật ký hành động quản trị trên quảng cáo.
+func (s *AdminService) SetAuditRepository(repo *repository.AdminAuditRepository) {
+	s.auditRepo = repo
+}
+
+// logAudit ghi audit best-effort: lỗi ghi log không được làm hỏng hành động chính.
+func (s *AdminService) logAudit(ctx context.Context, adminID, action, targetType, targetID, reason, metadata string) {
+	if s.auditRepo == nil {
+		return
+	}
+	entry := &models.AdminAuditLog{
+		ID:         utils.GenerateUUID(),
+		AdminID:    adminID,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Reason:     reason,
+		Metadata:   metadata,
+		CreatedAt:  time.Now(),
+	}
+	if err := s.auditRepo.Create(ctx, entry); err != nil {
+		log.Printf("[audit] %s %s/%s failed: %v", action, targetType, targetID, err)
+	}
 }
 
 func (s *AdminService) GetDashboardAnalytics(ctx context.Context, adminID string, input dto.AdminAnalyticsFilterInput) (dto.AdminAnalyticsResponse, error) {
@@ -299,7 +338,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	utils.InvalidateAuthCache(targetUserID)
 
 	statusMsg := fmt.Sprintf("Trạng thái tài khoản của bạn đã được cập nhật thành: %s", status)
-	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, targetUserID, nil, models.NotificationTypeModeration, statusMsg, NotificationRedirects{})
 
 	return nil
 }
@@ -365,7 +404,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if expiresAt != nil {
 		banMsg += fmt.Sprintf(". Thời hạn: %s", expiresAt.Format("02/01/2006 15:04"))
 	}
-	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, banMsg, nil, &targetUserID, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, targetUserID, nil, models.NotificationTypeModeration, banMsg, NotificationRedirects{})
 
 	return dto.AdminBanUserResponse{
 		Message: "ban user thành công",
@@ -528,15 +567,13 @@ func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string
 	}
 
 	postIDPtr := postID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		post.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		"Bài viết của bạn đã bị ẩn vì: "+input.Reason,
-		&postIDPtr,
-		nil,
-		nil,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -591,15 +628,13 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 	}
 
 	postIDPtr := postID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		post.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		fmt.Sprintf("Bài viết của bạn đã được cập nhật trạng thái thành %s", newStatus),
-		&postIDPtr,
-		nil,
-		nil,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -737,16 +772,13 @@ func (s *AdminService) HideComment(ctx context.Context, superAdminID, commentID 
 	}
 
 	postIDPtr := comment.PostID
-	commentIDPtr := commentID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		comment.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		"Bình luận của bạn đã bị ẩn vì: "+input.Reason,
-		&postIDPtr,
-		nil,
-		&commentIDPtr,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -782,16 +814,13 @@ func (s *AdminService) RevealComment(ctx context.Context, superAdminID, commentI
 	}
 
 	postIDPtr := comment.PostID
-	commentIDPtr := commentID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		comment.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		"Bình luận của bạn đã được hiện lại",
-		&postIDPtr,
-		nil,
-		&commentIDPtr,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -883,6 +912,7 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 		TargetPostID:      report.TargetPostID,
 		TargetCommentID:   report.TargetCommentID,
 		TargetCommunityID: report.TargetCommunityID,
+		TargetAdID:        report.TargetAdID,
 		ReportType:       report.ReportType,
 		ViolationRuleID:  report.ViolationRuleID,
 		ReasonDetail:     report.ReasonDetail,
@@ -893,6 +923,23 @@ func (s *AdminService) GetReportDetail(ctx context.Context, adminID, reportID st
 	if report.ViolationRuleID != nil && s.violationRuleRepo != nil {
 		if rule, err := s.violationRuleRepo.FindByID(ctx, *report.ViolationRuleID); err == nil {
 			detail.ViolationRuleTitle = &rule.Title
+		}
+	}
+
+	if report.TargetAdID != nil {
+		detail.TargetType = "ad"
+		if ad, err := s.adRepo.FindByID(*report.TargetAdID); err == nil {
+			mediaURI := ""
+			if len(ad.MediaList) > 0 {
+				mediaURI = ad.MediaList[0].URL
+			}
+			detail.TargetAd = &dto.AdminReportTargetAd{
+				AdID:      ad.ID,
+				Title:     ad.Title,
+				Status:    string(ad.Status),
+				PartnerID: ad.PartnerID,
+				MediaURI:  mediaURI,
+			}
 		}
 	}
 
@@ -1157,7 +1204,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 	// Mô tả mục tiêu bằng ngôn ngữ tự nhiên (tên/tựa, không phải UUID) để
 	// người nhận thông báo hiểu đang nói về nội dung nào.
 	descriptor := "nội dung bạn đã báo cáo"
-	var postTitle, commentExcerpt, targetUsername string
+	var postTitle, commentExcerpt, targetUsername, commentPostID string
 	if report.TargetPostID != nil {
 		if post, err := s.postRepo.FindByID(ctx, *report.TargetPostID); err == nil {
 			postTitle = strings.TrimSpace(post.Title)
@@ -1171,6 +1218,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 	} else if report.TargetCommentID != nil {
 		if comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID); err == nil {
 			commentExcerpt = excerptRunes(comment.Content, 60)
+			commentPostID = comment.PostID
 			descriptor = fmt.Sprintf("bình luận %q", commentExcerpt)
 		} else {
 			descriptor = "bình luận bạn đã báo cáo"
@@ -1209,7 +1257,17 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 	default:
 		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xem xét: nội dung không vi phạm.", descriptor)
 	}
-	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
+	// Kết quả report dùng type riêng để không bị xếp vào tab "Tin nhắn" và
+	// không bị tắt theo preference tin nhắn. Report bình luận điều hướng về
+	// bài viết chứa bình luận (không phải trang chat).
+	var reporterPostID *string
+	switch {
+	case report.TargetPostID != nil:
+		reporterPostID = report.TargetPostID
+	case commentPostID != "":
+		reporterPostID = &commentPostID
+	}
+	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeReportResult, reporterMessage, reporterPostID, report.TargetUserID, nil)
 
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
@@ -1219,13 +1277,13 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 				label = excerptRunes(post.Content, 60)
 			}
 			targetMessage := fmt.Sprintf("Bài viết %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", excerptRunes(label, 60), input.Reason)
-			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
+			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeReportResult, targetMessage, report.TargetPostID, nil, nil)
 		}
 	} else if report.TargetUserID != nil {
 		if action != "ban" {
 			// Nhánh ban có thông báo riêng chi tiết hơn bên dưới — tránh gửi trùng.
 			targetMessage := "Tài khoản của bạn đã bị báo cáo và đã được xem xét bởi quản trị viên."
-			_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+			_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeReportResult, targetMessage, nil, report.TargetUserID, nil)
 		}
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
@@ -1234,7 +1292,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 				commentExcerpt = excerptRunes(comment.Content, 60)
 			}
 			targetMessage := fmt.Sprintf("Bình luận %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", commentExcerpt, input.Reason)
-			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
+			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeReportResult, targetMessage, &comment.PostID, nil, nil)
 		}
 	}
 
@@ -1247,7 +1305,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 			ctx,
 			*report.TargetUserID,
 			nil,
-			models.NotificationTypeMessage,
+			models.NotificationTypeReportResult,
 			fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", reason),
 			nil,
 			report.TargetUserID,
@@ -1462,26 +1520,113 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	if newStatus == string(ad.Status) {
 		return nil
 	}
+	oldStatus := ad.Status
 
-	// Moderation logic: chỉ cho phép approve khi ad đang pending
-	if newStatus == string(models.AdStatusActive) && ad.Status != models.AdStatusPending {
-		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+	rejectionReason := strings.TrimSpace(input.RejectionReason)
+	suspendedReason := strings.TrimSpace(input.SuspendedReason)
+	if suspendedReason == "" {
+		suspendedReason = rejectionReason
 	}
-	// Reject chỉ khi ad đang pending
-	if newStatus == string(models.AdStatusRejected) && ad.Status != models.AdStatusPending {
+
+	// State machine: admin chỉ chuyển được những cặp trạng thái có nghĩa.
+	switch newStatus {
+	case string(models.AdStatusActive):
+		// Duyệt từ pending, hoặc bỏ tạm dừng / gỡ takedown.
+		if ad.Status != models.AdStatusPending &&
+			ad.Status != models.AdStatusPaused &&
+			ad.Status != models.AdStatusSuspended {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+		ad.SuspendedReason = nil
+		ad.RejectionReason = nil
+	case string(models.AdStatusRejected):
+		if ad.Status != models.AdStatusPending {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+		if rejectionReason == "" {
+			return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
+		}
+	case string(models.AdStatusSuspended):
+		if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+		if suspendedReason == "" {
+			return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
+		}
+	case string(models.AdStatusPaused), string(models.AdStatusCompleted):
+		if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+			return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
+		}
+	default:
 		return errorsapp.New(errorsapp.ErrCodeAdminInvalidStatus)
-	}
-	// Reject phải có lý do
-	if newStatus == string(models.AdStatusRejected) && strings.TrimSpace(input.RejectionReason) == "" {
-		return errorsapp.New(errorsapp.ErrCodeAdminReasonRequired)
 	}
 
 	ad.Status = models.ParseAdStatus(newStatus)
 	if newStatus == string(models.AdStatusRejected) {
-		ad.RejectionReason = &input.RejectionReason
+		ad.RejectionReason = &rejectionReason
 	}
+	if newStatus == string(models.AdStatusSuspended) {
+		ad.SuspendedReason = &suspendedReason
+	}
+	// Duyệt/bật lại: đảm bảo ví giữ đủ ngân sách còn lại trước khi ad chạy.
+	if newStatus == string(models.AdStatusActive) && s.adService != nil {
+		if err := s.adService.ActivateBudgetReservation(ad.ID); err != nil {
+			return err
+		}
+	}
+
+	// Ad suspended không chiếm slot. Khi bật lại phải giữ slot trước; nếu gói
+	// đã đầy (do partner tạo ad khác) thì chặn thay vì vượt max_slots.
+	reservedSubID := ""
+	if newStatus == string(models.AdStatusActive) &&
+		oldStatus == models.AdStatusSuspended && s.packageRepo != nil {
+		sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID)
+		if subErr != nil {
+			return subErr
+		}
+		if sub == nil {
+			return errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
+		}
+		reserved, reserveErr := s.packageRepo.ReserveSlot(sub.ID)
+		if reserveErr != nil {
+			return reserveErr
+		}
+		if !reserved {
+			maxSlots := 0
+			if sub.Package != nil {
+				maxSlots = sub.Package.MaxSlots
+			}
+			return errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{
+				"used": sub.SlotsUsed,
+				"max":  maxSlots,
+			})
+		}
+		reservedSubID = sub.ID
+	}
+
 	if err := s.adRepo.Update(ad); err != nil {
+		// Trả slot vừa giữ nếu cập nhật thất bại, tránh kẹt slot.
+		if reservedSubID != "" {
+			_ = s.packageRepo.DecrementSlotsUsed(reservedSubID)
+		}
 		return fmt.Errorf("cập nhật trạng thái quảng cáo thất bại: %w", err)
+	}
+
+	// completed/suspended không chiếm slot → trả slot đang giữ. Chỉ trả khi
+	// trạng thái cũ có chiếm slot để tránh decrement hai lần.
+	if (newStatus == string(models.AdStatusCompleted) || newStatus == string(models.AdStatusSuspended)) &&
+		oldStatus.ConsumesSlot() && s.packageRepo != nil {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr == nil && sub != nil {
+			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+		}
+	}
+	// Từ chối/hoàn thành: trả phần ngân sách chưa tiêu về ví. Suspended giữ
+	// nguyên tiền giữ chỗ để có thể bật lại.
+	if (newStatus == string(models.AdStatusRejected) || newStatus == string(models.AdStatusCompleted)) && s.adService != nil {
+		if err := s.adService.ReleaseBudgetReservation(ad.ID); err != nil {
+			// Không chặn thao tác admin vì lỗi trả tiền; worker sẽ dọn lại.
+			log.Printf("admin: release budget reservation for ad %s: %v", ad.ID, err)
+		}
 	}
 
 	// Notify partner
@@ -1491,16 +1636,38 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 			return "phê duyệt"
 		case models.AdStatusRejected:
 			return "từ chối"
+		case models.AdStatusSuspended:
+			return "tạm ngưng"
 		default:
 			return "cập nhật trạng thái"
 		}
 	}())
-	if newStatus == string(models.AdStatusRejected) && input.RejectionReason != "" {
-		statusMsg += " Lý do: " + input.RejectionReason
+	if newStatus == string(models.AdStatusRejected) && rejectionReason != "" {
+		statusMsg += " Lý do: " + rejectionReason
 	}
-	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
+	if newStatus == string(models.AdStatusSuspended) && suspendedReason != "" {
+		statusMsg += " Lý do: " + suspendedReason
+	}
+	_, _ = s.notificationService.CreateWithRedirects(ctx, ad.PartnerID, nil, models.NotificationTypeModeration, statusMsg, NotificationRedirects{AdID: &ad.ID})
+
+	reason := rejectionReason
+	if newStatus == string(models.AdStatusSuspended) {
+		reason = suspendedReason
+	}
+	s.logAudit(ctx, adminID, "ad."+newStatus, "ad", ad.ID, reason, "")
 
 	return nil
+}
+
+// GetAdPerformance cho admin xem thống kê của bất kỳ quảng cáo nào.
+func (s *AdminService) GetAdPerformance(ctx context.Context, adminID, adID string, from, to *time.Time) (*dto.AdPerformanceResponse, error) {
+	if err := s.ensureAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
+	if s.adService == nil {
+		return nil, fmt.Errorf("admin: ad service chưa được khởi tạo")
+	}
+	return s.adService.GetAdPerformance(adID, "", true, from, to)
 }
 
 func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error {
@@ -1508,9 +1675,40 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 		return err
 	}
 
-	if err := s.adRepo.Delete(ctx, adID); err != nil {
+	ad, err := s.adRepo.FindByID(adID)
+	if err != nil {
+		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
+	}
+
+	// Trả ngân sách chưa tiêu về ví trước khi xoá (release cần row ad).
+	if s.adService != nil {
+		if releaseErr := s.adService.ReleaseBudgetReservation(adID); releaseErr != nil {
+			log.Printf("admin: release budget reservation for ad %s: %v", adID, releaseErr)
+		}
+	}
+
+	// Xoá media + ad trong 1 transaction (ad_media không có FK → nếu chỉ xoá ad
+	// sẽ để lại row mồ côi).
+	if err := s.adRepo.DeleteWithMedia(ctx, adID); err != nil {
 		return fmt.Errorf("xoá quảng cáo thất bại: %w", err)
 	}
+
+	// Trả slot cho gói đang hoạt động của partner — trước đây admin xoá ad làm
+	// slot bị kẹt vĩnh viễn vì không ai decrement. Ad completed/suspended đã
+	// trả slot lúc đổi trạng thái nên không trừ thêm.
+	if s.packageRepo != nil && ad.Status.ConsumesSlot() {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr == nil && sub != nil {
+			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+		}
+	}
+
+	// Báo cho partner biết quảng cáo bị gỡ.
+	if s.notificationService != nil {
+		msg := fmt.Sprintf("Quảng cáo '%s' của bạn đã bị quản trị viên xoá.", ad.Title)
+		_, _ = s.notificationService.CreateWithRedirects(ctx, ad.PartnerID, nil, models.NotificationTypeModeration, msg, NotificationRedirects{AdID: &ad.ID})
+	}
+
+	s.logAudit(ctx, adminID, "ad.delete", "ad", ad.ID, "", "")
 
 	return nil
 }
@@ -1703,7 +1901,7 @@ func (s *AdminService) moderateGroup(ctx context.Context, superAdminID, chatID s
 
 	if chat.CreatorID != nil {
 		content := fmt.Sprintf("Nhóm chat '%s' đã bị %s bởi quản trị viên. Lý do: %s", chat.Name, actionLabel, reason)
-		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notificationService.CreateWithRedirects(ctx, *chat.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommentID: &chatID})
 	}
 
 	return nil
@@ -1743,7 +1941,7 @@ func (s *AdminService) WarnGroup(ctx context.Context, superAdminID, chatID strin
 
 	if chat.CreatorID != nil {
 		content := fmt.Sprintf("Cảnh báo nhóm chat '%s': %s", chat.Name, input.Message)
-		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notificationService.CreateWithRedirects(ctx, *chat.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommentID: &chatID})
 	}
 
 	return nil
@@ -1903,7 +2101,7 @@ func (s *AdminService) moderateCommunity(ctx context.Context, adminID, community
 	}
 
 	content := fmt.Sprintf("Cộng đồng '%s' đã bị %s bởi quản trị viên. Lý do: %s", community.Name, actionLabel, reason)
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, community.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -1944,7 +2142,7 @@ func (s *AdminService) WarnCommunity(ctx context.Context, adminID, communityID s
 	}
 
 	content := fmt.Sprintf("Cảnh báo cộng đồng '%s': %s", community.Name, input.Message)
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, community.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -1999,7 +2197,7 @@ func (s *AdminService) RemoveCommunityMedia(ctx context.Context, adminID, commun
 	}
 
 	content := fmt.Sprintf("Cộng đồng '%s' đã bị quản trị viên gỡ %s. Lý do: %s", community.Name, label, reason)
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, community.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }

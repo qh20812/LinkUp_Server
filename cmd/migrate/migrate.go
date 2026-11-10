@@ -60,6 +60,40 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "messages", "media_group_id", "VARCHAR(36) NULL")
 	ensureIndex(db, "messages", "idx_messages_media_group_id", "media_group_id")
 
+	// Lý do admin hạ quảng cáo (status = suspended). Idempotent, không mất dữ liệu.
+	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
+	ensureColumn(db, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
+	ensureColumn(db, "reports", "target_ad_id", "VARCHAR(36) NULL")
+	// Đích điều hướng chuyên dụng cho notification cộng đồng / quảng cáo
+	// (trước đây community ID bị nhét vào redirect_user_id).
+	ensureColumn(db, "notifications", "redirect_community_id", "VARCHAR(36) NULL")
+	ensureColumn(db, "notifications", "redirect_ad_id", "VARCHAR(36) NULL")
+	// Phase 4: dữ liệu cũ nhét community ID vào redirect_user_id — chuyển sang
+	// cột chuyên dụng để web điều hướng đúng. Idempotent.
+	backfillNotificationCommunityRedirect(db)
+	ensureAdminAuditLogTable(db)
+
+	// Ví trả trước + nạp tiền chuyển khoản (Track E). Tạo bằng SQL thuần vì
+	// AutoMigrate có thể abort sớm ở comment_reactions trên DB cũ.
+	ensureWalletTables(db)
+	// Số tiền đang giữ chỗ cho ngân sách của từng quảng cáo. Cần cột riêng để
+	// release đúng phần chưa tiêu (không thể suy ra từ budget - total_spent khi
+	// ad được sửa ngân sách nhiều lần).
+	ensureColumn(db, "ads", "wallet_reserved", "BIGINT NOT NULL DEFAULT 0")
+	ensureIndex(db, "wallets", "idx_wallets_updated", "updated_at")
+	ensureIndex(db, "wallet_transactions", "idx_wallet_tx_user_created", "user_id, created_at")
+	ensureIndex(db, "wallet_transactions", "idx_wallet_tx_ref", "ref_type, ref_id")
+	ensureIndex(db, "wallet_topups", "idx_wallet_topups_status_expires", "status, expires_at")
+	ensureIndex(db, "wallet_topups", "idx_wallet_topups_reported", "user_reported_at")
+
+	// Index hỗ trợ tracking/serving: dedupe theo (ad, action, thời gian), lọc ad
+	// theo cửa sổ chạy, danh sách theo partner và gói đang hoạt động.
+	ensureColumn(db, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0")
+	ensureIndex(db, "ad_analytics", "idx_ad_analytics_action_time", "ad_id, action_type, created_at")
+	ensureIndex(db, "ads", "idx_ads_status_window", "status, started_at, expires_at")
+	ensureIndex(db, "ads", "idx_ads_partner_created", "partner_id, created_at")
+	ensureIndex(db, "partner_subscriptions", "idx_ps_user_status", "user_id, status")
+	ensureIndex(db, "reports", "idx_reports_target_ad", "target_ad_id")
 	// Thêm cột messages.forwarded_from/forwards_count cho tính năng chuyển tiếp
 	// (forward) tin nhắn: trỏ về tin gốc + số lần chuỗi đã được chuyển tiếp.
 	ensureColumn(db, "messages", "forwarded_from", "VARCHAR(36) NULL")
@@ -475,6 +509,122 @@ func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn st
 	if err := db.Exec("ALTER TABLE " + table + " ADD CONSTRAINT " + fkName +
 		" FOREIGN KEY (" + column + ") REFERENCES " + refTable + "(" + refColumn + ")").Error; err != nil {
 		log.Printf("Warning: ensure FK %s: %v", fkName, err)
+	}
+}
+
+// ensureWalletTables tạo 3 bảng của ví trả trước (wallets, wallet_transactions,
+// wallet_topups) bằng SQL thuần. Idempotent — chạy lại không lỗi, không mất dữ
+// liệu. Không dựa vào AutoMigrate vì AutoMigrate có thể abort sớm trên DB cũ.
+func ensureWalletTables(db *gorm.DB) {
+	if !db.Migrator().HasTable("wallets") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS wallets (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			balance BIGINT NOT NULL DEFAULT 0,
+			reserved BIGINT NOT NULL DEFAULT 0,
+			currency VARCHAR(3) NOT NULL DEFAULT 'VND',
+			created_at DATETIME(3) NOT NULL,
+			updated_at DATETIME(3) NOT NULL,
+			UNIQUE INDEX idx_wallets_user (user_id),
+			INDEX idx_wallets_updated (updated_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create wallets table: %v", err)
+		}
+	}
+
+	if !db.Migrator().HasTable("wallet_transactions") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS wallet_transactions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			type VARCHAR(20) NOT NULL,
+			amount BIGINT NOT NULL,
+			balance_after BIGINT NOT NULL,
+			reserved_after BIGINT NOT NULL,
+			ref_type VARCHAR(30) NOT NULL DEFAULT '',
+			ref_id VARCHAR(36) NOT NULL DEFAULT '',
+			note VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_wallet_tx_user_created (user_id, created_at),
+			INDEX idx_wallet_tx_ref (ref_type, ref_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create wallet_transactions table: %v", err)
+		}
+	}
+
+	if !db.Migrator().HasTable("wallet_topups") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS wallet_topups (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			code VARCHAR(20) NOT NULL,
+			amount BIGINT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			expires_at DATETIME(3) NOT NULL,
+			user_reported_at DATETIME(3) NULL,
+			proof_url VARCHAR(500) NOT NULL DEFAULT '',
+			confirmed_amount BIGINT NULL,
+			confirmed_by VARCHAR(36) NULL,
+			admin_note VARCHAR(500) NOT NULL DEFAULT '',
+			paid_at DATETIME(3) NULL,
+			created_at DATETIME(3) NOT NULL,
+			updated_at DATETIME(3) NOT NULL,
+			UNIQUE INDEX idx_wallet_topups_code (code),
+			INDEX idx_wallet_topups_user (user_id),
+			INDEX idx_wallet_topups_status_expires (status, expires_at),
+			INDEX idx_wallet_topups_reported (user_reported_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create wallet_topups table: %v", err)
+		}
+	}
+}
+
+// ensureAdminAuditLogTable tạo bảng audit bằng SQL thuần (AutoMigrate có thể
+// abort sớm ở comment_reactions nên không dựa vào nó).
+func ensureAdminAuditLogTable(db *gorm.DB) {
+	if db.Migrator().HasTable("admin_audit_logs") {
+		return
+	}
+	err := db.Exec(`CREATE TABLE IF NOT EXISTS admin_audit_logs (
+		id VARCHAR(36) PRIMARY KEY,
+		admin_id VARCHAR(36) NOT NULL,
+		action VARCHAR(50) NOT NULL,
+		target_type VARCHAR(30) NOT NULL,
+		target_id VARCHAR(36) NOT NULL,
+		reason TEXT NULL,
+		metadata TEXT NULL,
+		created_at DATETIME(3) NOT NULL,
+		INDEX idx_admin_audit_admin (admin_id),
+		INDEX idx_admin_audit_target (target_type, target_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error
+	if err != nil {
+		log.Printf("Warning: ensure admin_audit_logs: %v", err)
+	}
+}
+
+// backfillNotificationCommunityRedirect chuyển community ID đang nằm sai field
+// (redirect_user_id) sang redirect_community_id cho các notification cũ.
+// Chỉ áp dụng khi redirect_user_id thật sự là một community tồn tại — nhờ vậy
+// các row community_* có redirect_user_id là user (admin/creator) không bị đụng.
+// Idempotent: row đã có redirect_community_id sẽ bị bỏ qua.
+func backfillNotificationCommunityRedirect(db *gorm.DB) {
+	if !db.Migrator().HasTable("notifications") || !db.Migrator().HasTable("communities") {
+		return
+	}
+	if !db.Migrator().HasColumn("notifications", "redirect_community_id") {
+		return
+	}
+	res := db.Exec(`UPDATE notifications n
+		JOIN communities c ON c.id = n.redirect_user_id
+		SET n.redirect_community_id = n.redirect_user_id,
+		    n.redirect_user_id = NULL
+		WHERE n.type LIKE 'community%'
+		  AND n.redirect_community_id IS NULL
+		  AND n.redirect_user_id IS NOT NULL`)
+	if res.Error != nil {
+		log.Printf("Warning: backfill notifications.redirect_community_id: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("Backfilled %d community notification(s): redirect_user_id → redirect_community_id", res.RowsAffected)
 	}
 }
 

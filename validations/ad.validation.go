@@ -2,8 +2,32 @@ package validations
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 	"strings"
 )
+
+const maxAdTargetURLLength = 2048
+
+// validateAdTargetURL chỉ nhận link http/https tuyệt đối; chặn
+// javascript:, data:, ftp: … để link quảng cáo không chạy script.
+func validateAdTargetURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return errors.New("link đích không được để trống")
+	}
+	if len(raw) > maxAdTargetURLLength {
+		return fmt.Errorf("link đích không được vượt quá %d ký tự", maxAdTargetURLLength)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return errors.New("link đích không hợp lệ")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("link đích phải bắt đầu bằng http:// hoặc https://")
+	}
+	return nil
+}
 
 func ValidateCreateAd(title, content, targetURL, format string, budget float64) error {
 	title = strings.TrimSpace(title)
@@ -22,9 +46,8 @@ func ValidateCreateAd(title, content, targetURL, format string, budget float64) 
 		return errors.New("nội dung không được vượt quá 2000 ký tự")
 	}
 
-	targetURL = strings.TrimSpace(targetURL)
-	if targetURL == "" {
-		return errors.New("link đích không được để trống")
+	if err := validateAdTargetURL(targetURL); err != nil {
+		return err
 	}
 
 	if budget <= 0 {
@@ -61,8 +84,13 @@ func ValidateUpdateAd(title, content, targetURL string, budget float64) error {
 		}
 	}
 
-	if targetURL != "" && strings.TrimSpace(targetURL) == "" {
-		return errors.New("link đích không được để trống")
+	if targetURL != "" {
+		if strings.TrimSpace(targetURL) == "" {
+			return errors.New("link đích không được để trống")
+		}
+		if err := validateAdTargetURL(targetURL); err != nil {
+			return err
+		}
 	}
 
 	if budget < 0 {

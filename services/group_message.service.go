@@ -720,7 +720,7 @@ func (s *GroupMessageService) ReactToMessage(ctx context.Context, userID, chatID
 
 	// Thông báo "thích" tin nhắn cho người gửi (chỉ khi thêm reaction mới).
 	if action == "added" && userID != msg.SenderID && s.notifService != nil {
-		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeMessageReact, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
 	}
 
 	return action, reactions, nil

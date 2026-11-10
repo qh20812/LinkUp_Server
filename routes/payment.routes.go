@@ -18,7 +18,31 @@ func RegisterPaymentRoutes(router *gin.Engine, ctrl *controllers.PaymentControll
 		ctrl.CreateVNPayPayment,
 	)
 
+	// Mua gói bằng ví trả trước (phương thức mặc định) + danh sách phương thức đang bật.
+	router.POST("/api/ads-management/payments/wallet",
+		middlewares.AuthMiddleware(env, db),
+		middlewares.RequireRoles(db, models.RoleUser, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
+		ctrl.CreateWalletPayment,
+	)
+	router.GET("/api/ads-management/payment-methods",
+		middlewares.AuthMiddleware(env, db),
+		middlewares.RequireRoles(db, models.RoleUser, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
+		ctrl.GetPaymentMethods,
+	)
+
 	// Return (trình duyệt) + IPN (server-to-server) — công khai, xác thực bằng chữ ký.
 	router.GET("/api/payments/vnpay/return", ctrl.VNPayReturn)
 	router.GET("/api/payments/vnpay/ipn", ctrl.VNPayIPN)
+
+	// Lịch sử giao dịch: partner xem của mình, admin xem toàn bộ.
+	router.GET("/api/ads-management/payments",
+		middlewares.AuthMiddleware(env, db),
+		middlewares.RequireRoles(db, models.RoleUser, models.RolePartner, models.RoleAdmin, models.RoleSuperAdmin),
+		ctrl.ListMyPayments,
+	)
+	router.GET("/api/admin/payments",
+		middlewares.AuthMiddleware(env, db),
+		middlewares.RequireRoles(db, models.RoleAdmin, models.RoleSuperAdmin),
+		ctrl.ListAllPayments,
+	)
 }

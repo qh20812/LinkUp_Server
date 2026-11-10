@@ -1021,18 +1021,19 @@ Validation: các endpoint Auth dùng `validations.AuthValidation` (không dùng 
 
 - **Name**: CreateReport
 - **Description**:
-  1. Người dùng chọn đối tượng báo cáo là người dùng, bài viết hoặc bình luận, rồi chọn loại vi phạm, nhập mô tả chi tiết và tùy chọn nội quy vi phạm rồi gửi báo cáo (bắt buộc đăng nhập).
+  1. Người dùng chọn đối tượng báo cáo là người dùng, bài viết, bình luận, cộng đồng hoặc quảng cáo, rồi chọn loại vi phạm, nhập mô tả chi tiết và tùy chọn nội quy vi phạm rồi gửi báo cáo (bắt buộc đăng nhập).
   2. Hệ thống kiểm tra dữ liệu báo cáo.
   3. Nếu chọn nội quy vi phạm, hệ thống kiểm tra nội quy có tồn tại, đang hiệu lực và phù hợp với loại đối tượng không; không phù hợp thì báo lỗi.
   4. Hệ thống chống spam: nếu người này đã có báo cáo đang chờ xử lý cho cùng đối tượng thì báo nên chỉnh sửa báo cáo cũ thay vì tạo mới.
   5. Với đối tượng là người dùng: không được tự báo mình, không được báo quản trị viên, người đã bị cấm thì báo lỗi.
   6. Với đối tượng là bài viết: bài không tồn tại, bị ẩn hoặc là bài của chính mình thì báo lỗi.
   7. Với đối tượng là bình luận: bình luận không tồn tại hoặc bị ẩn thì báo lỗi.
-  8. Hệ thống tạo báo cáo mới ở trạng thái đang chờ xử lý, trỏ tới đúng đối tượng được báo và lưu vào cơ sở dữ liệu.
-  9. Trả về thông báo báo cáo đã được gửi thành công; không gửi thông báo nào đi kèm.
-- **Entity**: người báo cáo, đối tượng bị báo (user/post/comment), admin xử lý (downstream)
+  8. Với đối tượng là quảng cáo: quảng cáo phải tồn tại (báo cáo sai lệch/vi phạm chính sách).
+  9. Hệ thống tạo báo cáo mới ở trạng thái đang chờ xử lý, trỏ tới đúng đối tượng được báo và lưu vào cơ sở dữ liệu.
+  10. Trả về thông báo báo cáo đã được gửi thành công; không gửi thông báo nào đi kèm.
+- **Entity**: người báo cáo, đối tượng bị báo (user/post/comment/community/ad), admin xử lý (downstream)
 - **Model**: models.Report, models.ViolationRule
-- **Databases**: reports, violation_rules, users, posts, comments
+- **Databases**: reports, violation_rules, users, posts, comments, ads
 
 ### 55. Chỉnh sửa báo cáo
 

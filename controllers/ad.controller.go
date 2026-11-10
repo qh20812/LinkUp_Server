@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"linkup/dto"
 	errorsapp "linkup/errors"
+	"linkup/internal/locations"
 	"linkup/models"
 	"linkup/repository"
 	"linkup/services"
 	"linkup/validations"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -20,16 +22,55 @@ import (
 )
 
 type AdController struct {
-	service     services.AdService
-	profileRepo *repository.ProfileRepository
+	service       services.AdService
+	profileRepo   *repository.ProfileRepository
+	locationStore *locations.Store
 }
 
 func NewAdController(service services.AdService, profileRepo *repository.ProfileRepository) *AdController {
 	return &AdController{service: service, profileRepo: profileRepo}
 }
 
-// adMaxMultipartMemory giới hạn bộ nhớ cho media quảng cáo (500MB).
-const adMaxMultipartMemory = 500 << 20
+// SetLocationStore cho phép validate target_locations là province ID có thật.
+func (ctrl *AdController) SetLocationStore(store *locations.Store) {
+	ctrl.locationStore = store
+}
+
+// validateTargetLocations chuẩn hoá + kiểm tra danh sách tỉnh/thành.
+// target_locations rỗng = chạy toàn quốc. Chỉ nhận province ID trong danh mục
+// (34 tỉnh/thành) để khớp profiles.current_province.
+func (ctrl *AdController) validateTargetLocations(list []string) error {
+	if len(list) == 0 {
+		return nil
+	}
+	if len(list) > 34 {
+		return fmt.Errorf("target_locations tối đa 34 tỉnh/thành")
+	}
+
+	seen := make(map[string]struct{}, len(list))
+	for _, raw := range list {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if ctrl.locationStore == nil {
+			continue
+		}
+		if _, ok := ctrl.locationStore.ProvinceByID(id); !ok {
+			return fmt.Errorf("target_locations: %q không phải tỉnh/thành hợp lệ", id)
+		}
+	}
+	return nil
+}
+
+// adMaxMultipartMemory giới hạn phần multipart giữ trong RAM; phần vượt sẽ
+// được Go spill ra file tạm. Trước đây đặt 500 MB nên vài upload đồng thời có
+// thể làm OOM VPS 2–4 GB.
+const adMaxMultipartMemory = 32 << 20
 
 // adTimeLayouts: input datetime-local của trình duyệt gửi "2006-01-02T15:04"
 // (không kèm timezone) nên time.RFC3339 không parse được. Trước đây lỗi bị bỏ
@@ -145,7 +186,7 @@ func (p adPayload) toCreateInput() (dto.CreateAdInput, error) {
 	return dto.CreateAdInput{
 		Title:           p.Title,
 		Content:         p.Content,
-		TargetURL:       p.TargetURL,
+		TargetURL:       strings.TrimSpace(p.TargetURL),
 		Format:          format,
 		Budget:          p.Budget,
 		DailyBudget:     p.DailyBudget,
@@ -174,7 +215,7 @@ func (p adPayload) toUpdateInput() (dto.UpdateAdInput, error) {
 	return dto.UpdateAdInput{
 		Title:           p.Title,
 		Content:         p.Content,
-		TargetURL:       p.TargetURL,
+		TargetURL:       strings.TrimSpace(p.TargetURL),
 		Budget:          p.Budget,
 		DailyBudget:     p.DailyBudget,
 		CPMPrice:        p.CPMPrice,
@@ -219,12 +260,24 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
+	if err := ctrl.validateTargetLocations(input.TargetLocations); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// Kiểm tra media trước khi service giữ slot: sai số lượng/loại/dung lượng
+	// thì trả lỗi ngay, không upload lên Cloudinary.
+	mediaFiles := adMediaFiles(c)
+	if err := validations.ValidateAdMedia(mediaFiles, input.Format); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
 
 	currentUserID := c.GetString("userID")
 	role := c.GetString("userRole")
 	platformAdmin := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
-	ad, err := ctrl.service.CreateAdWithMedia(c, input, adMediaFiles(c), currentUserID, platformAdmin)
+	ad, err := ctrl.service.CreateAdWithMedia(c, input, mediaFiles, currentUserID, platformAdmin)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
@@ -236,6 +289,30 @@ func (ctrl *AdController) CreateAd(c *gin.Context) {
 
 	// Quảng cáo tạo xong là active ngay (bỏ bước duyệt pending).
 	c.JSON(http.StatusCreated, gin.H{"message": "Tạo quảng cáo thành công", "data": ad})
+}
+
+// ReplaceAdMedia thay toàn bộ ảnh/video của ad (multipart field `media`).
+// Ownership do middleware CheckAdOwnership đảm bảo; admin cũng đi qua được.
+func (ctrl *AdController) ReplaceAdMedia(c *gin.Context) {
+	id := c.Param("id")
+	partnerID := c.GetString("userID")
+
+	if err := c.Request.ParseMultipartForm(adMaxMultipartMemory); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		errorsapp.Respond(c, http.StatusBadRequest, fmt.Errorf("dữ liệu multipart không hợp lệ: %w", err))
+		return
+	}
+
+	ad, err := ctrl.service.ReplaceMedia(c.Request.Context(), id, partnerID, adMediaFiles(c))
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật media quảng cáo thành công", "data": ad})
 }
 
 func (ctrl *AdController) UpdateStatus(c *gin.Context) {
@@ -260,11 +337,56 @@ func (ctrl *AdController) UpdateStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Status updated successfully", "data": ad})
 }
 
+// parseAdRange đọc query from/to (RFC3339 hoặc YYYY-MM-DD). Không truyền gì →
+// nil, nil (analytics toàn đời). Chỉ truyền một đầu → mặc định 30 ngày/now.
+func parseAdRange(c *gin.Context) (from, to *time.Time, err error) {
+	fromRaw := strings.TrimSpace(c.Query("from"))
+	toRaw := strings.TrimSpace(c.Query("to"))
+	if fromRaw == "" && toRaw == "" {
+		return nil, nil, nil
+	}
+
+	parse := func(raw string) (*time.Time, error) {
+		for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+			if t, parseErr := time.ParseInLocation(layout, raw, time.Local); parseErr == nil {
+				return &t, nil
+			}
+		}
+		return nil, fmt.Errorf("thời gian %q không hợp lệ (YYYY-MM-DD hoặc RFC3339)", raw)
+	}
+
+	now := time.Now()
+	if fromRaw != "" {
+		if from, err = parse(fromRaw); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		d := now.AddDate(0, 0, -30)
+		from = &d
+	}
+	if toRaw != "" {
+		if to, err = parse(toRaw); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		to = &now
+	}
+	return from, to, nil
+}
+
 func (ctrl *AdController) GetAnalytics(c *gin.Context) {
 	id := c.Param("id")
 	partnerID := c.GetString("userID")
+	role := c.GetString("userRole")
+	isAdmin := role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin)
 
-	report, err := ctrl.service.GetAdPerformance(id, partnerID)
+	from, to, err := parseAdRange(c)
+	if err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	report, err := ctrl.service.GetAdPerformance(id, partnerID, isAdmin, from, to)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
@@ -296,16 +418,14 @@ func (ctrl *AdController) GetAdminList(c *gin.Context) {
 	currentUserID := c.GetString("userID")
 
 	if role == string(models.RoleSuperAdmin) || role == string(models.RoleAdmin) {
-		list, err := ctrl.service.GetDashboardList()
-		if err != nil {
-			errorsapp.Respond(c, http.StatusInternalServerError, err)
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"data": list})
+		// Một nguồn duy nhất cho admin là /api/admin/ads. Endpoint này giữ lại
+		// cho partner; admin gọi vào đây sẽ bị hướng dẫn sang endpoint đúng
+		// thay vì trả danh sách trùng shape.
+		errorsapp.Respond(c, http.StatusBadRequest, fmt.Errorf("endpoint này dành cho partner; admin dùng GET /api/admin/ads"))
 		return
 	}
 
-	ads, total, err := ctrl.service.GetPartnerAds(currentUserID, input.Page, input.PageSize)
+	ads, total, err := ctrl.service.GetPartnerAds(currentUserID, input.Page, input.PageSize, input.Keyword, input.Status)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
@@ -336,7 +456,30 @@ func (ctrl *AdController) GetUserFeed(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": ads})
+	c.JSON(http.StatusOK, gin.H{"data": toFeedAdItems(ads)})
+}
+
+// toFeedAdItems map model nội bộ sang DTO công khai: chỉ giữ field cần render
+// quảng cáo, không trả budget/total_spent/CPM/CPC/partner_id/package_id.
+func toFeedAdItems(ads []models.Ad) []dto.FeedAdItem {
+	items := make([]dto.FeedAdItem, 0, len(ads))
+	for _, ad := range ads {
+		item := dto.FeedAdItem{
+			ID:        ad.ID,
+			Title:     ad.Title,
+			Content:   ad.Content,
+			Format:    string(ad.Format),
+			TargetURL: ad.TargetURL,
+		}
+		for _, media := range ad.MediaList {
+			item.MediaList = append(item.MediaList, dto.FeedAdMedia{
+				URL:       media.URL,
+				MediaType: media.MediaType,
+			})
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func (ctrl *AdController) TrackAction(c *gin.Context) {
@@ -355,7 +498,23 @@ func (ctrl *AdController) TrackAction(c *gin.Context) {
 	}
 
 	ipAddress := c.ClientIP()
-	err := ctrl.service.TrackUserAction(adID, userIDPtr, input.ActionType, ipAddress)
+
+	// Rate limit theo user (fallback IP): 60 event/phút. Trước đây endpoint mở
+	// hoàn toàn nên có thể spam impression/click để bòn ngân sách quảng cáo.
+	limitKey := ipAddress
+	if userIDPtr != nil && *userIDPtr != "" {
+		limitKey = *userIDPtr
+	}
+	if !adTrackLimiter.allow(limitKey, time.Now()) {
+		log.Printf("ad track: rate limited %s (action=%s ad=%s)", limitKey, input.ActionType, adID)
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"status":   "rate_limited",
+			"recorded": false,
+		})
+		return
+	}
+
+	recorded, err := ctrl.service.TrackUserAction(adID, userIDPtr, input.ActionType, ipAddress)
 	if err != nil {
 		if appErr, ok := errorsapp.IsAppError(err); ok {
 			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
@@ -364,7 +523,12 @@ func (ctrl *AdController) TrackAction(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "recorded"})
+
+	status := "skipped"
+	if recorded {
+		status = "recorded"
+	}
+	c.JSON(http.StatusOK, gin.H{"status": status, "recorded": recorded})
 }
 
 func (ctrl *AdController) UpdateAd(c *gin.Context) {
@@ -391,6 +555,12 @@ func (ctrl *AdController) UpdateAd(c *gin.Context) {
 		errorsapp.Respond(c, http.StatusBadRequest, err)
 		return
 	}
+	if input.TargetLocations != nil {
+		if err := ctrl.validateTargetLocations(input.TargetLocations); err != nil {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+			return
+		}
+	}
 
 	ad, err := ctrl.service.UpdateAd(id, partnerID, input)
 	if err != nil {
@@ -402,6 +572,23 @@ func (ctrl *AdController) UpdateAd(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Cập nhật quảng cáo thành công", "data": ad})
+}
+
+// SubmitAd đưa quảng cáo bị từ chối trở lại hàng đợi duyệt.
+func (ctrl *AdController) SubmitAd(c *gin.Context) {
+	id := c.Param("id")
+	partnerID := c.GetString("userID")
+
+	ad, err := ctrl.service.SubmitForReview(id, partnerID)
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Đã gửi quảng cáo để duyệt lại", "data": ad})
 }
 
 func (ctrl *AdController) DeleteAd(c *gin.Context) {

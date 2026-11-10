@@ -13,5 +13,7 @@ type AdPackage struct {
 	SupportsCarousel     bool      `json:"supports_carousel" gorm:"default:false"`
 	HasAdvancedAnalytics bool      `json:"has_advanced_analytics" gorm:"default:false"`
 	SortOrder            int       `json:"sort_order" gorm:"default:0"`
-	CreatedAt            time.Time `json:"created_at"`
+	// IsActive=false: ngừng bán nhưng vẫn giữ lịch sử subscription.
+	IsActive  bool      `json:"is_active" gorm:"default:true"`
+	CreatedAt time.Time `json:"created_at"`
 }

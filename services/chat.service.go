@@ -513,7 +513,7 @@ func (s *ChatService) RequestChatInvite(ctx context.Context, userID, targetUserI
 		return nil, err
 	}
 
-	s.notifService.Create(ctx, targetUserID, &userID, models.NotificationTypeMessage, "đã mời bạn tham gia chat", nil, &userID, nil)
+	s.notifService.Create(ctx, targetUserID, &userID, models.NotificationTypeMessage, "đã mời bạn tham gia chat", nil, nil, nil)
 
 	return invite, nil
 }
@@ -586,7 +586,7 @@ func (s *ChatService) ResponseChatInvite(ctx context.Context, userID, inviteID s
 		return nil, err
 	}
 
-	s.notifService.Create(ctx, invite.RequesterID, &userID, models.NotificationTypeMessage, "đã chấp nhận lời mời chat", nil, &userID, nil)
+	s.notifService.Create(ctx, invite.RequesterID, &userID, models.NotificationTypeMessage, "đã chấp nhận lời mời chat", nil, nil, &chat.ID)
 
 	return chat, nil
 }
@@ -1004,7 +1004,7 @@ func (s *ChatService) ReactToMessage(ctx context.Context, userID, chatID, messag
 
 	// Thông báo "thích" tin nhắn cho người gửi (chỉ khi thêm reaction mới).
 	if action == "added" && userID != msg.SenderID && s.notifService != nil {
-		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeLike, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
+		_, _ = s.notifService.Create(ctx, msg.SenderID, &userID, models.NotificationTypeMessageReact, "đã bày tỏ cảm xúc với tin nhắn của bạn", nil, &userID, &chatID)
 	}
 
 	return action, reactions, nil

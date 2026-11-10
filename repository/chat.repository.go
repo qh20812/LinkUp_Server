@@ -404,6 +404,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		LastMessageID        *string     `gorm:"column:last_message_id"`
 		LastContent          *string     `gorm:"column:last_content"`
 		LastSenderID         *string     `gorm:"column:last_sender_id"`
+		LastSenderName       string      `gorm:"column:last_sender_name"`
 		LastE2EVersion       *int        `gorm:"column:last_e2e_version"`
 		LastMediaType        string      `gorm:"column:last_media_type"`
 		LastMediaDuration    int         `gorm:"column:last_media_duration"`
@@ -424,6 +425,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			lm.id AS last_message_id,
 			lm.content AS last_content,
 			lm.sender_id AS last_sender_id,
+			COALESCE(lmp.display_name, '') AS last_sender_name,
 			lm.e2e_version AS last_e2e_version,
 			COALESCE(lmm.file_type, '') AS last_media_type,
 			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
@@ -444,6 +446,9 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			ORDER BY m2.created_at DESC
 			LIMIT 1
 		)`, userID, userID).
+		// Tên người gửi tin cuối — cần cho preview system message ở sidebar
+		// (member_joined|actorId...) để không hiển thị "Người lạ".
+		Joins("LEFT JOIN profiles AS lmp ON lmp.user_id = lm.sender_id").
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeDirect).
@@ -493,6 +498,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 				ID:            *row.LastMessageID,
 				ChatID:        row.ChatID,
 				SenderID:      derefString(row.LastSenderID),
+				SenderName:    row.LastSenderName,
 				Content:       *row.LastContent,
 				MediaType:     row.LastMediaType,
 				DurationSeconds: row.LastMediaDuration,

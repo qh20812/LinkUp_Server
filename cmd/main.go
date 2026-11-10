@@ -198,6 +198,7 @@ func main() {
 		reportRepository := repository.NewReportRepository(gormDB)
 		reportValidation := validations.NewReportValidation()
 		reportService := services.NewReportService(reportRepository, authRepository, postRepository, reportValidation)
+		reportService.SetNotificationService(notificationService)
 		reportController := controllers.NewReportController(reportService)
 		routes.RegisterReportRoutes(router, reportController, env, gormDB)
 
@@ -294,12 +295,23 @@ func main() {
 		// ===== KHỞI TẠO TẦNG ADVERTISEMENT & PACKAGES (QUẢNG CÁO & GÓI ĐĂNG KÝ) =====
 		adRepository := repository.NewAdRepository(gormDB)
 		packageRepository := repository.NewPackageRepository(gormDB)
+		reportService.SetAdRepository(adRepository)
 
 		adService := services.NewAdService(adRepository, packageRepository, mediaService)
 		packageService := services.NewPackageService(packageRepository)
+		packageService.SetNotificationService(notificationService)
 		paymentRepository := repository.NewPaymentRepository(gormDB)
 		paymentService := services.NewPaymentService(paymentRepository, packageRepository, env)
 		momoService := services.NewMoMoService(paymentRepository, packageRepository, env)
+
+		// ===== VÍ TRẢ TRƯỚC & NẠP TIỀN CHUYỂN KHOẢN (TRACK E) =====
+		walletRepository := repository.NewWalletRepository(gormDB)
+		walletService := services.NewWalletService(walletRepository, env)
+		walletService.SetNotificationService(notificationService)
+		walletService.SetAuditRepository(repository.NewAdminAuditRepository(gormDB))
+		walletController := controllers.NewWalletController(walletService)
+		// Bật giữ chỗ/trừ ngân sách quảng cáo từ ví.
+		adService.EnableWallet(true)
 
 		// Background worker: downgrade expired partner subscriptions (mục 1.3)
 		go func() {
@@ -312,12 +324,46 @@ func main() {
 				} else if count > 0 {
 					log.Printf("[AdWorker] expired %d subscriptions, downgraded roles", count)
 				}
+
+				// Ad hết hạn / hết budget / đạt max_impressions nhưng còn active:
+				// đóng lại để UI và báo cáo phản ánh đúng.
+				completed, err := adService.CompleteFinishedAds()
+				if err != nil {
+					log.Printf("[AdWorker] complete finished ads error: %v", err)
+				} else if completed > 0 {
+					log.Printf("[AdWorker] completed %d ads (expired/budget/max impressions)", completed)
+				}
+
+				// Nhắc gia hạn gói sắp hết hạn (<=3 ngày), tối đa 1 lần/ngày/gói.
+				reminded, err := packageService.RemindExpiringSubscriptions()
+				if err != nil {
+					log.Printf("[AdWorker] remind expiring subscriptions error: %v", err)
+				} else if reminded > 0 {
+					log.Printf("[AdWorker] sent %d subscription renewal reminders", reminded)
+				}
+			}
+		}()
+
+		// Worker đóng yêu cầu nạp ví quá hạn (mỗi 5 phút). Yêu cầu người dùng đã
+		// báo chuyển khoản thì KHÔNG tự expire — để admin đối chiếu sao kê.
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				count, err := walletService.ExpireTopups(context.Background())
+				if err != nil {
+					log.Printf("[WalletWorker] expire topups error: %v", err)
+				} else if count > 0 {
+					log.Printf("[WalletWorker] expired %d topups", count)
+				}
 			}
 		}()
 
 		adController := controllers.NewAdController(adService, profileRepository)
+		adController.SetLocationStore(locationStore)
 		packageController := controllers.NewPackageController(packageService, authService)
 		paymentController := controllers.NewPaymentController(paymentService, env)
+		paymentController.SetTokenIssuer(authService)
 		momoController := controllers.NewMoMoController(momoService, env)
 
 		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
@@ -325,6 +371,7 @@ func main() {
 		routes.RegisterPackageRoutes(router, packageController, env, gormDB)
 		routes.RegisterPaymentRoutes(router, paymentController, env, gormDB)
 		routes.RegisterMoMoRoutes(router, momoController, env, gormDB)
+		routes.RegisterWalletRoutes(router, walletController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)
@@ -332,6 +379,9 @@ func main() {
 		adminService := services.NewAdminService(authRepository, banRepository, postRepository, reportRepository, moderationRepository, chatRepository, communityRepository, profileRepository, groupChatRepository, adminRepository, mediaRepository, adRepository, notificationService)
 		adminService.SetCloudinary(cldForMedia)
 		adminService.SetViolationRuleRepository(violationRuleRepository)
+		adminService.SetAdService(adService)
+		adminService.SetPackageRepository(packageRepository)
+		adminService.SetAuditRepository(repository.NewAdminAuditRepository(gormDB))
 		adminController := controllers.NewAdminController(adminService)
 		routes.RegisterAdminRoutes(router, adminController, adminSettingsController, env, gormDB)
 

@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"mime/multipart"
+	"strings"
 	"time"
 
 	"linkup/dto"
@@ -13,29 +15,42 @@ import (
 	"linkup/models"
 	"linkup/repository"
 	"linkup/utils"
+	"linkup/validations"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AdService interface {
 	CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error)
+	// ReplaceMedia thay toàn bộ media của ad (giữ nguyên nội dung/format).
+	ReplaceMedia(ctx context.Context, id, partnerID string, files []*multipart.FileHeader) (*models.Ad, error)
 	UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error)
-	GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error)
-	GetDashboardList() ([]models.Ad, error)
-	GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error)
+	GetAdPerformance(id string, viewerID string, viewerIsAdmin bool, from, to *time.Time) (*dto.AdPerformanceResponse, error)
+	GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error)
 	GetAdsForUserFeed(userID string, userGender string, userAge int, userLocation string) ([]models.Ad, error)
-	TrackUserAction(adID string, userID *string, actionType, ip string) error
+	TrackUserAction(adID string, userID *string, actionType, ip string) (bool, error)
 	GetAdByID(id string) (*models.Ad, error)
 	UpdateAd(id, partnerID string, input dto.UpdateAdInput) (*models.Ad, error)
 	DeleteAd(id, partnerID string) error
-	SetAdStatus(id string, status models.AdStatus) error
+	SubmitForReview(id, partnerID string) (*models.Ad, error)
 	GetOverview(partnerID string) (*dto.AdOverviewResponse, error)
+	// CompleteFinishedAds chuyển ad active đã hết hạn / hết budget / đạt
+	// max_impressions sang completed (dùng cho worker định kỳ).
+	CompleteFinishedAds() (int, error)
+	// EnableWallet bật/tắt việc giữ chỗ và trừ tiền ngân sách từ ví trả trước.
+	EnableWallet(enabled bool)
+	// ActivateBudgetReservation giữ chỗ ngân sách còn lại khi ad được duyệt/bật
+	// lại (idempotent — gọi khi đã giữ đủ thì không làm gì).
+	ActivateBudgetReservation(adID string) error
+	// ReleaseBudgetReservation trả phần ngân sách chưa tiêu về ví (từ chối/xoá).
+	ReleaseBudgetReservation(adID string) error
 }
 
 type adServiceImpl struct {
 	repo         repository.AdRepository
 	packageRepo  repository.PackageRepository
 	mediaService MediaService
+	walletOn     bool
 }
 
 // targetLocationsJSON luôn trả về một mảng JSON hợp lệ cho cột `target_locations`.
@@ -64,12 +79,45 @@ func NewAdService(
 	}
 }
 
+// EnableWallet bật việc giữ chỗ/trừ tiền ngân sách quảng cáo từ ví trả trước.
+// Mặc định tắt để test/service cũ không cần dựng ví.
+func (s *adServiceImpl) EnableWallet(enabled bool) {
+	s.walletOn = enabled
+}
+
+// ActivateBudgetReservation giữ chỗ phần ngân sách còn lại khi ad bắt đầu chạy.
+// Idempotent: nếu ví đã giữ đúng số tiền thì repo không làm gì.
+func (s *adServiceImpl) ActivateBudgetReservation(adID string) error {
+	if !s.walletOn {
+		return nil
+	}
+	_, err := s.repo.SyncAdBudgetReservation(context.Background(), adID)
+	return err
+}
+
+// ReleaseBudgetReservation trả lại toàn bộ tiền đang giữ chỗ của ad.
+func (s *adServiceImpl) ReleaseBudgetReservation(adID string) error {
+	if !s.walletOn {
+		return nil
+	}
+	_, err := s.repo.ReleaseAdBudget(context.Background(), adID)
+	return err
+}
+
 // CreateAdWithMedia tạo quảng cáo kèm media.
 // platformAdmin = true khi ADMIN/SUPER_ADMIN tạo hộ: bỏ qua kiểm tra gói và
 // slot (admin không mua gói), ad không gắn PackageID. PARTNER vẫn bị ràng buộc
 // bởi gói đang hoạt động và số slot còn lại.
-func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (*models.Ad, error) {
+func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdInput, files []*multipart.FileHeader, partnerID string, platformAdmin bool) (out *models.Ad, retErr error) {
 	adFormat := models.AdFormat(input.Format)
+	reservedSubID := ""
+	defer func() {
+		// Nếu đã giữ slot nhưng tạo ad/upload thất bại thì phải trả slot lại,
+		// nếu không gói của partner bị kẹt slot vĩnh viễn.
+		if retErr != nil && reservedSubID != "" {
+			_ = s.packageRepo.DecrementSlotsUsed(reservedSubID)
+		}
+	}()
 
 	// 1. Kiểm tra Subscription & Slot Limit (mục 2.1)[cite: 2]
 	var sub *models.PartnerSubscription
@@ -83,10 +131,6 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 			return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
 		}
 
-		if sub.SlotsUsed >= sub.Package.MaxSlots {
-			return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
-		}
-
 		// 2. Kiểm tra Format có được gói hỗ trợ không
 		if adFormat == models.AdFormatVideo && !sub.Package.SupportsVideo {
 			return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotVideo)
@@ -94,10 +138,24 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		if adFormat == models.AdFormatCarousel && !sub.Package.SupportsCarousel {
 			return nil, errorsapp.New(errorsapp.ErrCodeAdFormatNotCarousel)
 		}
+
+		// 3. Giữ slot nguyên tử (tránh 2 request đồng thời cùng vượt max_slots).
+		ok, err := s.packageRepo.ReserveSlot(sub.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{"used": sub.SlotsUsed, "max": sub.Package.MaxSlots})
+		}
+		reservedSubID = sub.ID
 	}
 
 	// 3. Khởi tạo Quảng cáo
 	ad := models.NewAd(input.Title, input.Content, input.TargetURL, input.Budget, adFormat)
+	// Partner phải qua bước duyệt; admin tạo hộ thì phát ngay.
+	if !platformAdmin {
+		ad.Status = models.AdStatusPending
+	}
 	ad.ID = utils.GenerateUUID()
 	ad.PartnerID = partnerID
 	if sub != nil {
@@ -132,6 +190,35 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		return nil, err
 	}
 
+	// Giữ chỗ ngân sách từ ví trước khi upload media: hết tiền thì fail sớm,
+	// không tốn upload/không tạo ad rác. Ad do admin tạo hộ (platformAdmin)
+	// không trừ ví của partner.
+	walletReserved := false
+	if s.walletOn && !platformAdmin && input.Budget > 0 {
+		if _, err := s.repo.SyncAdBudgetReservation(ctx.Request.Context(), ad.ID); err != nil {
+			_ = s.repo.Delete(context.Background(), ad.ID)
+			return nil, err
+		}
+		walletReserved = true
+	}
+
+	// Upload/ghi media lỗi giữa chừng thì dọn ad + media đã tạo, tránh dữ liệu
+	// mồ côi trong DB/Cloudinary (slot đã được defer phía trên trả lại).
+	var uploadedMediaRows []*models.Media
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		cleanupCtx := context.Background()
+		if walletReserved {
+			_, _ = s.repo.ReleaseAdBudget(cleanupCtx, ad.ID)
+		}
+		for _, media := range uploadedMediaRows {
+			_ = s.mediaService.DeleteMedia(cleanupCtx, partnerID, media.ID)
+		}
+		_ = s.repo.Delete(cleanupCtx, ad.ID)
+	}()
+
 	// 4. Upload file đính kèm
 	var mediaList []models.AdMedia
 	for idx, fileHeader := range files {
@@ -140,6 +227,20 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx.Request.Context(), partnerID, fileHeader)
 		if err != nil {
 			return nil, fmt.Errorf("lỗi upload file %s: %w", fileHeader.Filename, err)
+		}
+		uploadedMediaRows = append(uploadedMediaRows, uploadedMedia)
+
+		// Video: chặn thời lượng quá dài. Lỗi Admin API/thiếu metadata thì
+		// fail-open (log) để không chặn oan upload hợp lệ.
+		if strings.HasPrefix(uploadedMedia.FileType, "video/") {
+			duration, durationErr := s.mediaService.GetVideoDurationSeconds(ctx.Request.Context(), uploadedMedia.ID)
+			if durationErr != nil {
+				log.Printf("[Ad] không đọc được duration của %s: %v", uploadedMedia.ID, durationErr)
+			} else if duration > float64(validations.MaxAdVideoSeconds) {
+				return nil, errorsapp.Newf(errorsapp.ErrCodeAdVideoTooLong, map[string]any{
+					"max": validations.MaxAdVideoSeconds,
+				})
+			}
 		}
 
 		mediaList = append(mediaList, models.AdMedia{
@@ -159,11 +260,8 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		ad.MediaList = mediaList
 	}
 
-	// 5. Cập nhật slot (chỉ partner có gói mới có slot)
-	if sub != nil {
-		_ = s.packageRepo.IncrementSlotsUsed(sub.ID)
-	}
-
+	// 5. Slot đã được giữ nguyên tử ở bước 3 (ReserveSlot); thành công thì giữ,
+	// thất bại đã được defer trả lại.
 	return &ad, nil
 }
 
@@ -171,6 +269,105 @@ func (s *adServiceImpl) GetAdByID(id string) (*models.Ad, error) {
 	return s.repo.FindByID(id)
 }
 
+// ReplaceMedia thay toàn bộ media của ad đang sửa. Validate theo đúng format
+// hiện tại của ad (không đổi format ở đây), upload mới trước rồi mới thay DB;
+// nếu thay DB lỗi thì dọn media vừa upload. Media cũ được xoá best-effort sau
+// khi DB đã commit (asset hotlink/seed không có row media sẽ bị bỏ qua).
+func (s *adServiceImpl) ReplaceMedia(
+	ctx context.Context,
+	id, partnerID string,
+	files []*multipart.FileHeader,
+) (out *models.Ad, retErr error) {
+	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+	if err != nil || !isOwner {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
+	}
+
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	switch ad.Status {
+	case models.AdStatusPending, models.AdStatusRejected, models.AdStatusActive, models.AdStatusPaused:
+	default:
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	if err := validations.ValidateAdMedia(files, string(ad.Format)); err != nil {
+		return nil, err
+	}
+
+	oldMedia, err := s.repo.ListAdMedia(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Media thuộc về partner sở hữu ad (kể cả khi admin thao tác hộ) để quota
+	// và việc dọn asset cũ đi đúng chủ.
+	ownerID := ad.PartnerID
+	if ownerID == "" {
+		ownerID = partnerID
+	}
+
+	var uploaded []*models.Media
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		cleanupCtx := context.Background()
+		for _, media := range uploaded {
+			_ = s.mediaService.DeleteMedia(cleanupCtx, ownerID, media.ID)
+		}
+	}()
+
+	mediaList := make([]models.AdMedia, 0, len(files))
+	for idx, fileHeader := range files {
+		uploadedMedia, err := s.mediaService.AutoApproveUpload(ctx, ownerID, fileHeader)
+		if err != nil {
+			return nil, fmt.Errorf("lỗi upload file %s: %w", fileHeader.Filename, err)
+		}
+		uploaded = append(uploaded, uploadedMedia)
+
+		if strings.HasPrefix(uploadedMedia.FileType, "video/") {
+			duration, durationErr := s.mediaService.GetVideoDurationSeconds(ctx, uploadedMedia.ID)
+			if durationErr != nil {
+				log.Printf("[Ad] không đọc được duration của %s: %v", uploadedMedia.ID, durationErr)
+			} else if duration > float64(validations.MaxAdVideoSeconds) {
+				return nil, errorsapp.Newf(errorsapp.ErrCodeAdVideoTooLong, map[string]any{
+					"max": validations.MaxAdVideoSeconds,
+				})
+			}
+		}
+
+		mediaList = append(mediaList, models.AdMedia{
+			ID:        generateMediaUUID(),
+			AdID:      id,
+			URL:       uploadedMedia.FileURI,
+			MediaType: uploadedMedia.FileType,
+			SortOrder: idx,
+			CreatedAt: time.Now(),
+		})
+	}
+
+	if err := s.repo.ReplaceAdMedia(id, mediaList); err != nil {
+		return nil, err
+	}
+
+	for _, media := range oldMedia {
+		if err := s.mediaService.DeleteByURL(context.Background(), ownerID, media.URL); err != nil {
+			log.Printf("[Ad] không xoá được media cũ của ad %s: %v", id, err)
+		}
+	}
+
+	ad.MediaList = mediaList
+	return ad, nil
+}
+
+// UpdateStatus cho partner tạm dừng / bật lại quảng cáo của mình.
+// Chỉ chấp nhận active ↔ paused; duyệt, từ chối, takedown và hoàn thành do
+// admin/hệ thống quyết định nên partner không được tự đổi sang các trạng thái
+// đó (trước đây partner đổi được mọi trạng thái, kể cả tự duyệt).
 func (s *adServiceImpl) UpdateStatus(id string, statusStr string, partnerID string) (*models.Ad, error) {
 	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
 	if err != nil || !isOwner {
@@ -181,16 +378,76 @@ func (s *adServiceImpl) UpdateStatus(id string, statusStr string, partnerID stri
 	if err != nil {
 		return nil, err
 	}
-	ad.Status = models.ParseAdStatus(statusStr)
+
+	target := models.ParseAdStatus(statusStr)
+	allowed := (ad.Status == models.AdStatusActive && target == models.AdStatusPaused) ||
+		(ad.Status == models.AdStatusPaused && target == models.AdStatusActive)
+	if !allowed {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	// Bật lại chỉ hợp lệ khi còn ngân sách, chưa hết hạn và gói còn hiệu lực.
+	if target == models.AdStatusActive {
+		if ad.Budget > 0 && ad.TotalSpent >= ad.Budget {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdBudgetExceeded)
+		}
+		if ad.ExpiresAt != nil && ad.ExpiresAt.Before(time.Now()) {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+		}
+		if sub, subErr := s.packageRepo.GetActiveSubscription(partnerID); subErr != nil || sub == nil {
+			return nil, errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
+		}
+	}
+
+	ad.Status = target
+	if target == models.AdStatusActive {
+		// Đảm bảo ví vẫn giữ đủ ngân sách còn lại trước khi cho chạy lại.
+		if err := s.ActivateBudgetReservation(id); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.repo.Update(ad); err != nil {
 		return nil, err
 	}
 	return ad, nil
 }
 
-func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPerformanceResponse, error) {
-	if partnerID != "" {
-		isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+// SubmitForReview đưa quảng cáo bị từ chối trở lại hàng đợi duyệt và xoá lý do
+// từ chối cũ, để partner sửa nội dung rồi gửi duyệt lại.
+func (s *adServiceImpl) SubmitForReview(id, partnerID string) (*models.Ad, error) {
+	isOwner, err := s.repo.CheckAdOwnership(id, partnerID)
+	if err != nil || !isOwner {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
+	}
+
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if ad.Status != models.AdStatusRejected {
+		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
+	}
+
+	fields := map[string]interface{}{
+		"status":           string(models.AdStatusPending),
+		"rejection_reason": nil,
+	}
+	if err := s.repo.UpdateAdFields(ad, fields); err != nil {
+		return nil, err
+	}
+	return s.repo.FindByID(id)
+}
+
+// GetAdPerformance trả số liệu của một quảng cáo. Partner chỉ xem được ad của
+// mình; admin (viewerIsAdmin) xem được mọi ad — trước đây admin bị chặn 403 vì
+// service kiểm tra ownership bằng userID của admin.
+//
+// from/to nil = số liệu toàn đời (tương thích client cũ). Khi có khoảng thời
+// gian, trả thêm chuỗi theo ngày; gói không có advanced analytics bị giới hạn
+// 30 ngày gần nhất (cờ limited).
+func (s *adServiceImpl) GetAdPerformance(id string, viewerID string, viewerIsAdmin bool, from, to *time.Time) (*dto.AdPerformanceResponse, error) {
+	if !viewerIsAdmin && viewerID != "" {
+		isOwner, err := s.repo.CheckAdOwnership(id, viewerID)
 		if err != nil || !isOwner {
 			return nil, errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 		}
@@ -201,16 +458,52 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 		return nil, err
 	}
 
-	counts, err := s.repo.GetActionCounts(id)
+	if from == nil || to == nil {
+		counts, err := s.repo.GetActionCounts(id)
+		if err != nil {
+			return nil, err
+		}
+		uniqueReach, err := s.repo.GetUniqueReach(id)
+		if err != nil {
+			uniqueReach = 0
+		}
+		return buildAdPerformanceResponse(ad, counts, uniqueReach, ad.TotalSpent), nil
+	}
+
+	start, end := *from, *to
+	if !end.After(start) {
+		return nil, errorsapp.New(errorsapp.ErrCodeInvalidInput)
+	}
+
+	limited := false
+	if !viewerIsAdmin {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr != nil ||
+			sub == nil || sub.Package == nil || !sub.Package.HasAdvancedAnalytics {
+			maxStart := time.Now().AddDate(0, 0, -30)
+			if start.Before(maxStart) {
+				start = maxStart
+				limited = true
+			}
+		}
+	}
+
+	metrics, err := s.repo.GetAdMetricsRange(id, start, end)
 	if err != nil {
 		return nil, err
 	}
 
-	uniqueReach, err := s.repo.GetUniqueReach(id)
-	if err != nil {
-		uniqueReach = 0
-	}
+	resp := buildAdPerformanceResponse(ad, metrics.Counts, metrics.UniqueReach, metrics.Cost)
+	resp.Cost = metrics.Cost
+	resp.From = start.Format(time.RFC3339)
+	resp.To = end.Format(time.RFC3339)
+	resp.Limited = limited
+	resp.Series = metrics.Series
+	return resp, nil
+}
 
+// buildAdPerformanceResponse dựng response từ counts + chi phí của phạm vi đang
+// xem (toàn đời hoặc một khoảng). Budget/remaining luôn tính trên toàn đời.
+func buildAdPerformanceResponse(ad *models.Ad, counts map[string]int64, uniqueReach int64, spent float64) *dto.AdPerformanceResponse {
 	impressions := counts[string(models.ActionImpression)]
 	clicks := counts[string(models.ActionClick)]
 	videoStarts := counts[string(models.ActionVideoStart)]
@@ -218,28 +511,24 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 	views := counts[string(models.ActionView)]
 	swipeCount := counts[string(models.ActionSwipe)]
 
-	// Interactions = views + clicks + swipes + video_start (tất cả tương tác có ý nghĩa)
 	interactions := views + clicks + swipeCount + videoStarts
 
-	// Chi phí đã sử dụng
-	totalSpent := ad.TotalSpent
-	if totalSpent > ad.Budget && ad.Budget > 0 {
-		totalSpent = ad.Budget
+	lifetimeSpent := ad.TotalSpent
+	if ad.Budget > 0 && lifetimeSpent > ad.Budget {
+		lifetimeSpent = ad.Budget
 	}
-
-	remainingBudget := ad.Budget - totalSpent
+	remainingBudget := ad.Budget - lifetimeSpent
 	if remainingBudget < 0 {
 		remainingBudget = 0
 	}
 
-	// Tính toán CTR, CPC, CPM chuẩn xác (mục 2.4)[cite: 2]
 	var ctr, cpc, cpm float64
 	if impressions > 0 {
 		ctr = (float64(clicks) / float64(impressions)) * 100.0
-		cpm = (totalSpent / float64(impressions)) * 1000.0
+		cpm = (spent / float64(impressions)) * 1000.0
 	}
 	if clicks > 0 {
-		cpc = totalSpent / float64(clicks)
+		cpc = spent / float64(clicks)
 	}
 
 	return &dto.AdPerformanceResponse{
@@ -249,7 +538,7 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 		Format:           string(ad.Format),
 		Budget:           ad.Budget,
 		DailyBudget:      ad.DailyBudget,
-		TotalSpent:       totalSpent,
+		TotalSpent:       lifetimeSpent,
 		RemainingBudget:  remainingBudget,
 		Impressions:      impressions,
 		UniqueReach:      uniqueReach,
@@ -262,16 +551,14 @@ func (s *adServiceImpl) GetAdPerformance(id string, partnerID string) (*dto.AdPe
 		VideoCompletions: videoEnds,
 		StartedAt:        ad.StartedAt,
 		ExpiresAt:        ad.ExpiresAt,
-	}, nil
+		Cost:             spent,
+	}
 }
 
-func (s *adServiceImpl) GetDashboardList() ([]models.Ad, error) {
-	return s.repo.GetAll()
-}
-
-// GetPartnerAds trả về ads của riêng partner với metrics, có phân trang (mục 6.4)
-func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int) ([]dto.PartnerAdListItem, int64, error) {
-	total, err := s.repo.CountByPartnerID(partnerID)
+// GetPartnerAds trả về ads của riêng partner với metrics + lọc keyword/status,
+// có phân trang (mục 6.4).
+func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int, keyword, status string) ([]dto.PartnerAdListItem, int64, error) {
+	total, err := s.repo.CountByPartnerID(partnerID, keyword, status)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -281,9 +568,12 @@ func (s *adServiceImpl) GetPartnerAds(partnerID string, page, pageSize int) ([]d
 		offset = 0
 	}
 
-	ads, err := s.repo.ListByPartnerID(partnerID, pageSize, offset)
+	ads, err := s.repo.ListByPartnerID(partnerID, keyword, status, pageSize, offset)
 	if err != nil {
 		return nil, 0, err
+	}
+	if ads == nil {
+		ads = []dto.PartnerAdListItem{}
 	}
 	return ads, total, nil
 }
@@ -300,7 +590,11 @@ func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) 
 		return nil, err
 	}
 
-	if ad.Status != models.AdStatusActive && ad.Status != models.AdStatusPaused {
+	// Chỉ sửa nội dung khi quảng cáo chưa kết thúc vòng đời. Cho phép cả
+	// pending/rejected để partner sửa trước khi gửi duyệt lại.
+	switch ad.Status {
+	case models.AdStatusPending, models.AdStatusRejected, models.AdStatusActive, models.AdStatusPaused:
+	default:
 		return nil, errorsapp.New(errorsapp.ErrCodeAdCannotEdit)
 	}
 
@@ -358,17 +652,16 @@ func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) 
 		}
 	}
 
-	return s.repo.FindByID(id)
-}
-
-// SetAdStatus cập nhật trạng thái ad trực tiếp (dùng cho moderation khi tạo)
-func (s *adServiceImpl) SetAdStatus(id string, status models.AdStatus) error {
-	ad, err := s.repo.FindByID(id)
-	if err != nil {
-		return err
+	// Đổi ngân sách thì phải giữ chỗ/trả lại tiền tương ứng trong ví. Nếu không
+	// đủ số dư, hoàn lại ngân sách cũ để không có ad chạy "ngoài ví".
+	if s.walletOn && input.Budget > 0 && input.Budget != ad.Budget {
+		if _, err := s.repo.SyncAdBudgetReservation(context.Background(), id); err != nil {
+			_ = s.repo.UpdateAdFields(ad, map[string]interface{}{"budget": ad.Budget})
+			return nil, err
+		}
 	}
-	ad.Status = status
-	return s.repo.Update(ad)
+
+	return s.repo.FindByID(id)
 }
 
 // DeleteAd xóa ad + giải phóng slot (hard delete)
@@ -378,8 +671,10 @@ func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
 		return errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 	}
 
-	// Xác nhận ad tồn tại trước khi xoá.
-	if _, err := s.repo.FindByID(id); err != nil {
+	// Xác nhận ad tồn tại trước khi xoá; giữ lại trạng thái để biết có cần trả
+	// slot hay không (ad completed/suspended đã trả slot trước đó).
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
 		return err
 	}
 
@@ -390,16 +685,24 @@ func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
 	// Xóa media trước
 	_ = s.repo.DeleteAdMedia(id)
 
+	// Trả phần ngân sách chưa tiêu về ví trước khi xoá ad (release cần đọc row ad).
+	if s.walletOn {
+		if _, err := s.repo.ReleaseAdBudget(context.Background(), id); err != nil {
+			log.Printf("[Ad] không trả được ngân sách giữ chỗ của ad %s: %v", id, err)
+		}
+	}
+
 	// Xóa ad
 	if err := s.repo.Delete(context.Background(), id); err != nil {
 		return err
 	}
 
-	// Giải phóng slot trong subscription. Trước đây truyền ad.PackageID (id gói)
-	// nên câu UPDATE không khớp bản ghi subscription nào — slot không bao giờ
-	// được trả lại và đối tác sẽ cạn slot sau vài lần xoá.
-	if sub, err := s.packageRepo.GetActiveSubscription(partnerID); err == nil && sub != nil {
-		_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+	// Chỉ trả slot khi ad đang chiếm slot. Ad completed/suspended đã được trả
+	// slot lúc đổi trạng thái — decrement thêm sẽ ăn slot của ad khác.
+	if ad.Status.ConsumesSlot() {
+		if sub, err := s.packageRepo.GetActiveSubscription(partnerID); err == nil && sub != nil {
+			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+		}
 	}
 
 	return nil
@@ -426,25 +729,25 @@ func (s *adServiceImpl) GetAdsForUserFeed(userID string, userGender string, user
 	return filtered, nil
 }
 
-func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType, ip string) error {
+// TrackUserAction ghi nhận một tương tác quảng cáo. Trả recorded=false khi ad
+// không ở trạng thái chạy, gói của partner hết hạn, hoặc bị chặn bởi cap
+// (chống trùng/budget/max impressions) — những trường hợp này không phải lỗi.
+func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType, ip string) (bool, error) {
 	ad, err := s.repo.FindByID(adID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	// Anti-fraud: skip nếu user đã track cùng action trong 24h (mục 2.2)
-	if userID != nil && *userID != "" {
-		hasRecent, _ := s.repo.HasRecentAction(adID, *userID, actionType, 24*time.Hour)
-		if hasRecent {
-			return nil
-		}
+	// Chỉ ad đang chạy mới được ghi nhận/trừ tiền.
+	if ad.Status != models.AdStatusActive {
+		return false, nil
 	}
 
-	// Daily budget check (mục 2.4)
-	if ad.DailyBudget > 0 {
-		dailySpend, _ := s.repo.GetDailySpend(adID, time.Now())
-		if dailySpend >= ad.DailyBudget {
-			return nil
+	// Ad của partner chỉ hợp lệ khi gói còn hiệu lực. Ad do admin tạo (không
+	// gắn PackageID) vẫn được ghi nhận bình thường.
+	if ad.PackageID != nil {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr != nil || sub == nil {
+			return false, nil
 		}
 	}
 
@@ -452,14 +755,39 @@ func (s *adServiceImpl) TrackUserAction(adID string, userID *string, actionType,
 	log.ID = utils.GenerateUUID()
 	log.CreatedAt = time.Now()
 
-	// Ghi nhận tương tác và tính toán khấu trừ ngân sách
-	return s.repo.TrackActionAndDeduct(&log, ad.CPMPrice, ad.CPCPrice)
+	// Toàn bộ check chống trùng / daily budget / budget / max impressions nằm
+	// trong transaction của repo.
+	return s.repo.TrackActionAndDeduct(&log)
 }
 
 func generateMediaUUID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return fmt.Sprintf("media_%x", b)
+}
+
+// CompleteFinishedAds dọn các quảng cáo đã kết thúc vòng đời: quá expires_at,
+// hết budget hoặc đạt max_impressions nhưng vẫn còn status active. Sau khi
+// chuyển completed, trả phần ngân sách chưa tiêu còn giữ chỗ về ví.
+func (s *adServiceImpl) CompleteFinishedAds() (int, error) {
+	rows, err := s.repo.MarkFinishedAdsCompleted(time.Now())
+	if err != nil {
+		return int(rows), err
+	}
+	if !s.walletOn {
+		return int(rows), nil
+	}
+
+	ads, listErr := s.repo.ListAdsWithOutstandingReserve(context.Background(), 500)
+	if listErr != nil {
+		return int(rows), listErr
+	}
+	for _, ad := range ads {
+		if _, releaseErr := s.repo.ReleaseAdBudget(context.Background(), ad.ID); releaseErr != nil {
+			log.Printf("[Ad] không trả được ngân sách giữ chỗ của ad %s: %v", ad.ID, releaseErr)
+		}
+	}
+	return int(rows), nil
 }
 
 // GetOverview trả về tổng quan quảng cáo của partner (mục 6.1)

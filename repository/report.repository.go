@@ -61,6 +61,8 @@ func (r *ReportRepository) FindPendingByReporterAndTarget(ctx context.Context, r
 		q = q.Where("target_comment_id = ?", targetID)
 	case "community":
 		q = q.Where("target_community_id = ?", targetID)
+	case "ad":
+		q = q.Where("target_ad_id = ?", targetID)
 	}
 
 	err := q.First(&report).Error

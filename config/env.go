@@ -58,6 +58,26 @@ type Env struct {
 	MoMoIPNURL      string
 	// Trang web hiển thị kết quả sau khi MoMo redirect trình duyệt về.
 	MoMoFrontendReturnURL string
+
+	// Ví trả trước — nạp tiền bằng chuyển khoản ngân hàng + admin duyệt.
+	// Tất cả optional: thiếu cấu hình chỉ làm endpoint tạo yêu cầu nạp trả lỗi
+	// wallet.NOT_CONFIGURED, không chặn server khởi động.
+	BankBIN           string
+	BankAccountNo     string
+	BankAccountName   string
+	BankShortName     string
+	TopupQRBaseURL    string
+	TopupExpiresMin   int
+	TopupMinAmount    int64
+	TopupMaxAmount    int64
+	TopupDailyLimit   int
+	TopupPendingLimit int
+
+	// Bật/tắt từng phương thức thanh toán gói. Mặc định chỉ bật ví trả trước;
+	// MoMo/VNPay giữ code nhưng tắt cho tới khi cấu hình merchant.
+	PaymentWalletEnabled bool
+	PaymentMoMoEnabled   bool
+	PaymentVNPayEnabled  bool
 }
 
 var (
@@ -142,6 +162,21 @@ func LoadEnv() error {
 			"MOMO_FRONTEND_RETURN_URL",
 			getString("VNP_FRONTEND_RETURN_URL", ""),
 		),
+
+		BankBIN:           getString("BANK_BIN", ""),
+		BankAccountNo:     getString("BANK_ACCOUNT_NO", ""),
+		BankAccountName:   getString("BANK_ACCOUNT_NAME", ""),
+		BankShortName:     getString("BANK_SHORT_NAME", ""),
+		TopupQRBaseURL:    getString("TOPUP_QR_BASE_URL", "https://img.vietqr.io/image"),
+		TopupExpiresMin:   getIntDefault("TOPUP_EXPIRES_MINUTES", 30),
+		TopupMinAmount:    getInt64Default("TOPUP_MIN_AMOUNT", 10000),
+		TopupMaxAmount:    getInt64Default("TOPUP_MAX_AMOUNT", 50000000),
+		TopupDailyLimit:   getIntDefault("TOPUP_DAILY_LIMIT", 10),
+		TopupPendingLimit: getIntDefault("TOPUP_PENDING_LIMIT", 5),
+
+		PaymentWalletEnabled: getBoolDefault("PAYMENT_WALLET_ENABLED", true),
+		PaymentMoMoEnabled:   getBoolDefault("PAYMENT_MOMO_ENABLED", false),
+		PaymentVNPayEnabled:  getBoolDefault("PAYMENT_VNPAY_ENABLED", false),
 	}
 
 	missing := validateRequired(env)
@@ -276,6 +311,46 @@ func getBool(key string) (bool, error) {
 		return false, fmt.Errorf("invalid bool env var %s: %w", key, err)
 	}
 	return parsed, nil
+}
+
+// getIntDefault đọc biến optional; thiếu hoặc không hợp lệ thì dùng fallback
+// (dùng cho cấu hình ví/nạp tiền — không được phép chặn server khởi động).
+func getIntDefault(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// getInt64Default đọc biến optional kiểu int64 (số tiền VND).
+func getInt64Default(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// getBoolDefault đọc biến optional kiểu bool; thiếu/không hợp lệ dùng fallback.
+func getBoolDefault(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func parseCSV(value string) []string {

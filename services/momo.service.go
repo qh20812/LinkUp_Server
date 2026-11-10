@@ -81,6 +81,9 @@ func NewMoMoService(payments repository.PaymentRepository, packages repository.P
 }
 
 func (s *momoServiceImpl) CreateMoMoPayment(userID, packageID string) (*dto.CreatePaymentResponse, error) {
+	if !s.env.PaymentMoMoEnabled {
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentMethodOff)
+	}
 	cfg := momoConfigFromEnv(s.env)
 	if !cfg.enabled() {
 		return nil, errorsapp.New(errorsapp.ErrCodePaymentNotConfigured)
