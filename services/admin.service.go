@@ -1519,6 +1519,7 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	if newStatus == string(ad.Status) {
 		return nil
 	}
+	oldStatus := ad.Status
 
 	rejectionReason := strings.TrimSpace(input.RejectionReason)
 	suspendedReason := strings.TrimSpace(input.SuspendedReason)
@@ -1566,8 +1567,65 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	if newStatus == string(models.AdStatusSuspended) {
 		ad.SuspendedReason = &suspendedReason
 	}
+	// Duyệt/bật lại: đảm bảo ví giữ đủ ngân sách còn lại trước khi ad chạy.
+	if newStatus == string(models.AdStatusActive) && s.adService != nil {
+		if err := s.adService.ActivateBudgetReservation(ad.ID); err != nil {
+			return err
+		}
+	}
+
+	// Ad suspended không chiếm slot. Khi bật lại phải giữ slot trước; nếu gói
+	// đã đầy (do partner tạo ad khác) thì chặn thay vì vượt max_slots.
+	reservedSubID := ""
+	if newStatus == string(models.AdStatusActive) &&
+		oldStatus == models.AdStatusSuspended && s.packageRepo != nil {
+		sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID)
+		if subErr != nil {
+			return subErr
+		}
+		if sub == nil {
+			return errorsapp.New(errorsapp.ErrCodeAdNoSubscription)
+		}
+		reserved, reserveErr := s.packageRepo.ReserveSlot(sub.ID)
+		if reserveErr != nil {
+			return reserveErr
+		}
+		if !reserved {
+			maxSlots := 0
+			if sub.Package != nil {
+				maxSlots = sub.Package.MaxSlots
+			}
+			return errorsapp.Newf(errorsapp.ErrCodeAdSlotsExhausted, map[string]any{
+				"used": sub.SlotsUsed,
+				"max":  maxSlots,
+			})
+		}
+		reservedSubID = sub.ID
+	}
+
 	if err := s.adRepo.Update(ad); err != nil {
+		// Trả slot vừa giữ nếu cập nhật thất bại, tránh kẹt slot.
+		if reservedSubID != "" {
+			_ = s.packageRepo.DecrementSlotsUsed(reservedSubID)
+		}
 		return fmt.Errorf("cập nhật trạng thái quảng cáo thất bại: %w", err)
+	}
+
+	// completed/suspended không chiếm slot → trả slot đang giữ. Chỉ trả khi
+	// trạng thái cũ có chiếm slot để tránh decrement hai lần.
+	if (newStatus == string(models.AdStatusCompleted) || newStatus == string(models.AdStatusSuspended)) &&
+		oldStatus.ConsumesSlot() && s.packageRepo != nil {
+		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr == nil && sub != nil {
+			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+		}
+	}
+	// Từ chối/hoàn thành: trả phần ngân sách chưa tiêu về ví. Suspended giữ
+	// nguyên tiền giữ chỗ để có thể bật lại.
+	if (newStatus == string(models.AdStatusRejected) || newStatus == string(models.AdStatusCompleted)) && s.adService != nil {
+		if err := s.adService.ReleaseBudgetReservation(ad.ID); err != nil {
+			// Không chặn thao tác admin vì lỗi trả tiền; worker sẽ dọn lại.
+			log.Printf("admin: release budget reservation for ad %s: %v", ad.ID, err)
+		}
 	}
 
 	// Notify partner
@@ -1621,6 +1679,13 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 		return errorsapp.New(errorsapp.ErrCodeAdminNotFound)
 	}
 
+	// Trả ngân sách chưa tiêu về ví trước khi xoá (release cần row ad).
+	if s.adService != nil {
+		if releaseErr := s.adService.ReleaseBudgetReservation(adID); releaseErr != nil {
+			log.Printf("admin: release budget reservation for ad %s: %v", adID, releaseErr)
+		}
+	}
+
 	// Xoá media + ad trong 1 transaction (ad_media không có FK → nếu chỉ xoá ad
 	// sẽ để lại row mồ côi).
 	if err := s.adRepo.DeleteWithMedia(ctx, adID); err != nil {
@@ -1628,8 +1693,9 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 	}
 
 	// Trả slot cho gói đang hoạt động của partner — trước đây admin xoá ad làm
-	// slot bị kẹt vĩnh viễn vì không ai decrement.
-	if s.packageRepo != nil {
+	// slot bị kẹt vĩnh viễn vì không ai decrement. Ad completed/suspended đã
+	// trả slot lúc đổi trạng thái nên không trừ thêm.
+	if s.packageRepo != nil && ad.Status.ConsumesSlot() {
 		if sub, subErr := s.packageRepo.GetActiveSubscription(ad.PartnerID); subErr == nil && sub != nil {
 			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
 		}

@@ -1,6 +1,9 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"linkup/config"
 	"linkup/dto"
 	errorsapp "linkup/errors"
@@ -39,6 +42,11 @@ func (c vnpayConfig) enabled() bool {
 
 type PaymentService interface {
 	CreateVNPayPayment(userID, packageID, ip string) (*dto.CreatePaymentResponse, error)
+	// CreateWalletPayment mua gói bằng ví trả trước. idempotencyKey lấy từ header
+	// Idempotency-Key; gửi lặp cùng khoá trả lại kết quả cũ thay vì trừ tiền lần nữa.
+	CreateWalletPayment(userID, packageID, idempotencyKey string) (*dto.WalletPurchaseResponse, error)
+	// GetPaymentMethods trả các phương thức thanh toán gói đang bật.
+	GetPaymentMethods() dto.PaymentMethodsResponse
 	ProcessVNPayCallback(values url.Values) dto.PaymentCallbackResult
 	// ListPayments trả lịch sử giao dịch (partner: filter.UserID đã bị ép).
 	ListPayments(filter dto.PaymentListFilter) ([]models.PaymentTransaction, int64, error)
@@ -55,6 +63,9 @@ func NewPaymentService(payments repository.PaymentRepository, packages repositor
 }
 
 func (s *paymentServiceImpl) CreateVNPayPayment(userID, packageID, ip string) (*dto.CreatePaymentResponse, error) {
+	if !s.env.PaymentVNPayEnabled {
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentMethodOff)
+	}
 	cfg := vnpayConfigFromEnv(s.env)
 	if !cfg.enabled() {
 		return nil, errorsapp.New(errorsapp.ErrCodePaymentNotConfigured)
@@ -126,6 +137,183 @@ func (s *paymentServiceImpl) CreateVNPayPayment(userID, packageID, ip string) (*
 		Amount:     amountVND,
 		ExpiresAt:  expiresAt,
 	}, nil
+}
+
+// CreateWalletPayment mua gói bằng số dư ví trả trước. Toàn bộ việc trừ tiền,
+// huỷ giao dịch gateway đang chờ cùng gói, ghi payment và kích hoạt gói nằm
+// trong một transaction ở repository.
+//
+// Idempotency: txn_ref được suy ra từ (user, package, Idempotency-Key) nên
+// request lặp lại (double click, retry mạng) không trừ tiền lần hai. Nếu client
+// không gửi khoá, mỗi request là một giao dịch mới.
+func (s *paymentServiceImpl) CreateWalletPayment(userID, packageID, idempotencyKey string) (*dto.WalletPurchaseResponse, error) {
+	if !s.env.PaymentWalletEnabled {
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentMethodOff)
+	}
+
+	pkg, err := s.packages.GetPackageByID(packageID)
+	if err != nil {
+		return nil, err
+	}
+	if pkg.PriceMonthly < 0 {
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentInvalidAmount)
+	}
+	// Giá 0 là gói miễn phí: vẫn kích hoạt gói nhưng không ghi bút toán ví.
+	amount := int64(math.Round(pkg.PriceMonthly))
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if len(idempotencyKey) > 64 {
+		idempotencyKey = idempotencyKey[:64]
+	}
+	txnRef := walletTxnRef(userID, packageID, idempotencyKey)
+
+	// Replay phải chạy TRƯỚC kiểm tra "gói đang hoạt động": lần gọi thứ hai
+	// của cùng một yêu cầu sẽ thấy gói vừa được kích hoạt ở lần đầu.
+	existing, err := s.payments.FindByTxnRef(txnRef)
+	if err != nil {
+		return nil, errorsapp.Wrap(errorsapp.ErrCodePaymentCreateFailed, err)
+	}
+	if existing != nil {
+		return s.replayWalletPurchase(userID, existing)
+	}
+
+	activeSub, err := s.packages.GetActiveSubscription(userID)
+	if err != nil {
+		return nil, err
+	}
+	if activeSub != nil && activeSub.PackageID == pkg.ID {
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentAlreadyActive)
+	}
+
+	now := time.Now()
+	newSub := newPartnerSubscription(userID, pkg)
+	txn := &models.PaymentTransaction{
+		ID:        utils.GenerateUUID(),
+		TxnRef:    txnRef,
+		RequestID: strings.TrimSpace(idempotencyKey),
+		UserID:    userID,
+		PackageID: pkg.ID,
+		Amount:    amount,
+		Status:    models.PaymentStatusPending,
+		Gateway:   "wallet",
+		OrderInfo: "Thanh toan goi quang cao " + pkg.Name,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	wallet, err := s.payments.PurchaseWithWallet(userID, pkg, activeSub, newSub, txn, amount)
+	if err != nil {
+		// Request song song cùng Idempotency-Key: giao dịch kia đã thắng, đọc
+		// lại và trả kết quả thay vì báo lỗi cho người dùng.
+		if errors.Is(err, repository.ErrWalletTxnExists) {
+			existing, findErr := s.payments.FindByTxnRef(txnRef)
+			if findErr != nil {
+				return nil, errorsapp.Wrap(errorsapp.ErrCodePaymentCreateFailed, findErr)
+			}
+			if existing != nil {
+				return s.replayWalletPurchase(userID, existing)
+			}
+		}
+		return nil, err
+	}
+
+	resp := &dto.WalletPurchaseResponse{
+		Subscription: walletSubscriptionResponse(newSub, pkg),
+		Payment:      *txn,
+	}
+	if wallet != nil {
+		resp.Wallet = &dto.WalletBalance{
+			Balance:   wallet.Balance,
+			Reserved:  wallet.Reserved,
+			Available: wallet.Available(),
+			Currency:  wallet.Currency,
+		}
+	}
+	return resp, nil
+}
+
+// replayWalletPurchase trả lại kết quả của giao dịch ví đã thành công trước đó.
+func (s *paymentServiceImpl) replayWalletPurchase(userID string, txn *models.PaymentTransaction) (*dto.WalletPurchaseResponse, error) {
+	if txn.UserID != userID || txn.Status != models.PaymentStatusSuccess {
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentDuplicate)
+	}
+
+	activeSub, err := s.packages.GetActiveSubscription(userID)
+	if err != nil {
+		return nil, err
+	}
+	if activeSub == nil || activeSub.PackageID != txn.PackageID {
+		// Giao dịch đã xử lý nhưng gói đã đổi/hết hạn — không thể dựng lại
+		// subscription của lần mua cũ, và cũng không được trừ tiền lại.
+		return nil, errorsapp.New(errorsapp.ErrCodePaymentDuplicate)
+	}
+
+	pkg := activeSub.Package
+	if pkg == nil {
+		pkg = &models.AdPackage{ID: txn.PackageID}
+	}
+	return &dto.WalletPurchaseResponse{
+		Subscription: walletSubscriptionResponse(activeSub, pkg),
+		Payment:      *txn,
+		Replayed:     true,
+	}, nil
+}
+
+// walletSubscriptionResponse chuyển subscription vừa tạo sang DTO. Không dùng
+// GetUserSubscription vì hàm đó đọc lại DB và trả lỗi 404 khi chưa thấy commit.
+func walletSubscriptionResponse(sub *models.PartnerSubscription, pkg *models.AdPackage) dto.SubscriptionResponse {
+	slotsLeft := pkg.MaxSlots - sub.SlotsUsed
+	if slotsLeft < 0 {
+		slotsLeft = 0
+	}
+	return dto.SubscriptionResponse{
+		ID:           sub.ID,
+		PackageID:    sub.PackageID,
+		PackageName:  pkg.Name,
+		MaxSlots:     pkg.MaxSlots,
+		SlotsUsed:    sub.SlotsUsed,
+		SlotsLeft:    slotsLeft,
+		PriceMonthly: pkg.PriceMonthly,
+		StartedAt:    sub.StartedAt,
+		ExpiresAt:    sub.ExpiresAt,
+		Status:       string(sub.Status),
+	}
+}
+
+// GetPaymentMethods trả các phương thức thanh toán gói đang bật. MoMo/VNPay
+// chỉ hiện khi vừa bật cờ vừa có đủ cấu hình merchant, tránh hiển thị nút
+// bấm vào sẽ lỗi.
+func (s *paymentServiceImpl) GetPaymentMethods() dto.PaymentMethodsResponse {
+	options := []dto.PaymentMethodOption{
+		{Key: "wallet", Enabled: s.env.PaymentWalletEnabled},
+		{Key: "momo", Enabled: s.env.PaymentMoMoEnabled && momoConfigured(s.env)},
+		{Key: "vnpay", Enabled: s.env.PaymentVNPayEnabled && vnpayConfigFromEnv(s.env).enabled()},
+	}
+	defaultMethod := ""
+	for _, option := range options {
+		if option.Enabled {
+			defaultMethod = option.Key
+			break
+		}
+	}
+	return dto.PaymentMethodsResponse{Methods: options, Default: defaultMethod}
+}
+
+func momoConfigured(env config.Env) bool {
+	return strings.TrimSpace(env.MoMoPartnerCode) != "" &&
+		strings.TrimSpace(env.MoMoAccessKey) != "" &&
+		strings.TrimSpace(env.MoMoSecretKey) != "" &&
+		strings.TrimSpace(env.MoMoEndpoint) != ""
+}
+
+// walletTxnRef dựng mã giao dịch ví. Có Idempotency-Key thì băm (user, gói,
+// khoá) để lặp lại cùng yêu cầu ra cùng mã; không có thì sinh mã ngẫu nhiên.
+func walletTxnRef(userID, packageID, idempotencyKey string) string {
+	key := strings.TrimSpace(idempotencyKey)
+	if key == "" {
+		return "LKW" + strings.ToUpper(strings.ReplaceAll(utils.GenerateUUID(), "-", ""))[:24]
+	}
+	sum := sha256.Sum256([]byte(userID + "|" + packageID + "|" + key))
+	return "LKW" + strings.ToUpper(hex.EncodeToString(sum[:]))[:40]
 }
 
 // ProcessVNPayCallback xử lý cả return (trình duyệt) và IPN (server-to-server).

@@ -6,6 +6,7 @@ import (
 	"linkup/dto"
 	errorsapp "linkup/errors"
 	"linkup/services"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,10 +17,16 @@ import (
 type PaymentController struct {
 	service services.PaymentService
 	env     config.Env
+	issuer  TokenIssuer
 }
 
 func NewPaymentController(service services.PaymentService, env config.Env) *PaymentController {
 	return &PaymentController{service: service, env: env}
+}
+
+// SetTokenIssuer gắn bộ cấp JWT để trả token mới khi mua gói nâng role.
+func (ctrl *PaymentController) SetTokenIssuer(issuer TokenIssuer) {
+	ctrl.issuer = issuer
 }
 
 func (ctrl *PaymentController) ListMyPayments(c *gin.Context) {
@@ -85,6 +92,52 @@ func (ctrl *PaymentController) CreateVNPayPayment(c *gin.Context) {
 		"message": "Tạo giao dịch VNPay thành công",
 		"data":    res,
 	})
+}
+
+// CreateWalletPayment mua gói bằng ví trả trước. Header Idempotency-Key (tuỳ
+// chọn) giúp retry không bị trừ tiền hai lần.
+func (ctrl *PaymentController) CreateWalletPayment(c *gin.Context) {
+	var input dto.CreatePaymentInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		errorsapp.Respond(c, http.StatusBadRequest, err)
+		return
+	}
+
+	userID := c.GetString("userID")
+	res, err := ctrl.service.CreateWalletPayment(
+		userID,
+		input.PackageID,
+		c.GetHeader("Idempotency-Key"),
+	)
+	if err != nil {
+		if appErr, ok := errorsapp.IsAppError(err); ok {
+			errorsapp.Respond(c, errorsapp.StatusCode(appErr.Code), appErr)
+		} else {
+			errorsapp.Respond(c, http.StatusBadRequest, err)
+		}
+		return
+	}
+
+	body := gin.H{"message": "Thanh toán gói bằng ví thành công", "data": res}
+	if !res.Replayed {
+		// Role DB có thể vừa nâng lên PARTNER — cấp lại token để claim khớp ngay.
+		// Best-effort: lỗi cấp token không làm fail giao dịch đã trừ tiền.
+		if ctrl.issuer != nil {
+			sessionID := c.GetString("sessionID")
+			if tokens, terr := ctrl.issuer.ReissueTokensForUser(c.Request.Context(), userID, sessionID); terr != nil {
+				log.Printf("[WalletPayment] reissue tokens failed for user %s: %v", userID, terr)
+			} else if tokens != nil {
+				body["tokens"] = tokens
+			}
+		}
+	}
+	c.JSON(http.StatusOK, body)
+}
+
+// GetPaymentMethods trả phương thức thanh toán gói đang bật (ví/momo/vnpay)
+// để UI chỉ hiện lựa chọn khả dụng.
+func (ctrl *PaymentController) GetPaymentMethods(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": ctrl.service.GetPaymentMethods()})
 }
 
 // VNPayReturn là nơi trình duyệt quay về sau khi thanh toán. Endpoint công khai

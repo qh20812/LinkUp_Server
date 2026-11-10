@@ -303,6 +303,15 @@ func main() {
 		paymentService := services.NewPaymentService(paymentRepository, packageRepository, env)
 		momoService := services.NewMoMoService(paymentRepository, packageRepository, env)
 
+		// ===== VÍ TRẢ TRƯỚC & NẠP TIỀN CHUYỂN KHOẢN (TRACK E) =====
+		walletRepository := repository.NewWalletRepository(gormDB)
+		walletService := services.NewWalletService(walletRepository, env)
+		walletService.SetNotificationService(notificationService)
+		walletService.SetAuditRepository(repository.NewAdminAuditRepository(gormDB))
+		walletController := controllers.NewWalletController(walletService)
+		// Bật giữ chỗ/trừ ngân sách quảng cáo từ ví.
+		adService.EnableWallet(true)
+
 		// Background worker: downgrade expired partner subscriptions (mục 1.3)
 		go func() {
 			ticker := time.NewTicker(1 * time.Hour)
@@ -334,10 +343,26 @@ func main() {
 			}
 		}()
 
+		// Worker đóng yêu cầu nạp ví quá hạn (mỗi 5 phút). Yêu cầu người dùng đã
+		// báo chuyển khoản thì KHÔNG tự expire — để admin đối chiếu sao kê.
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				count, err := walletService.ExpireTopups(context.Background())
+				if err != nil {
+					log.Printf("[WalletWorker] expire topups error: %v", err)
+				} else if count > 0 {
+					log.Printf("[WalletWorker] expired %d topups", count)
+				}
+			}
+		}()
+
 		adController := controllers.NewAdController(adService, profileRepository)
-	adController.SetLocationStore(locationStore)
+		adController.SetLocationStore(locationStore)
 		packageController := controllers.NewPackageController(packageService, authService)
 		paymentController := controllers.NewPaymentController(paymentService, env)
+		paymentController.SetTokenIssuer(authService)
 		momoController := controllers.NewMoMoController(momoService, env)
 
 		// Đăng ký routes cho cả Quảng cáo và Gói Đăng ký
@@ -345,6 +370,7 @@ func main() {
 		routes.RegisterPackageRoutes(router, packageController, env, gormDB)
 		routes.RegisterPaymentRoutes(router, paymentController, env, gormDB)
 		routes.RegisterMoMoRoutes(router, momoController, env, gormDB)
+		routes.RegisterWalletRoutes(router, walletController, env, gormDB)
 
 		// ===== KHỞI TẠO TẦNG ADMIN =====
 		moderationRepository := repository.NewModerationRepository(gormDB)

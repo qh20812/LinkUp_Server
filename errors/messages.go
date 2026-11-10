@@ -410,6 +410,8 @@ var Messages = map[string]string{
 	"payment.INVALID_AMOUNT": "Số tiền thanh toán không hợp lệ",
 	"payment.ALREADY_ACTIVE": "Gói này đang hoạt động, không cần thanh toán lại",
 	"payment.CREATE_FAILED":  "Không thể tạo giao dịch thanh toán",
+	"payment.METHOD_DISABLED": "Phương thức thanh toán này đang tạm tắt",
+	"payment.DUPLICATE_REQUEST": "Yêu cầu thanh toán này đã được xử lý trước đó",
 
 	// ── Notification ───────────────────────────────────────────
 	"notification.CREATE_FAILED":      "Không thể tạo thông báo",
@@ -458,4 +460,20 @@ var Messages = map[string]string{
 
 	// ── Ban ───────────────────────────────────────────────────
 	"ban.NOT_FOUND": "Không tìm thấy bản ghi ban",
+
+	// ── Wallet (ví trả trước + nạp tiền chuyển khoản) ─────────
+	"wallet.NOT_CONFIGURED":         "Tính năng nạp ví chưa được cấu hình. Vui lòng liên hệ quản trị viên",
+	"wallet.INVALID_AMOUNT":         "Số tiền nạp không hợp lệ",
+	"wallet.AMOUNT_TOO_SMALL":       "Số tiền nạp tối thiểu là {{min}}đ",
+	"wallet.AMOUNT_TOO_LARGE":       "Số tiền nạp tối đa là {{max}}đ",
+	"wallet.INSUFFICIENT_BALANCE":   "Số dư khả dụng không đủ (cần {{required}}đ, hiện có {{available}}đ). Vui lòng nạp thêm tiền vào ví",
+	"wallet.TOPUP_NOT_FOUND":        "Không tìm thấy yêu cầu nạp tiền",
+	"wallet.TOPUP_NOT_PENDING":      "Yêu cầu nạp tiền này đã được xử lý",
+	"wallet.TOPUP_EXPIRED":          "Yêu cầu nạp tiền đã hết hạn. Vui lòng tạo yêu cầu mới",
+	"wallet.TOPUP_ALREADY_REPORTED": "Bạn đã báo chuyển khoản cho yêu cầu này",
+	"wallet.TOPUP_RATE_LIMITED":     "Bạn đã tạo quá nhiều yêu cầu nạp tiền. Vui lòng thử lại sau",
+	"wallet.TOPUP_CODE_FAILED":      "Không thể tạo mã nạp tiền. Vui lòng thử lại",
+	"wallet.NOT_OWNER":              "Bạn không có quyền thao tác yêu cầu nạp tiền này",
+	"wallet.REASON_REQUIRED":        "Vui lòng nhập lý do từ chối",
+	"wallet.INVALID_LEDGER":         "Thao tác ví không hợp lệ (số dư hoặc tiền giữ chỗ không đủ)",
 }

@@ -36,6 +36,20 @@ type CreatePaymentResponse struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
+// PaymentMethodOption là một phương thức thanh toán gói mà client được chọn.
+// Key khớp cột payment_transactions.gateway: wallet | momo | vnpay.
+type PaymentMethodOption struct {
+	Key     string `json:"key"`
+	Enabled bool   `json:"enabled"`
+}
+
+// PaymentMethodsResponse cho biết phương thức nào đang bật và mặc định là gì.
+// Nhãn hiển thị do phía web i18n, server chỉ trả khoá.
+type PaymentMethodsResponse struct {
+	Methods []PaymentMethodOption `json:"methods"`
+	Default string                `json:"default"`
+}
+
 // PaymentCallbackResult là kết quả xử lý return/IPN sau khi đã kiểm tra chữ ký,
 // mã merchant, giao dịch và số tiền.
 type PaymentCallbackResult struct {

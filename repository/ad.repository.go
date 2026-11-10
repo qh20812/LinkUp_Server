@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -51,6 +52,16 @@ type AdRepository interface {
 	// MarkFinishedAdsCompleted chuyển các ad active đã hết hạn / hết budget /
 	// đạt max_impressions sang completed. Trả số dòng đã cập nhật.
 	MarkFinishedAdsCompleted(now time.Time) (int64, error)
+	// SyncAdBudgetReservation giữ chỗ/trả lại ví để khớp với ngân sách còn lại
+	// của ad (target = budget - total_spent). Trả delta reserved (dương = giữ
+	// thêm, âm = trả lại). Ad do admin tạo (PackageID NULL) không dùng ví.
+	SyncAdBudgetReservation(ctx context.Context, adID string) (int64, error)
+	// ReleaseAdBudget trả toàn bộ tiền đang giữ chỗ của ad về ví (dùng khi ad
+	// bị từ chối/xoá/kết thúc). Trả số tiền đã trả lại.
+	ReleaseAdBudget(ctx context.Context, adID string) (int64, error)
+	// ListAdsWithOutstandingReserve liệt kê ad đã kết thúc nhưng còn giữ chỗ,
+	// phục vụ worker dọn tiền về ví.
+	ListAdsWithOutstandingReserve(ctx context.Context, limit int) ([]models.Ad, error)
 }
 
 type adRepositoryImpl struct {
@@ -345,13 +356,31 @@ func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics) (
 		}
 		if ad.MaxImpressions > 0 && impressions >= int64(ad.MaxImpressions) {
 			ad.Status = models.AdStatusCompleted
-			return tx.Model(&models.Ad{}).Where("id = ?", ad.ID).Update("status", ad.Status).Error
+			if err := releaseAdSlotTx(tx, &ad); err != nil {
+				return err
+			}
+			if err := releaseAdReserveTx(tx, &ad); err != nil {
+				return err
+			}
+			return tx.Model(&models.Ad{}).Where("id = ?", ad.ID).
+				Updates(map[string]interface{}{
+					"status":          ad.Status,
+					"wallet_reserved": ad.WalletReserved,
+				}).Error
 		}
 
 		cost := actionCost(&ad, analytics.ActionType)
+		costInt := int64(0)
 		if cost > 0 {
+			// Ví dùng số nguyên VND; làm tròn nhưng không để phí về 0.
+			costInt = int64(math.Round(cost))
+			if costInt < 1 {
+				costInt = 1
+			}
+			charged := float64(costInt)
+
 			// 4. Budget còn lại: chặn trước khi ghi để không vượt ngân sách.
-			if ad.Budget > 0 && ad.TotalSpent+cost > ad.Budget {
+			if ad.Budget > 0 && ad.TotalSpent+charged > ad.Budget {
 				return nil
 			}
 			// 5. Daily budget.
@@ -363,35 +392,81 @@ func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics) (
 					Select("COALESCE(SUM(cost), 0)").Scan(&daily).Error; err != nil {
 					return err
 				}
-				if daily+cost > ad.DailyBudget {
+				if daily+charged > ad.DailyBudget {
 					return nil
 				}
 			}
 		}
 
+		// 5b. Ad có ngân sách giữ từ ví: khoá ví và kiểm tra còn đủ tiền giữ
+		// chỗ. Không đủ thì dừng ad ngay và trả phần còn lại, không ghi nhận
+		// tương tác miễn phí.
+		var spendWallet *models.Wallet
+		if costInt > 0 && ad.WalletReserved > 0 {
+			wallet, walletErr := lockWalletTx(tx, ad.PartnerID)
+			if walletErr != nil {
+				return walletErr
+			}
+			if wallet.Reserved < costInt || wallet.Balance < costInt {
+				ad.Status = models.AdStatusCompleted
+				if err := releaseAdSlotTx(tx, &ad); err != nil {
+					return err
+				}
+				if err := releaseAdReserveTx(tx, &ad); err != nil {
+					return err
+				}
+				return tx.Model(&models.Ad{}).Where("id = ?", ad.ID).
+					Updates(map[string]interface{}{
+						"status":          ad.Status,
+						"wallet_reserved": ad.WalletReserved,
+					}).Error
+			}
+			spendWallet = wallet
+		}
+
 		// 6. Ghi log tương tác + cost của chính hành động này.
+		analytics.Cost = float64(costInt)
 		if err := tx.Create(analytics).Error; err != nil {
 			return err
 		}
-		if cost > 0 {
-			if err := tx.Model(&models.AdAnalytics{}).Where("id = ?", analytics.ID).
-				Update("cost", cost).Error; err != nil {
+
+		// 6b. Trừ tiền thật khỏi ví (balance và reserved cùng giảm) trong cùng
+		// transaction với analytics + ad.
+		if spendWallet != nil {
+			if err := applyWalletDeltaTx(
+				tx, spendWallet,
+				-costInt, -costInt, -costInt,
+				models.WalletTxSpend, "ad_analytics", analytics.ID,
+				"Trừ tiền hiển thị/click quảng cáo",
+			); err != nil {
 				return err
+			}
+			ad.WalletReserved -= costInt
+			if ad.WalletReserved < 0 {
+				ad.WalletReserved = 0
 			}
 		}
 
 		// 7. Cập nhật chi tiêu; tự hoàn thành khi chạm budget hoặc max impressions.
-		ad.TotalSpent += cost
+		ad.TotalSpent += float64(costInt)
 		reachedMax := ad.MaxImpressions > 0 &&
 			analytics.ActionType == string(models.ActionImpression) &&
 			impressions+1 >= int64(ad.MaxImpressions)
 		if (ad.Budget > 0 && ad.TotalSpent >= ad.Budget) || reachedMax {
 			ad.Status = models.AdStatusCompleted
+			// Ad kết thúc: trả slot + phần ngân sách chưa tiêu về ví.
+			if err := releaseAdSlotTx(tx, &ad); err != nil {
+				return err
+			}
+			if err := releaseAdReserveTx(tx, &ad); err != nil {
+				return err
+			}
 		}
 		if err := tx.Model(&models.Ad{}).Where("id = ?", ad.ID).
 			Updates(map[string]interface{}{
-				"total_spent": ad.TotalSpent,
-				"status":      ad.Status,
+				"total_spent":     ad.TotalSpent,
+				"status":          ad.Status,
+				"wallet_reserved": ad.WalletReserved,
 			}).Error; err != nil {
 			return err
 		}
@@ -401,6 +476,169 @@ func (r *adRepositoryImpl) TrackActionAndDeduct(analytics *models.AdAnalytics) (
 	})
 
 	return recorded, err
+}
+
+// releaseAdSlotTx trả 1 slot cho subscription đang hoạt động của partner khi ad
+// chuyển sang trạng thái không chiếm slot (completed). No-op với ad do admin
+// tạo hộ (không gắn gói) hoặc partner không còn gói active.
+func releaseAdSlotTx(tx *gorm.DB, ad *models.Ad) error {
+	if ad.PackageID == nil {
+		return nil
+	}
+	return tx.Exec(`
+		UPDATE partner_subscriptions
+		SET slots_used = GREATEST(slots_used - 1, 0), updated_at = ?
+		WHERE user_id = ? AND status = ?`,
+		time.Now(), ad.PartnerID, models.SubscriptionStatusActive).Error
+}
+
+// releaseAdReserveTx trả toàn bộ tiền đang giữ chỗ của ad về ví trong transaction
+// hiện tại. No-op nếu ad không giữ chỗ đồng nào (ad cũ hoặc ad admin tạo).
+func releaseAdReserveTx(tx *gorm.DB, ad *models.Ad) error {
+	if ad.WalletReserved <= 0 {
+		return nil
+	}
+	wallet, err := lockWalletTx(tx, ad.PartnerID)
+	if err != nil {
+		return err
+	}
+	amount := ad.WalletReserved
+	if amount > wallet.Reserved {
+		amount = wallet.Reserved
+	}
+	if amount > 0 {
+		if err := applyWalletDeltaTx(
+			tx, wallet,
+			0, -amount, -amount,
+			models.WalletTxRelease, "ad", ad.ID,
+			"Trả lại ngân sách chưa tiêu của quảng cáo",
+		); err != nil {
+			return err
+		}
+	}
+	ad.WalletReserved = 0
+	return nil
+}
+
+// SyncAdBudgetReservation giữ chỗ thêm hoặc trả lại phần ngân sách chưa tiêu để
+// ví khớp với ad. Ad do admin tạo hộ (PackageID NULL) không dùng ví của partner.
+func (r *adRepositoryImpl) SyncAdBudgetReservation(ctx context.Context, adID string) (int64, error) {
+	var applied int64
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var ad models.Ad
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&ad, "id = ?", adID).Error; err != nil {
+			return err
+		}
+		if ad.PackageID == nil {
+			return nil
+		}
+
+		target := int64(math.Round(ad.Budget - ad.TotalSpent))
+		if target < 0 {
+			target = 0
+		}
+		delta := target - ad.WalletReserved
+		if delta == 0 {
+			return nil
+		}
+
+		wallet, err := lockWalletTx(tx, ad.PartnerID)
+		if err != nil {
+			return err
+		}
+
+		if delta > 0 {
+			if wallet.Available() < delta {
+				return errorsapp.Newf(errorsapp.ErrCodeWalletInsufficient, map[string]any{
+					"required":  delta,
+					"available": wallet.Available(),
+				})
+			}
+			if err := applyWalletDeltaTx(
+				tx, wallet,
+				0, delta, delta,
+				models.WalletTxReserve, "ad", ad.ID,
+				"Giữ chỗ ngân sách quảng cáo",
+			); err != nil {
+				return err
+			}
+		} else {
+			amount := -delta
+			if amount > ad.WalletReserved {
+				amount = ad.WalletReserved
+			}
+			if amount > wallet.Reserved {
+				amount = wallet.Reserved
+			}
+			if amount > 0 {
+				if err := applyWalletDeltaTx(
+					tx, wallet,
+					0, -amount, -amount,
+					models.WalletTxRelease, "ad", ad.ID,
+					"Điều chỉnh giảm ngân sách giữ chỗ",
+				); err != nil {
+					return err
+				}
+				delta = -amount
+			} else {
+				delta = 0
+			}
+		}
+
+		if err := tx.Model(&models.Ad{}).Where("id = ?", ad.ID).
+			Update("wallet_reserved", target).Error; err != nil {
+			return err
+		}
+		applied = delta
+		return nil
+	})
+
+	return applied, err
+}
+
+// ReleaseAdBudget trả toàn bộ tiền đang giữ chỗ của ad về ví. Dùng khi ad bị
+// từ chối, bị xoá hoặc đã kết thúc (worker/CompleteFinishedAds).
+func (r *adRepositoryImpl) ReleaseAdBudget(ctx context.Context, adID string) (int64, error) {
+	var released int64
+
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var ad models.Ad
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&ad, "id = ?", adID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		before := ad.WalletReserved
+		if err := releaseAdReserveTx(tx, &ad); err != nil {
+			return err
+		}
+		if before <= 0 {
+			return nil
+		}
+		released = before
+		return tx.Model(&models.Ad{}).Where("id = ?", ad.ID).
+			Update("wallet_reserved", 0).Error
+	})
+
+	return released, err
+}
+
+func (r *adRepositoryImpl) ListAdsWithOutstandingReserve(ctx context.Context, limit int) ([]models.Ad, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var ads []models.Ad
+	err := r.db.WithContext(ctx).
+		Where("wallet_reserved > 0 AND status IN ?", []models.AdStatus{
+			models.AdStatusCompleted, models.AdStatusRejected,
+		}).
+		Limit(limit).
+		Find(&ads).Error
+	return ads, err
 }
 
 func actionCost(ad *models.Ad, actionType string) float64 {
@@ -604,17 +842,39 @@ func (r *adRepositoryImpl) FilterByFrequencyCap(ads []models.Ad, userID string, 
 	return filtered, nil
 }
 
-// GetDailySpend lấy tổng chi phí trong ngày (mục 2.4)
+// MarkFinishedAdsCompleted chuyển các ad active đã hết hạn / hết budget /
+// đạt max_impressions sang completed VÀ trả slot cho gói trong cùng transaction.
+// Chỉ ad đang active mới được xử lý nên chạy lại không trả slot lần hai.
 func (r *adRepositoryImpl) MarkFinishedAdsCompleted(now time.Time) (int64, error) {
-	res := r.db.Model(&models.Ad{}).
-		Where("status = ?", models.AdStatusActive).
-		Where(`(expires_at IS NOT NULL AND expires_at < ?)
-		    OR (budget > 0 AND total_spent >= budget)
-		    OR (max_impressions > 0 AND (
-		        SELECT COUNT(*) FROM ad_analytics x
-		        WHERE x.ad_id = ads.id AND x.action_type = 'impression') >= max_impressions)`, now).
-		Update("status", models.AdStatusCompleted)
-	return res.RowsAffected, res.Error
+	var count int64
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var ads []models.Ad
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("status = ?", models.AdStatusActive).
+			Where(`(expires_at IS NOT NULL AND expires_at < ?)
+			    OR (budget > 0 AND total_spent >= budget)
+			    OR (max_impressions > 0 AND (
+			        SELECT COUNT(*) FROM ad_analytics x
+			        WHERE x.ad_id = ads.id AND x.action_type = 'impression') >= max_impressions)`, now).
+			Find(&ads).Error; err != nil {
+			return err
+		}
+
+		for i := range ads {
+			ad := &ads[i]
+			if err := tx.Model(&models.Ad{}).
+				Where("id = ? AND status = ?", ad.ID, models.AdStatusActive).
+				Update("status", models.AdStatusCompleted).Error; err != nil {
+				return err
+			}
+			if err := releaseAdSlotTx(tx, ad); err != nil {
+				return err
+			}
+			count++
+		}
+		return nil
+	})
+	return count, err
 }
 
 // AdRangeMetrics là số liệu tổng hợp + chuỗi ngày trong một khoảng thời gian.
@@ -760,7 +1020,10 @@ func (r *adRepositoryImpl) GetOverviewByPartner(partnerID string) (*dto.AdOvervi
 	var si subInfo
 	err = r.db.Raw(`
 		SELECT
-			COALESCE(ps.slots_used, 0) AS slots_used,
+			COALESCE((
+				SELECT COUNT(*) FROM ads a
+				WHERE a.partner_id = ps.user_id AND a.status IN (`+slotConsumingStatusSQL+`)
+			), 0) AS slots_used,
 			COALESCE(p.max_slots, 0) AS max_slots,
 			COALESCE(p.name, '') AS package_name,
 			ps.expires_at

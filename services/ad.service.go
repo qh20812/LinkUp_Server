@@ -37,12 +37,20 @@ type AdService interface {
 	// CompleteFinishedAds chuyển ad active đã hết hạn / hết budget / đạt
 	// max_impressions sang completed (dùng cho worker định kỳ).
 	CompleteFinishedAds() (int, error)
+	// EnableWallet bật/tắt việc giữ chỗ và trừ tiền ngân sách từ ví trả trước.
+	EnableWallet(enabled bool)
+	// ActivateBudgetReservation giữ chỗ ngân sách còn lại khi ad được duyệt/bật
+	// lại (idempotent — gọi khi đã giữ đủ thì không làm gì).
+	ActivateBudgetReservation(adID string) error
+	// ReleaseBudgetReservation trả phần ngân sách chưa tiêu về ví (từ chối/xoá).
+	ReleaseBudgetReservation(adID string) error
 }
 
 type adServiceImpl struct {
 	repo         repository.AdRepository
 	packageRepo  repository.PackageRepository
 	mediaService MediaService
+	walletOn     bool
 }
 
 // targetLocationsJSON luôn trả về một mảng JSON hợp lệ cho cột `target_locations`.
@@ -69,6 +77,31 @@ func NewAdService(
 		packageRepo:  packageRepo,
 		mediaService: mediaService,
 	}
+}
+
+// EnableWallet bật việc giữ chỗ/trừ tiền ngân sách quảng cáo từ ví trả trước.
+// Mặc định tắt để test/service cũ không cần dựng ví.
+func (s *adServiceImpl) EnableWallet(enabled bool) {
+	s.walletOn = enabled
+}
+
+// ActivateBudgetReservation giữ chỗ phần ngân sách còn lại khi ad bắt đầu chạy.
+// Idempotent: nếu ví đã giữ đúng số tiền thì repo không làm gì.
+func (s *adServiceImpl) ActivateBudgetReservation(adID string) error {
+	if !s.walletOn {
+		return nil
+	}
+	_, err := s.repo.SyncAdBudgetReservation(context.Background(), adID)
+	return err
+}
+
+// ReleaseBudgetReservation trả lại toàn bộ tiền đang giữ chỗ của ad.
+func (s *adServiceImpl) ReleaseBudgetReservation(adID string) error {
+	if !s.walletOn {
+		return nil
+	}
+	_, err := s.repo.ReleaseAdBudget(context.Background(), adID)
+	return err
 }
 
 // CreateAdWithMedia tạo quảng cáo kèm media.
@@ -157,6 +190,18 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 		return nil, err
 	}
 
+	// Giữ chỗ ngân sách từ ví trước khi upload media: hết tiền thì fail sớm,
+	// không tốn upload/không tạo ad rác. Ad do admin tạo hộ (platformAdmin)
+	// không trừ ví của partner.
+	walletReserved := false
+	if s.walletOn && !platformAdmin && input.Budget > 0 {
+		if _, err := s.repo.SyncAdBudgetReservation(ctx.Request.Context(), ad.ID); err != nil {
+			_ = s.repo.Delete(context.Background(), ad.ID)
+			return nil, err
+		}
+		walletReserved = true
+	}
+
 	// Upload/ghi media lỗi giữa chừng thì dọn ad + media đã tạo, tránh dữ liệu
 	// mồ côi trong DB/Cloudinary (slot đã được defer phía trên trả lại).
 	var uploadedMediaRows []*models.Media
@@ -165,6 +210,9 @@ func (s *adServiceImpl) CreateAdWithMedia(ctx *gin.Context, input dto.CreateAdIn
 			return
 		}
 		cleanupCtx := context.Background()
+		if walletReserved {
+			_, _ = s.repo.ReleaseAdBudget(cleanupCtx, ad.ID)
+		}
 		for _, media := range uploadedMediaRows {
 			_ = s.mediaService.DeleteMedia(cleanupCtx, partnerID, media.ID)
 		}
@@ -352,6 +400,12 @@ func (s *adServiceImpl) UpdateStatus(id string, statusStr string, partnerID stri
 	}
 
 	ad.Status = target
+	if target == models.AdStatusActive {
+		// Đảm bảo ví vẫn giữ đủ ngân sách còn lại trước khi cho chạy lại.
+		if err := s.ActivateBudgetReservation(id); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.repo.Update(ad); err != nil {
 		return nil, err
 	}
@@ -598,6 +652,15 @@ func (s *adServiceImpl) UpdateAd(id, partnerID string, input dto.UpdateAdInput) 
 		}
 	}
 
+	// Đổi ngân sách thì phải giữ chỗ/trả lại tiền tương ứng trong ví. Nếu không
+	// đủ số dư, hoàn lại ngân sách cũ để không có ad chạy "ngoài ví".
+	if s.walletOn && input.Budget > 0 && input.Budget != ad.Budget {
+		if _, err := s.repo.SyncAdBudgetReservation(context.Background(), id); err != nil {
+			_ = s.repo.UpdateAdFields(ad, map[string]interface{}{"budget": ad.Budget})
+			return nil, err
+		}
+	}
+
 	return s.repo.FindByID(id)
 }
 
@@ -608,8 +671,10 @@ func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
 		return errorsapp.New(errorsapp.ErrCodeAdNotOwner)
 	}
 
-	// Xác nhận ad tồn tại trước khi xoá.
-	if _, err := s.repo.FindByID(id); err != nil {
+	// Xác nhận ad tồn tại trước khi xoá; giữ lại trạng thái để biết có cần trả
+	// slot hay không (ad completed/suspended đã trả slot trước đó).
+	ad, err := s.repo.FindByID(id)
+	if err != nil {
 		return err
 	}
 
@@ -620,16 +685,24 @@ func (s *adServiceImpl) DeleteAd(id, partnerID string) error {
 	// Xóa media trước
 	_ = s.repo.DeleteAdMedia(id)
 
+	// Trả phần ngân sách chưa tiêu về ví trước khi xoá ad (release cần đọc row ad).
+	if s.walletOn {
+		if _, err := s.repo.ReleaseAdBudget(context.Background(), id); err != nil {
+			log.Printf("[Ad] không trả được ngân sách giữ chỗ của ad %s: %v", id, err)
+		}
+	}
+
 	// Xóa ad
 	if err := s.repo.Delete(context.Background(), id); err != nil {
 		return err
 	}
 
-	// Giải phóng slot trong subscription. Trước đây truyền ad.PackageID (id gói)
-	// nên câu UPDATE không khớp bản ghi subscription nào — slot không bao giờ
-	// được trả lại và đối tác sẽ cạn slot sau vài lần xoá.
-	if sub, err := s.packageRepo.GetActiveSubscription(partnerID); err == nil && sub != nil {
-		_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+	// Chỉ trả slot khi ad đang chiếm slot. Ad completed/suspended đã được trả
+	// slot lúc đổi trạng thái — decrement thêm sẽ ăn slot của ad khác.
+	if ad.Status.ConsumesSlot() {
+		if sub, err := s.packageRepo.GetActiveSubscription(partnerID); err == nil && sub != nil {
+			_ = s.packageRepo.DecrementSlotsUsed(sub.ID)
+		}
 	}
 
 	return nil
@@ -694,10 +767,27 @@ func generateMediaUUID() string {
 }
 
 // CompleteFinishedAds dọn các quảng cáo đã kết thúc vòng đời: quá expires_at,
-// hết budget hoặc đạt max_impressions nhưng vẫn còn status active.
+// hết budget hoặc đạt max_impressions nhưng vẫn còn status active. Sau khi
+// chuyển completed, trả phần ngân sách chưa tiêu còn giữ chỗ về ví.
 func (s *adServiceImpl) CompleteFinishedAds() (int, error) {
 	rows, err := s.repo.MarkFinishedAdsCompleted(time.Now())
-	return int(rows), err
+	if err != nil {
+		return int(rows), err
+	}
+	if !s.walletOn {
+		return int(rows), nil
+	}
+
+	ads, listErr := s.repo.ListAdsWithOutstandingReserve(context.Background(), 500)
+	if listErr != nil {
+		return int(rows), listErr
+	}
+	for _, ad := range ads {
+		if _, releaseErr := s.repo.ReleaseAdBudget(context.Background(), ad.ID); releaseErr != nil {
+			log.Printf("[Ad] không trả được ngân sách giữ chỗ của ad %s: %v", ad.ID, releaseErr)
+		}
+	}
+	return int(rows), nil
 }
 
 // GetOverview trả về tổng quan quảng cáo của partner (mục 6.1)

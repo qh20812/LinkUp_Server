@@ -498,6 +498,42 @@ func TestDeleteAd_SkipsSlotWhenNoActiveSubscription(t *testing.T) {
 	}
 }
 
+func TestDeleteAd_CompletedAdDoesNotFreeSlotAgain(t *testing.T) {
+	// Ad completed đã trả slot lúc chuyển trạng thái; xoá không được trừ thêm
+	// (nếu không sẽ ăn slot của một ad khác đang chạy).
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusCompleted, PackageID: ptrString("pkg-1")},
+	}
+	pkg := &fakePackageRepo{sub: newActiveSubscription()}
+	pkg.slotsUsed = 2
+	svc := newTestAdService(repo, pkg)
+
+	if err := svc.DeleteAd("ad-1", "partner-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pkg.slotsUsed != 2 || pkg.released != 0 {
+		t.Fatalf("ad completed không được trả slot lần nữa, got slotsUsed=%d released=%d", pkg.slotsUsed, pkg.released)
+	}
+}
+
+func TestDeleteAd_SuspendedAdDoesNotFreeSlotAgain(t *testing.T) {
+	repo := &fakeAdRepo{
+		isOwner:  true,
+		existing: &models.Ad{ID: "ad-1", Status: models.AdStatusSuspended, PackageID: ptrString("pkg-1")},
+	}
+	pkg := &fakePackageRepo{sub: newActiveSubscription()}
+	pkg.slotsUsed = 1
+	svc := newTestAdService(repo, pkg)
+
+	if err := svc.DeleteAd("ad-1", "partner-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pkg.slotsUsed != 1 || pkg.released != 0 {
+		t.Fatalf("ad suspended không được trả slot lần nữa, got slotsUsed=%d released=%d", pkg.slotsUsed, pkg.released)
+	}
+}
+
 // ─── P0-1: state machine duyệt quảng cáo ──────────────────────────────────
 
 func TestCreateAdWithMedia_PartnerAdStartsPending(t *testing.T) {

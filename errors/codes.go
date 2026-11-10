@@ -401,6 +401,22 @@ const (
 	ErrCodeAdCarouselTotalSize = "ad.CAROUSEL_TOTAL_TOO_LARGE"
 	ErrCodeAdMediaTypeMismatch = "ad.MEDIA_TYPE_MISMATCH"
 
+	// ── Wallet (ví trả trước + nạp tiền chuyển khoản) ───────────
+	ErrCodeWalletNotConfigured    = "wallet.NOT_CONFIGURED"
+	ErrCodeWalletInvalidAmount    = "wallet.INVALID_AMOUNT"
+	ErrCodeWalletAmountTooSmall   = "wallet.AMOUNT_TOO_SMALL"
+	ErrCodeWalletAmountTooLarge   = "wallet.AMOUNT_TOO_LARGE"
+	ErrCodeWalletInsufficient     = "wallet.INSUFFICIENT_BALANCE"
+	ErrCodeWalletTopupNotFound    = "wallet.TOPUP_NOT_FOUND"
+	ErrCodeWalletTopupNotPending  = "wallet.TOPUP_NOT_PENDING"
+	ErrCodeWalletTopupExpired     = "wallet.TOPUP_EXPIRED"
+	ErrCodeWalletTopupReported    = "wallet.TOPUP_ALREADY_REPORTED"
+	ErrCodeWalletTopupRateLimited = "wallet.TOPUP_RATE_LIMITED"
+	ErrCodeWalletTopupCodeFailed  = "wallet.TOPUP_CODE_FAILED"
+	ErrCodeWalletNotOwner         = "wallet.NOT_OWNER"
+	ErrCodeWalletReasonRequired   = "wallet.REASON_REQUIRED"
+	ErrCodeWalletInvalidLedger    = "wallet.INVALID_LEDGER"
+
 	// ── Package ────────────────────────────────────────────────
 	ErrCodePackageSubscribeFailed = "package.SUBSCRIBE_FAILED"
 	ErrCodePackageNotSubscribed   = "package.NOT_SUBSCRIBED"
@@ -410,6 +426,8 @@ const (
 	ErrCodePaymentInvalidAmount = "payment.INVALID_AMOUNT"
 	ErrCodePaymentAlreadyActive = "payment.ALREADY_ACTIVE"
 	ErrCodePaymentCreateFailed  = "payment.CREATE_FAILED"
+	ErrCodePaymentMethodOff     = "payment.METHOD_DISABLED"
+	ErrCodePaymentDuplicate     = "payment.DUPLICATE_REQUEST"
 
 	// ── Notification ───────────────────────────────────────────
 	ErrCodeNotificationCreateFailed = "notification.CREATE_FAILED"

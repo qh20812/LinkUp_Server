@@ -66,6 +66,19 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "reports", "target_ad_id", "VARCHAR(36) NULL")
 	ensureAdminAuditLogTable(db)
 
+	// Ví trả trước + nạp tiền chuyển khoản (Track E). Tạo bằng SQL thuần vì
+	// AutoMigrate có thể abort sớm ở comment_reactions trên DB cũ.
+	ensureWalletTables(db)
+	// Số tiền đang giữ chỗ cho ngân sách của từng quảng cáo. Cần cột riêng để
+	// release đúng phần chưa tiêu (không thể suy ra từ budget - total_spent khi
+	// ad được sửa ngân sách nhiều lần).
+	ensureColumn(db, "ads", "wallet_reserved", "BIGINT NOT NULL DEFAULT 0")
+	ensureIndex(db, "wallets", "idx_wallets_updated", "updated_at")
+	ensureIndex(db, "wallet_transactions", "idx_wallet_tx_user_created", "user_id, created_at")
+	ensureIndex(db, "wallet_transactions", "idx_wallet_tx_ref", "ref_type, ref_id")
+	ensureIndex(db, "wallet_topups", "idx_wallet_topups_status_expires", "status, expires_at")
+	ensureIndex(db, "wallet_topups", "idx_wallet_topups_reported", "user_reported_at")
+
 	// Index hỗ trợ tracking/serving: dedupe theo (ad, action, thời gian), lọc ad
 	// theo cửa sổ chạy, danh sách theo partner và gói đang hoạt động.
 	ensureColumn(db, "ad_analytics", "cost", "DECIMAL(12,2) NOT NULL DEFAULT 0")
@@ -489,6 +502,71 @@ func ensureForeignKey(db *gorm.DB, table, fkName, column, refTable, refColumn st
 	if err := db.Exec("ALTER TABLE " + table + " ADD CONSTRAINT " + fkName +
 		" FOREIGN KEY (" + column + ") REFERENCES " + refTable + "(" + refColumn + ")").Error; err != nil {
 		log.Printf("Warning: ensure FK %s: %v", fkName, err)
+	}
+}
+
+// ensureWalletTables tạo 3 bảng của ví trả trước (wallets, wallet_transactions,
+// wallet_topups) bằng SQL thuần. Idempotent — chạy lại không lỗi, không mất dữ
+// liệu. Không dựa vào AutoMigrate vì AutoMigrate có thể abort sớm trên DB cũ.
+func ensureWalletTables(db *gorm.DB) {
+	if !db.Migrator().HasTable("wallets") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS wallets (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			balance BIGINT NOT NULL DEFAULT 0,
+			reserved BIGINT NOT NULL DEFAULT 0,
+			currency VARCHAR(3) NOT NULL DEFAULT 'VND',
+			created_at DATETIME(3) NOT NULL,
+			updated_at DATETIME(3) NOT NULL,
+			UNIQUE INDEX idx_wallets_user (user_id),
+			INDEX idx_wallets_updated (updated_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create wallets table: %v", err)
+		}
+	}
+
+	if !db.Migrator().HasTable("wallet_transactions") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS wallet_transactions (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			type VARCHAR(20) NOT NULL,
+			amount BIGINT NOT NULL,
+			balance_after BIGINT NOT NULL,
+			reserved_after BIGINT NOT NULL,
+			ref_type VARCHAR(30) NOT NULL DEFAULT '',
+			ref_id VARCHAR(36) NOT NULL DEFAULT '',
+			note VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME(3) NOT NULL,
+			INDEX idx_wallet_tx_user_created (user_id, created_at),
+			INDEX idx_wallet_tx_ref (ref_type, ref_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create wallet_transactions table: %v", err)
+		}
+	}
+
+	if !db.Migrator().HasTable("wallet_topups") {
+		if err := db.Exec(`CREATE TABLE IF NOT EXISTS wallet_topups (
+			id VARCHAR(36) PRIMARY KEY,
+			user_id VARCHAR(36) NOT NULL,
+			code VARCHAR(20) NOT NULL,
+			amount BIGINT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'pending',
+			expires_at DATETIME(3) NOT NULL,
+			user_reported_at DATETIME(3) NULL,
+			proof_url VARCHAR(500) NOT NULL DEFAULT '',
+			confirmed_amount BIGINT NULL,
+			confirmed_by VARCHAR(36) NULL,
+			admin_note VARCHAR(500) NOT NULL DEFAULT '',
+			paid_at DATETIME(3) NULL,
+			created_at DATETIME(3) NOT NULL,
+			updated_at DATETIME(3) NOT NULL,
+			UNIQUE INDEX idx_wallet_topups_code (code),
+			INDEX idx_wallet_topups_user (user_id),
+			INDEX idx_wallet_topups_status_expires (status, expires_at),
+			INDEX idx_wallet_topups_reported (user_reported_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
+			log.Printf("Warning: create wallet_topups table: %v", err)
+		}
 	}
 }
 

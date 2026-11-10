@@ -38,6 +38,10 @@ type Ad struct {
 	Budget         float64    `json:"budget" gorm:"not null"`
 	DailyBudget    float64    `json:"daily_budget" gorm:"default:0"`
 	TotalSpent     float64    `json:"total_spent" gorm:"default:0"`
+	// WalletReserved là số tiền ví đang giữ chỗ cho ngân sách ad này. Khác
+	// TotalSpent (đã tiêu thật): khi ad kết thúc/xoá/bị từ chối, phần còn lại
+	// của WalletReserved được trả về ví.
+	WalletReserved int64 `json:"wallet_reserved,omitempty" gorm:"not null;default:0"`
 	CPMPrice       float64    `json:"cpm_price" gorm:"default:0"`
 	CPCPrice       float64    `json:"cpc_price" gorm:"default:0"`
 	MaxImpressions int        `json:"max_impressions" gorm:"default:0"`
@@ -84,5 +88,19 @@ func ParseAdStatus(value string) AdStatus {
 		return AdStatusSuspended
 	default:
 		return AdStatusPaused
+	}
+}
+
+// ConsumesSlot báo trạng thái ad có đang chiếm slot của gói hay không.
+//
+// Quy ước (chốt ở PLAN §13.2): pending/active/paused/rejected chiếm slot;
+// completed và suspended thì không. Khi đổi trạng thái sang completed/suspended
+// phải trả slot; khi bật lại từ suspended phải giữ slot trước.
+func (s AdStatus) ConsumesSlot() bool {
+	switch s {
+	case AdStatusPending, AdStatusActive, AdStatusPaused, AdStatusRejected:
+		return true
+	default:
+		return false
 	}
 }

@@ -221,6 +221,20 @@ func StatusCode(code string) int {
 		default:
 			return http.StatusBadRequest
 		}
+	case strings.HasPrefix(code, "wallet."):
+		switch {
+		case strings.HasSuffix(code, "NOT_FOUND"):
+			return http.StatusNotFound
+		case strings.HasSuffix(code, "NOT_OWNER"):
+			return http.StatusForbidden
+		case strings.HasSuffix(code, "RATE_LIMITED"):
+			return http.StatusTooManyRequests
+		case strings.HasSuffix(code, "INSUFFICIENT_BALANCE") || strings.HasSuffix(code, "TOPUP_NOT_PENDING") ||
+			strings.HasSuffix(code, "TOPUP_EXPIRED"):
+			return http.StatusConflict
+		default:
+			return http.StatusBadRequest
+		}
 	case strings.HasPrefix(code, "package."):
 		switch {
 		case strings.HasSuffix(code, "NOT_SUBSCRIBED"):

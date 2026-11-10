@@ -3,9 +3,11 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"linkup/models"
 	"linkup/utils"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -37,6 +39,60 @@ type packageRepositoryImpl struct {
 
 func NewPackageRepository(db *gorm.DB) PackageRepository {
 	return &packageRepositoryImpl{db: db}
+}
+
+// slotConsumingStatuses là các trạng thái ad chiếm slot của gói. Giữ khớp với
+// models.AdStatus.ConsumesSlot() — nguồn sự thật cho SQL đếm.
+var slotConsumingStatuses = []models.AdStatus{
+	models.AdStatusPending,
+	models.AdStatusActive,
+	models.AdStatusPaused,
+	models.AdStatusRejected,
+}
+
+// slotConsumingStatusSQL là danh sách literal đã quote, chèn trực tiếp vào câu
+// SQL đếm (giá trị lấy từ hằng số nội bộ, không phải input người dùng).
+var slotConsumingStatusSQL = func() string {
+	quoted := make([]string, len(slotConsumingStatuses))
+	for i, status := range slotConsumingStatuses {
+		quoted[i] = "'" + string(status) + "'"
+	}
+	return strings.Join(quoted, ",")
+}()
+
+// countSlotConsumingAds đếm số ad đang chiếm slot của một partner.
+func countSlotConsumingAds(db *gorm.DB, userID string) (int64, error) {
+	var count int64
+	err := db.Model(&models.Ad{}).
+		Where("partner_id = ? AND status IN ("+slotConsumingStatusSQL+")", userID).
+		Count(&count).Error
+	return count, err
+}
+
+// reconcileSlotsIfStale đồng bộ cột slots_used với số ad thực tế khi dữ liệu đã
+// cũ. Chỉ chạy khi subscription không được cập nhật trong hơn 1 phút để tránh
+// ghi đè một reservation đang bay (ReserveSlot → Create ad).
+func (r *packageRepositoryImpl) reconcileSlotsIfStale(subID string) {
+	var row struct {
+		UserID    string
+		UpdatedAt time.Time
+	}
+	if err := r.db.Model(&models.PartnerSubscription{}).
+		Select("user_id, updated_at").
+		Where("id = ?", subID).
+		Scan(&row).Error; err != nil || row.UserID == "" {
+		return
+	}
+	if time.Since(row.UpdatedAt) < time.Minute {
+		return
+	}
+	count, err := countSlotConsumingAds(r.db, row.UserID)
+	if err != nil {
+		return
+	}
+	_ = r.db.Model(&models.PartnerSubscription{}).
+		Where("id = ?", subID).
+		UpdateColumn("slots_used", count).Error
 }
 
 func (r *packageRepositoryImpl) GetAllPackages() ([]models.AdPackage, error) {
@@ -83,6 +139,21 @@ func (r *packageRepositoryImpl) GetActiveSubscription(userID string) (*models.Pa
 		}
 		return nil, err
 	}
+
+	// slots_used là bộ đếm reservation (tăng trước khi tạo ad), nhưng có thể
+	// drift sau khi ad completed/suspended hoặc dữ liệu cũ. Trả số thực tế cho
+	// UI/quyết định, và đồng bộ lại cột khi đã cũ.
+	if count, countErr := countSlotConsumingAds(r.db, userID); countErr == nil {
+		previous := sub.SlotsUsed
+		sub.SlotsUsed = int(count)
+		// Chỉ ghi lại cột khi bản ghi đã cũ — tránh ghi đè reservation vừa
+		// tăng bởi ReserveSlot nhưng ad chưa kịp insert.
+		if previous != sub.SlotsUsed && time.Since(sub.UpdatedAt) > time.Minute {
+			_ = r.db.Model(&models.PartnerSubscription{}).
+				Where("id = ?", sub.ID).
+				UpdateColumn("slots_used", count).Error
+		}
+	}
 	return &sub, nil
 }
 
@@ -102,7 +173,11 @@ func (r *packageRepositoryImpl) DecrementSlotsUsed(subID string) error {
 
 // ReserveSlot là check-and-increment nguyên tử: hai request tạo ad đồng thời
 // không thể cùng vượt max_slots (trước đây check rồi increment ở 2 bước).
+// Trước khi tăng, đồng bộ bộ đếm nếu dữ liệu đã cũ (ad completed trước bản vá
+// hoặc drift) để không chặn oan.
 func (r *packageRepositoryImpl) ReserveSlot(subID string) (bool, error) {
+	r.reconcileSlotsIfStale(subID)
+
 	res := r.db.Exec(`
 		UPDATE partner_subscriptions ps
 		JOIN ad_packages p ON p.id = ps.package_id

@@ -109,7 +109,7 @@ type FeedAdItem struct {
 	Content   string        `json:"content"`
 	Format    string        `json:"format"`
 	TargetURL string        `json:"target_url"`
-	MediaList []FeedAdMedia `json:"media_list,omitempty"`
+	MediaList []FeedAdMedia `json:"media_list,omitempty" gorm:"-"`
 }
 
 type FeedAdMedia struct {
@@ -134,7 +134,7 @@ type PartnerAdListItem struct {
 	Clicks          int64      `json:"clicks"`
 	CTR             float64    `json:"ctr"`
 	MediaURI        string     `json:"media_uri"`
-	MediaList       []FeedAdMedia `json:"media_list,omitempty"`
+	MediaList       []FeedAdMedia `json:"media_list,omitempty" gorm:"-"`
 	TargetGender    string     `json:"target_gender"`
 	TargetAgeMin    int        `json:"target_age_min"`
 	TargetAgeMax    int        `json:"target_age_max"`
