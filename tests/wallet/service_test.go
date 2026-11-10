@@ -204,6 +204,42 @@ func TestReportTopup_NotOwner(t *testing.T) {
 	}
 }
 
+func TestReportTopup_RequiresProof(t *testing.T) {
+	repo := &fakeWalletRepo{topup: &models.WalletTopup{
+		ID:        "t1",
+		UserID:    "u1",
+		Status:    models.WalletTopupPending,
+		ExpiresAt: time.Now().Add(time.Minute),
+	}}
+	svc := services.NewWalletService(repo, bankEnv())
+
+	_, err := svc.ReportTopup(context.Background(), "u1", "t1", "   ")
+	if code := codeOf(t, err); code != errorsapp.ErrCodeWalletProofRequired {
+		t.Fatalf("code = %s, want %s", code, errorsapp.ErrCodeWalletProofRequired)
+	}
+	if repo.reportedProof != "" {
+		t.Fatalf("repo must not be called without proof, got %q", repo.reportedProof)
+	}
+}
+
+func TestReportTopup_WithProof(t *testing.T) {
+	repo := &fakeWalletRepo{topup: &models.WalletTopup{
+		ID:        "t1",
+		UserID:    "u1",
+		Status:    models.WalletTopupPending,
+		ExpiresAt: time.Now().Add(time.Minute),
+	}}
+	svc := services.NewWalletService(repo, bankEnv())
+
+	const proof = "https://res.cloudinary.com/demo/bill.jpg"
+	if _, err := svc.ReportTopup(context.Background(), "u1", "t1", proof); err != nil {
+		t.Fatalf("ReportTopup returned error: %v", err)
+	}
+	if repo.reportedProof != proof {
+		t.Fatalf("reportedProof = %q, want %q", repo.reportedProof, proof)
+	}
+}
+
 func TestApproveTopup_UsesConfirmedAmount(t *testing.T) {
 	repo := &fakeWalletRepo{topup: &models.WalletTopup{
 		ID:     "t1",

@@ -352,12 +352,15 @@ func (s *walletServiceImpl) ReportTopup(ctx context.Context, userID, topupID, pr
 	}
 
 	proofURL = strings.TrimSpace(proofURL)
+	if proofURL == "" {
+		return nil, errorsapp.New(errorsapp.ErrCodeWalletProofRequired)
+	}
 	if len(proofURL) > 500 {
 		return nil, errorsapp.New(errorsapp.ErrCodeInvalidInput)
 	}
-	// Ảnh biên lai chỉ để tham khảo nhưng vẫn phải là URL http(s) để admin
-	// không mở nhầm scheme lạ (javascript:, data:...).
-	if proofURL != "" && !strings.HasPrefix(proofURL, "http://") && !strings.HasPrefix(proofURL, "https://") {
+	// Ảnh biên lai phải là URL http(s) để admin không mở nhầm scheme lạ
+	// (javascript:, data:...).
+	if !strings.HasPrefix(proofURL, "http://") && !strings.HasPrefix(proofURL, "https://") {
 		return nil, errorsapp.New(errorsapp.ErrCodeInvalidInput)
 	}
 	if err := s.repo.MarkTopupReported(ctx, userID, topupID, proofURL); err != nil {

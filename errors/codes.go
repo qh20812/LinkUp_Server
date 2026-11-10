@@ -411,6 +411,7 @@ const (
 	ErrCodeWalletTopupNotPending  = "wallet.TOPUP_NOT_PENDING"
 	ErrCodeWalletTopupExpired     = "wallet.TOPUP_EXPIRED"
 	ErrCodeWalletTopupReported    = "wallet.TOPUP_ALREADY_REPORTED"
+	ErrCodeWalletProofRequired    = "wallet.PROOF_REQUIRED"
 	ErrCodeWalletTopupRateLimited = "wallet.TOPUP_RATE_LIMITED"
 	ErrCodeWalletTopupCodeFailed  = "wallet.TOPUP_CODE_FAILED"
 	ErrCodeWalletNotOwner         = "wallet.NOT_OWNER"

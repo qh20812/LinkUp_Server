@@ -471,6 +471,7 @@ var Messages = map[string]string{
 	"wallet.TOPUP_NOT_PENDING":      "Yêu cầu nạp tiền này đã được xử lý",
 	"wallet.TOPUP_EXPIRED":          "Yêu cầu nạp tiền đã hết hạn. Vui lòng tạo yêu cầu mới",
 	"wallet.TOPUP_ALREADY_REPORTED": "Bạn đã báo chuyển khoản cho yêu cầu này",
+	"wallet.PROOF_REQUIRED":         "Vui lòng tải ảnh biên lai chuyển khoản",
 	"wallet.TOPUP_RATE_LIMITED":     "Bạn đã tạo quá nhiều yêu cầu nạp tiền. Vui lòng thử lại sau",
 	"wallet.TOPUP_CODE_FAILED":      "Không thể tạo mã nạp tiền. Vui lòng thử lại",
 	"wallet.NOT_OWNER":              "Bạn không có quyền thao tác yêu cầu nạp tiền này",
