@@ -593,6 +593,8 @@ func Run(env config.Env) error {
 			redirect_post_id VARCHAR(36) NULL,
 			redirect_user_id VARCHAR(36) NULL,
 			redirect_comment_id VARCHAR(36) NULL,
+			redirect_community_id VARCHAR(36) NULL,
+			redirect_ad_id VARCHAR(36) NULL,
 			content TEXT,
 			is_read TINYINT(1) NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,

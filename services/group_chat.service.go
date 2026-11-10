@@ -180,7 +180,7 @@ func (s *GroupChatService) LeaveGroup(ctx context.Context, chatID, userID, leave
 				content,
 				nil,
 				nil,
-				nil,
+				&chatID,
 			)
 		}
 	}
@@ -648,7 +648,7 @@ func (s *GroupChatService) MuteMember(ctx context.Context, chatID, adminID, targ
 	}
 	content := fmt.Sprintf("Bạn đã bị tắt tiếng trong nhóm (lý do: %s). Hết hạn: %s", reason, expiresStr)
 	if s.isNotificationsEnabled(ctx, chatID, targetUserID) {
-		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, &chatID)
 	}
 
 	return mute, nil
@@ -669,7 +669,7 @@ func (s *GroupChatService) UnmuteMember(ctx context.Context, chatID, adminID, ta
 
 	content := "Quyền gửi tin nhắn đã được mở lại trong nhóm."
 	if s.isNotificationsEnabled(ctx, chatID, targetUserID) {
-		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notifService.Create(ctx, targetUserID, &adminID, models.NotificationTypeMessage, content, nil, nil, &chatID)
 	}
 	return nil
 }

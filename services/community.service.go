@@ -197,10 +197,10 @@ func (s *CommunityService) CreateCommunity(ctx context.Context, creatorID, name,
 		log.Printf("[community] failed to seed defaults for community %s: %v", community.ID, err)
 	}
 
-	if _, err := s.notifService.Create(ctx, creatorID, nil,
+	if _, err := s.notifService.CreateWithRedirects(ctx, creatorID, nil,
 		models.NotificationTypeCommunityGroupChatAdded,
 		"Tạo cộng đồng thành công! Group chat mặc định đã sẵn sàng",
-		nil, nil, nil); err != nil {
+		NotificationRedirects{CommunityID: &community.ID}); err != nil {
 		log.Printf("[community] failed to send creation notification to user %s: %v", creatorID, err)
 	}
 	log.Printf("[community] user %s created community %s (%s)", creatorID, community.ID, community.Name)
@@ -368,10 +368,10 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 			return nil, errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 		}
 
-		s.notifService.Create(ctx, userID, &community.CreatorID,
+		s.notifService.CreateWithRedirects(ctx, userID, &community.CreatorID,
 			models.NotificationTypeCommunityGroupChatAdded,
 			"Bạn đã tham gia cộng đồng và group chat mặc định",
-			nil, &community.ID, nil)
+			NotificationRedirects{CommunityID: &community.ID})
 
 		return &dto.JoinResult{AutoApproved: true}, nil
 	}
@@ -394,7 +394,7 @@ func (s *CommunityService) joinPublic(ctx context.Context, userID string, commun
 		return nil, errorsapp.New(errorsapp.ErrCodeJoinRequestFailed)
 	}
 
-	s.notifService.Create(ctx, community.CreatorID, &userID, models.NotificationTypeCommunityJoinRequest, "đã gửi yêu cầu tham gia cộng đồng", nil, &userID, nil)
+	s.notifService.CreateWithRedirects(ctx, community.CreatorID, &userID, models.NotificationTypeCommunityJoinRequest, "đã gửi yêu cầu tham gia cộng đồng", NotificationRedirects{CommunityID: &community.ID})
 
 	return &dto.JoinResult{RequestID: joinReq.ID, AutoApproved: false}, nil
 }
@@ -427,10 +427,10 @@ func (s *CommunityService) joinByCode(ctx context.Context, userID string, commun
 
 	s.repo.IncrementInviteCodeUsedCount(ctx, nil, inviteCode.ID)
 
-	s.notifService.Create(ctx, userID, nil,
+	s.notifService.CreateWithRedirects(ctx, userID, nil,
 		models.NotificationTypeCommunityInviteCodeUsed,
 		"Tham gia cộng đồng bằng mã mời thành công",
-		nil, &community.ID, nil)
+		NotificationRedirects{CommunityID: &community.ID})
 
 	return &dto.JoinResult{AutoApproved: true}, nil
 }
@@ -466,10 +466,10 @@ func (s *CommunityService) joinByInvitation(ctx context.Context, userID string, 
 		log.Printf("[community] failed to update invitation %s status to accepted: %v", invitationID, err)
 	}
 
-	s.notifService.Create(ctx, userID, &invitation.InviterID,
+	s.notifService.CreateWithRedirects(ctx, userID, &invitation.InviterID,
 		models.NotificationTypeCommunityInvitationAccepted,
 		"Bạn đã tham gia cộng đồng theo lời mời",
-		nil, &community.ID, nil)
+		NotificationRedirects{CommunityID: &community.ID})
 
 	return &dto.JoinResult{AutoApproved: true}, nil
 }
@@ -534,10 +534,10 @@ func (s *CommunityService) ApproveJoinRequest(ctx context.Context, adminID, requ
 		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
-	s.notifService.Create(ctx, req.UserID, &adminID,
+	s.notifService.CreateWithRedirects(ctx, req.UserID, &adminID,
 		models.NotificationTypeCommunityGroupChatAdded,
 		"Bạn đã được duyệt vào cộng đồng và thêm vào group chat",
-		nil, &req.CommunityID, nil)
+		NotificationRedirects{CommunityID: &req.CommunityID})
 
 	return nil
 }
@@ -562,7 +562,7 @@ func (s *CommunityService) RejectJoinRequest(ctx context.Context, adminID, reque
 		return errorsapp.Wrap(errorsapp.ErrCodeInternal, err)
 	}
 
-	s.notifService.Create(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinRejected, "đã từ chối yêu cầu tham gia cộng đồng", nil, &adminID, nil)
+	s.notifService.CreateWithRedirects(ctx, req.UserID, &adminID, models.NotificationTypeCommunityJoinRejected, "đã từ chối yêu cầu tham gia cộng đồng", NotificationRedirects{CommunityID: &req.CommunityID})
 
 	return nil
 }
@@ -605,7 +605,7 @@ func (s *CommunityService) UpdateMemberRole(ctx context.Context, adminID, commun
 		return errorsapp.New(errorsapp.ErrCodeRoleUpdateFailed)
 	}
 
-	s.notifService.Create(ctx, memberID, &adminID, models.NotificationTypeCommunityRoleChanged, "đã thay đổi vai trò của bạn trong cộng đồng", nil, &adminID, nil)
+	s.notifService.CreateWithRedirects(ctx, memberID, &adminID, models.NotificationTypeCommunityRoleChanged, "đã thay đổi vai trò của bạn trong cộng đồng", NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -664,7 +664,7 @@ func (s *CommunityService) KickMember(ctx context.Context, adminID, communityID,
 	}
 
 	content := fmt.Sprintf("bạn đã bị đuổi khỏi cộng đồng %s với lý do: %s", community.Name, reason)
-	s.notifService.Create(ctx, memberID, &adminID, models.NotificationTypeCommunityMemberKicked, content, nil, nil, nil)
+	s.notifService.CreateWithRedirects(ctx, memberID, &adminID, models.NotificationTypeCommunityMemberKicked, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -683,8 +683,7 @@ func (s *CommunityService) GetCommunityMembers(ctx context.Context, communityID 
 }
 
 func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, communityID string, quiet bool) error {
-	community, err := s.repo.FindByID(ctx, communityID)
-	if err != nil {
+	if _, err := s.repo.FindByID(ctx, communityID); err != nil {
 		return validations.ErrCommunityNotFound
 	}
 
@@ -711,7 +710,7 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 	if quiet {
 		adminIDs, err := s.repo.FindCommunityAdmins(ctx, communityID)
 		if err == nil && len(adminIDs) > 0 {
-			s.notifService.CreateBulk(ctx, adminIDs, &userID, models.NotificationTypeCommunityMemberLeft, "đã rời khỏi cộng đồng", nil, &community.CreatorID, nil)
+			s.notifService.CreateBulkWithRedirects(ctx, adminIDs, &userID, models.NotificationTypeCommunityMemberLeft, "đã rời khỏi cộng đồng", NotificationRedirects{CommunityID: &communityID})
 		}
 	} else {
 		memberIDs, err := s.repo.FindCommunityMemberIDs(ctx, communityID)
@@ -723,7 +722,7 @@ func (s *CommunityService) LeaveCommunity(ctx context.Context, userID, community
 				}
 			}
 			if len(receiverIDs) > 0 {
-				s.notifService.CreateBulk(ctx, receiverIDs, &userID, models.NotificationTypeCommunityMemberLeft, "đã rời khỏi cộng đồng", nil, &community.CreatorID, nil)
+				s.notifService.CreateBulkWithRedirects(ctx, receiverIDs, &userID, models.NotificationTypeCommunityMemberLeft, "đã rời khỏi cộng đồng", NotificationRedirects{CommunityID: &communityID})
 			}
 		}
 	}
@@ -757,10 +756,10 @@ func (s *CommunityService) TransferOwnership(ctx context.Context, requesterID, c
 		return errorsapp.New(errorsapp.ErrCodeTransferFailed)
 	}
 
-	s.notifService.Create(ctx, targetUserID, &requesterID,
+	s.notifService.CreateWithRedirects(ctx, targetUserID, &requesterID,
 		models.NotificationTypeCommunityRoleChanged,
 		"Bạn đã được chuyển quyền sở hữu cộng đồng",
-		nil, &communityID, nil)
+		NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -890,10 +889,10 @@ func (s *CommunityService) SendInvitation(ctx context.Context, inviterID, commun
 		communityName = community.Name
 	}
 
-	s.notifService.Create(ctx, inviteeID, &inviterID,
+	s.notifService.CreateWithRedirects(ctx, inviteeID, &inviterID,
 		models.NotificationTypeCommunityInvitationReceived,
 		"Bạn đã nhận được lời mời tham gia cộng đồng",
-		nil, &communityID, nil)
+		NotificationRedirects{CommunityID: &communityID})
 
 	return &dto.InvitationItem{
 		ID:            invitation.ID,
@@ -953,10 +952,10 @@ func (s *CommunityService) RespondInvitation(ctx context.Context, userID, invita
 			log.Printf("[community] failed to update invitation %s status to accepted: %v", invitationID, err)
 		}
 
-		s.notifService.Create(ctx, userID, &invitation.InviterID,
+		s.notifService.CreateWithRedirects(ctx, userID, &invitation.InviterID,
 			models.NotificationTypeCommunityInvitationAccepted,
 			"Bạn đã tham gia cộng đồng theo lời mời",
-			nil, &invitation.CommunityID, nil)
+			NotificationRedirects{CommunityID: &invitation.CommunityID})
 	} else {
 		if err := s.repo.UpdateInvitationStatus(ctx, nil, invitationID, models.InvitationStatusDeclined); err != nil {
 			log.Printf("[community] failed to update invitation %s status to declined: %v", invitationID, err)

@@ -427,6 +427,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		LastMsgID         *string    `gorm:"column:last_message_id"`
 		LastContent       *string    `gorm:"column:last_content"`
 		LastSender        *string    `gorm:"column:last_sender_id"`
+		LastSenderName    string     `gorm:"column:last_sender_name"`
 		LastMediaType     string     `gorm:"column:last_media_type"`
 		LastMediaDuration int        `gorm:"column:last_media_duration"`
 		LastForwardedFrom *string    `gorm:"column:last_forwarded_from"`
@@ -448,6 +449,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			lm.id AS last_message_id,
 			lm.content AS last_content,
 			lm.sender_id AS last_sender_id,
+			COALESCE(lmp.display_name, '') AS last_sender_name,
 			COALESCE(lmm.file_type, '') AS last_media_type,
 			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
 			lm.forwarded_from AS last_forwarded_from,
@@ -466,13 +468,16 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			ORDER BY m2.created_at DESC
 			LIMIT 1
 		)`, userID, userID).
+		// Tên người gửi tin cuối — cần cho preview system message ở sidebar
+		// (member_joined|actorId...) để không hiển thị "Người lạ".
+		Joins("LEFT JOIN profiles AS lmp ON lmp.user_id = lm.sender_id").
 		Joins("LEFT JOIN media AS lmm ON lmm.id = lm.media_id").
 		Joins("LEFT JOIN chat_user_settings AS cus ON cus.chat_id = chats.id AND cus.user_id = ?", userID).
 		Where("chats.type = ?", models.ChatTypeGroup).
 		// Xóa hội thoại là cục bộ: chỉ ẩn ở phía người dùng này, nhóm của các
 		// thành viên khác không đổi; hiện lại khi có tin nhắn mới hơn hidden_at.
 		Where("(cus.hidden_at IS NULL OR COALESCE(lm.created_at, chats.created_at) > cus.hidden_at)").
-		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value, cus.overlay_strength").
+		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmp.display_name, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value, cus.overlay_strength").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -498,6 +503,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 				ID:            *r.LastMsgID,
 				ChatID:        r.ChatID,
 				SenderID:      derefString(r.LastSender),
+				SenderName:    r.LastSenderName,
 				Content:       *r.LastContent,
 				MediaType:     r.LastMediaType,
 				DurationSeconds: r.LastMediaDuration,

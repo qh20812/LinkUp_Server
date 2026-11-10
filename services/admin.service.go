@@ -338,7 +338,7 @@ func (s *AdminService) UpdateUserStatus(ctx context.Context, superAdminID, targe
 	utils.InvalidateAuthCache(targetUserID)
 
 	statusMsg := fmt.Sprintf("Trạng thái tài khoản của bạn đã được cập nhật thành: %s", status)
-	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, statusMsg, nil, &targetUserID, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, targetUserID, nil, models.NotificationTypeModeration, statusMsg, NotificationRedirects{})
 
 	return nil
 }
@@ -404,7 +404,7 @@ func (s *AdminService) BanUser(ctx context.Context, superAdminID, targetUserID s
 	if expiresAt != nil {
 		banMsg += fmt.Sprintf(". Thời hạn: %s", expiresAt.Format("02/01/2006 15:04"))
 	}
-	_, _ = s.notificationService.Create(ctx, targetUserID, nil, models.NotificationTypeMessage, banMsg, nil, &targetUserID, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, targetUserID, nil, models.NotificationTypeModeration, banMsg, NotificationRedirects{})
 
 	return dto.AdminBanUserResponse{
 		Message: "ban user thành công",
@@ -567,15 +567,13 @@ func (s *AdminService) HidePost(ctx context.Context, superAdminID, postID string
 	}
 
 	postIDPtr := postID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		post.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		"Bài viết của bạn đã bị ẩn vì: "+input.Reason,
-		&postIDPtr,
-		nil,
-		nil,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -630,15 +628,13 @@ func (s *AdminService) ChangePostStatus(ctx context.Context, superAdminID, postI
 	}
 
 	postIDPtr := postID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		post.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		fmt.Sprintf("Bài viết của bạn đã được cập nhật trạng thái thành %s", newStatus),
-		&postIDPtr,
-		nil,
-		nil,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -776,16 +772,13 @@ func (s *AdminService) HideComment(ctx context.Context, superAdminID, commentID 
 	}
 
 	postIDPtr := comment.PostID
-	commentIDPtr := commentID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		comment.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		"Bình luận của bạn đã bị ẩn vì: "+input.Reason,
-		&postIDPtr,
-		nil,
-		&commentIDPtr,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -821,16 +814,13 @@ func (s *AdminService) RevealComment(ctx context.Context, superAdminID, commentI
 	}
 
 	postIDPtr := comment.PostID
-	commentIDPtr := commentID
-	_, err = s.notificationService.Create(
+	_, err = s.notificationService.CreateWithRedirects(
 		ctx,
 		comment.UserID,
 		nil,
-		models.NotificationTypeMessage,
+		models.NotificationTypeModeration,
 		"Bình luận của bạn đã được hiện lại",
-		&postIDPtr,
-		nil,
-		&commentIDPtr,
+		NotificationRedirects{PostID: &postIDPtr},
 	)
 	if err != nil {
 		return err
@@ -1214,7 +1204,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 	// Mô tả mục tiêu bằng ngôn ngữ tự nhiên (tên/tựa, không phải UUID) để
 	// người nhận thông báo hiểu đang nói về nội dung nào.
 	descriptor := "nội dung bạn đã báo cáo"
-	var postTitle, commentExcerpt, targetUsername string
+	var postTitle, commentExcerpt, targetUsername, commentPostID string
 	if report.TargetPostID != nil {
 		if post, err := s.postRepo.FindByID(ctx, *report.TargetPostID); err == nil {
 			postTitle = strings.TrimSpace(post.Title)
@@ -1228,6 +1218,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 	} else if report.TargetCommentID != nil {
 		if comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID); err == nil {
 			commentExcerpt = excerptRunes(comment.Content, 60)
+			commentPostID = comment.PostID
 			descriptor = fmt.Sprintf("bình luận %q", commentExcerpt)
 		} else {
 			descriptor = "bình luận bạn đã báo cáo"
@@ -1266,7 +1257,17 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 	default:
 		reporterMessage = fmt.Sprintf("Báo cáo của bạn về %s đã được xem xét: nội dung không vi phạm.", descriptor)
 	}
-	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeMessage, reporterMessage, report.TargetPostID, report.TargetUserID, report.TargetCommentID)
+	// Kết quả report dùng type riêng để không bị xếp vào tab "Tin nhắn" và
+	// không bị tắt theo preference tin nhắn. Report bình luận điều hướng về
+	// bài viết chứa bình luận (không phải trang chat).
+	var reporterPostID *string
+	switch {
+	case report.TargetPostID != nil:
+		reporterPostID = report.TargetPostID
+	case commentPostID != "":
+		reporterPostID = &commentPostID
+	}
+	_, _ = s.notificationService.Create(ctx, report.ReporterID, nil, models.NotificationTypeReportResult, reporterMessage, reporterPostID, report.TargetUserID, nil)
 
 	if report.TargetPostID != nil {
 		post, err := s.postRepo.FindByID(ctx, *report.TargetPostID)
@@ -1276,13 +1277,13 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 				label = excerptRunes(post.Content, 60)
 			}
 			targetMessage := fmt.Sprintf("Bài viết %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", excerptRunes(label, 60), input.Reason)
-			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeMessage, targetMessage, report.TargetPostID, nil, nil)
+			_, _ = s.notificationService.Create(ctx, post.UserID, nil, models.NotificationTypeReportResult, targetMessage, report.TargetPostID, nil, nil)
 		}
 	} else if report.TargetUserID != nil {
 		if action != "ban" {
 			// Nhánh ban có thông báo riêng chi tiết hơn bên dưới — tránh gửi trùng.
 			targetMessage := "Tài khoản của bạn đã bị báo cáo và đã được xem xét bởi quản trị viên."
-			_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeMessage, targetMessage, nil, report.TargetUserID, nil)
+			_, _ = s.notificationService.Create(ctx, *report.TargetUserID, nil, models.NotificationTypeReportResult, targetMessage, nil, report.TargetUserID, nil)
 		}
 	} else if report.TargetCommentID != nil {
 		comment, err := s.postRepo.FindCommentByID(ctx, *report.TargetCommentID)
@@ -1291,7 +1292,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 				commentExcerpt = excerptRunes(comment.Content, 60)
 			}
 			targetMessage := fmt.Sprintf("Bình luận %q của bạn đã bị ẩn bởi quản trị viên. Lý do: %s", commentExcerpt, input.Reason)
-			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeMessage, targetMessage, nil, nil, report.TargetCommentID)
+			_, _ = s.notificationService.Create(ctx, comment.UserID, nil, models.NotificationTypeReportResult, targetMessage, &comment.PostID, nil, nil)
 		}
 	}
 
@@ -1304,7 +1305,7 @@ func (s *AdminService) ReviewReport(ctx context.Context, adminID, reportID strin
 			ctx,
 			*report.TargetUserID,
 			nil,
-			models.NotificationTypeMessage,
+			models.NotificationTypeReportResult,
 			fmt.Sprintf("Tài khoản của bạn đã bị cấm. Lý do: %s", reason),
 			nil,
 			report.TargetUserID,
@@ -1647,7 +1648,7 @@ func (s *AdminService) UpdateAdStatus(ctx context.Context, adminID, adID string,
 	if newStatus == string(models.AdStatusSuspended) && suspendedReason != "" {
 		statusMsg += " Lý do: " + suspendedReason
 	}
-	_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, statusMsg, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, ad.PartnerID, nil, models.NotificationTypeModeration, statusMsg, NotificationRedirects{AdID: &ad.ID})
 
 	reason := rejectionReason
 	if newStatus == string(models.AdStatusSuspended) {
@@ -1704,7 +1705,7 @@ func (s *AdminService) DeleteAd(ctx context.Context, adminID, adID string) error
 	// Báo cho partner biết quảng cáo bị gỡ.
 	if s.notificationService != nil {
 		msg := fmt.Sprintf("Quảng cáo '%s' của bạn đã bị quản trị viên xoá.", ad.Title)
-		_, _ = s.notificationService.Create(ctx, ad.PartnerID, nil, models.NotificationTypeMessage, msg, nil, nil, nil)
+		_, _ = s.notificationService.CreateWithRedirects(ctx, ad.PartnerID, nil, models.NotificationTypeModeration, msg, NotificationRedirects{AdID: &ad.ID})
 	}
 
 	s.logAudit(ctx, adminID, "ad.delete", "ad", ad.ID, "", "")
@@ -1900,7 +1901,7 @@ func (s *AdminService) moderateGroup(ctx context.Context, superAdminID, chatID s
 
 	if chat.CreatorID != nil {
 		content := fmt.Sprintf("Nhóm chat '%s' đã bị %s bởi quản trị viên. Lý do: %s", chat.Name, actionLabel, reason)
-		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notificationService.CreateWithRedirects(ctx, *chat.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommentID: &chatID})
 	}
 
 	return nil
@@ -1940,7 +1941,7 @@ func (s *AdminService) WarnGroup(ctx context.Context, superAdminID, chatID strin
 
 	if chat.CreatorID != nil {
 		content := fmt.Sprintf("Cảnh báo nhóm chat '%s': %s", chat.Name, input.Message)
-		_, _ = s.notificationService.Create(ctx, *chat.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+		_, _ = s.notificationService.CreateWithRedirects(ctx, *chat.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommentID: &chatID})
 	}
 
 	return nil
@@ -2100,7 +2101,7 @@ func (s *AdminService) moderateCommunity(ctx context.Context, adminID, community
 	}
 
 	content := fmt.Sprintf("Cộng đồng '%s' đã bị %s bởi quản trị viên. Lý do: %s", community.Name, actionLabel, reason)
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, community.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -2141,7 +2142,7 @@ func (s *AdminService) WarnCommunity(ctx context.Context, adminID, communityID s
 	}
 
 	content := fmt.Sprintf("Cảnh báo cộng đồng '%s': %s", community.Name, input.Message)
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, community.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }
@@ -2196,7 +2197,7 @@ func (s *AdminService) RemoveCommunityMedia(ctx context.Context, adminID, commun
 	}
 
 	content := fmt.Sprintf("Cộng đồng '%s' đã bị quản trị viên gỡ %s. Lý do: %s", community.Name, label, reason)
-	_, _ = s.notificationService.Create(ctx, community.CreatorID, nil, models.NotificationTypeMessage, content, nil, nil, nil)
+	_, _ = s.notificationService.CreateWithRedirects(ctx, community.CreatorID, nil, models.NotificationTypeModeration, content, NotificationRedirects{CommunityID: &communityID})
 
 	return nil
 }

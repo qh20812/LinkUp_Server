@@ -24,6 +24,7 @@ type ReportService struct {
 	adRepo           repository.AdRepository
 	violationRuleSvc *ViolationRuleService
 	validation       *validations.ReportValidation
+	notificationSvc  *NotificationService
 }
 
 func NewReportService(reportRepo *repository.ReportRepository, authRepo *repository.AuthRepository, postRepo *repository.PostRepository, validation *validations.ReportValidation) *ReportService {
@@ -51,6 +52,12 @@ func (s *ReportService) SetAdRepository(repo repository.AdRepository) {
 	s.adRepo = repo
 }
 
+// SetNotificationService gán service thông báo (khởi tạo sau report service
+// trong main.go) để gửi xác nhận khi báo cáo được tạo thành công.
+func (s *ReportService) SetNotificationService(svc *NotificationService) {
+	s.notificationSvc = svc
+}
+
 func (s *ReportService) CreateReport(ctx context.Context, reporterID string, input dto.CreateReportInput) (dto.CreateReportResponse, error) {
 	hasRule := input.ViolationRuleID != nil && strings.TrimSpace(*input.ViolationRuleID) != ""
 	if err := s.validation.ValidateCreateReport(input.TargetType, input.TargetID, input.ReportType, input.ReasonDetail, hasRule); err != nil {
@@ -71,6 +78,9 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 	if existing != nil {
 		return dto.CreateReportResponse{}, errors.New("bạn đã có báo cáo đang chờ xử lý cho đối tượng này, vui lòng chỉnh sửa báo cáo thay vì tạo mới")
 	}
+
+	// Với report bình luận, giữ post_id để notification điều hướng về đúng bài.
+	var targetPostID string
 
 	switch input.TargetType {
 	case "user":
@@ -120,6 +130,7 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 		if comment.Status == models.CommentStatusHidden {
 			return dto.CreateReportResponse{}, errors.New("không thể báo cáo bình luận đã bị ẩn")
 		}
+		targetPostID = comment.PostID
 	case "ad":
 		if s.adRepo == nil {
 			return dto.CreateReportResponse{}, errors.New("tính năng báo cáo quảng cáo chưa sẵn sàng")
@@ -175,9 +186,48 @@ func (s *ReportService) CreateReport(ctx context.Context, reporterID string, inp
 		return dto.CreateReportResponse{}, fmt.Errorf("create report: %w", err)
 	}
 
+	// Xác nhận trong chuông để người dùng có dấu vết báo cáo đã gửi (toast chỉ
+	// hiện vài giây). Không push vì họ vừa thao tác và đã thấy toast.
+	if s.notificationSvc != nil {
+		targetID := input.TargetID
+		var redirectPostID, redirectUserID *string
+		switch input.TargetType {
+		case "post":
+			redirectPostID = &targetID
+		case "comment":
+			if targetPostID != "" {
+				redirectPostID = &targetPostID
+			}
+		case "user":
+			redirectUserID = &targetID
+		}
+		_, _ = s.notificationSvc.Create(ctx, reporterID, nil, models.NotificationTypeReportSubmitted,
+			fmt.Sprintf("Báo cáo của bạn về %s đã được gửi thành công. Chúng tôi sẽ xem xét và thông báo kết quả.", reportTargetLabel(input.TargetType)),
+			redirectPostID, redirectUserID, nil, WithoutPush())
+	}
+
 	return dto.CreateReportResponse{
 		Message: "Báo cáo đã được gửi thành công",
 	}, nil
+}
+
+// reportTargetLabel — nhãn tiếng Việt của đối tượng bị báo cáo, dùng cho nội
+// dung notification xác nhận.
+func reportTargetLabel(targetType string) string {
+	switch targetType {
+	case "post":
+		return "bài viết"
+	case "comment":
+		return "bình luận"
+	case "user":
+		return "người dùng"
+	case "community":
+		return "cộng đồng"
+	case "ad":
+		return "quảng cáo"
+	default:
+		return "nội dung"
+	}
 }
 
 func (s *ReportService) UpdateReport(ctx context.Context, reporterID, reportID string, input dto.UpdateReportInput) (dto.UpdateReportResponse, error) {

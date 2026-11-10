@@ -147,7 +147,7 @@ func (s *packageServiceImpl) RemindExpiringSubscriptions() (int, error) {
 			daysLeft = 0
 		}
 		msg := fmt.Sprintf("Gói quảng cáo của bạn sẽ hết hạn sau %d ngày. Gia hạn để quảng cáo tiếp tục hiển thị.", daysLeft)
-		if _, err := s.notifier.Create(context.Background(), sub.UserID, nil, models.NotificationTypeMessage, msg, nil, nil, nil); err == nil {
+		if _, err := s.notifier.Create(context.Background(), sub.UserID, nil, models.NotificationTypePackage, msg, nil, nil, nil); err == nil {
 			s.lastReminder[sub.ID] = now
 			sent++
 		}
@@ -257,7 +257,7 @@ func (s *packageServiceImpl) ProcessExpiredSubscriptions() (int, error) {
 				context.Background(),
 				sub.UserID,
 				nil,
-				models.NotificationTypeMessage,
+				models.NotificationTypePackage,
 				"Gói quảng cáo của bạn đã hết hạn. Quảng cáo sẽ tạm ngưng phân phối cho tới khi bạn gia hạn.",
 				nil, nil, nil,
 			)

@@ -30,19 +30,27 @@ const (
 	NotificationTypeMediaApproved              NotificationType = "media_approved"
 	NotificationTypeMediaRejected              NotificationType = "media_rejected"
 	NotificationTypeMediaFlagged               NotificationType = "media_flagged"
+	NotificationTypeReportSubmitted            NotificationType = "report_submitted"
+	NotificationTypeReportResult               NotificationType = "report_result"
+	NotificationTypeModeration                 NotificationType = "moderation"
+	NotificationTypeWallet                     NotificationType = "wallet"
+	NotificationTypePackage                    NotificationType = "package"
+	NotificationTypeMessageReact               NotificationType = "message_react"
 )
 
 type Notification struct {
-	ID                string           `json:"id"`
-	ReceiverID        string           `json:"receiver_id"`
-	SenderID          *string          `json:"sender_id,omitempty"`
-	Type              NotificationType `json:"type"`
-	RedirectPostID    *string          `json:"redirect_post_id,omitempty"`
-	RedirectUserID    *string          `json:"redirect_user_id,omitempty"`
-	RedirectCommentID *string          `json:"redirect_comment_id,omitempty"`
-	Content           string           `json:"content"`
-	IsRead            bool             `json:"is_read"`
-	CreatedAt         time.Time        `json:"created_at"`
+	ID                  string           `json:"id"`
+	ReceiverID          string           `json:"receiver_id"`
+	SenderID            *string          `json:"sender_id,omitempty"`
+	Type                NotificationType `json:"type"`
+	RedirectPostID      *string          `json:"redirect_post_id,omitempty"`
+	RedirectUserID      *string          `json:"redirect_user_id,omitempty"`
+	RedirectCommentID   *string          `json:"redirect_comment_id,omitempty"`
+	RedirectCommunityID *string          `json:"redirect_community_id,omitempty"`
+	RedirectAdID        *string          `json:"redirect_ad_id,omitempty"`
+	Content             string           `json:"content"`
+	IsRead              bool             `json:"is_read"`
+	CreatedAt           time.Time        `json:"created_at"`
 }
 
 func NewNotification(receiverID string, senderID *string, notifType NotificationType, content string) Notification {
@@ -104,6 +112,18 @@ func ParseNotificationType(value string) NotificationType {
 		return NotificationTypeMediaRejected
 	case string(NotificationTypeMediaFlagged):
 		return NotificationTypeMediaFlagged
+	case string(NotificationTypeReportSubmitted):
+		return NotificationTypeReportSubmitted
+	case string(NotificationTypeReportResult):
+		return NotificationTypeReportResult
+	case string(NotificationTypeModeration):
+		return NotificationTypeModeration
+	case string(NotificationTypeWallet):
+		return NotificationTypeWallet
+	case string(NotificationTypePackage):
+		return NotificationTypePackage
+	case string(NotificationTypeMessageReact):
+		return NotificationTypeMessageReact
 	default:
 		return NotificationTypeLike
 	}

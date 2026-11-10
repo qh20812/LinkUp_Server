@@ -64,6 +64,13 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
 	ensureColumn(db, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
 	ensureColumn(db, "reports", "target_ad_id", "VARCHAR(36) NULL")
+	// Đích điều hướng chuyên dụng cho notification cộng đồng / quảng cáo
+	// (trước đây community ID bị nhét vào redirect_user_id).
+	ensureColumn(db, "notifications", "redirect_community_id", "VARCHAR(36) NULL")
+	ensureColumn(db, "notifications", "redirect_ad_id", "VARCHAR(36) NULL")
+	// Phase 4: dữ liệu cũ nhét community ID vào redirect_user_id — chuyển sang
+	// cột chuyên dụng để web điều hướng đúng. Idempotent.
+	backfillNotificationCommunityRedirect(db)
 	ensureAdminAuditLogTable(db)
 
 	// Ví trả trước + nạp tiền chuyển khoản (Track E). Tạo bằng SQL thuần vì
@@ -590,6 +597,34 @@ func ensureAdminAuditLogTable(db *gorm.DB) {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error
 	if err != nil {
 		log.Printf("Warning: ensure admin_audit_logs: %v", err)
+	}
+}
+
+// backfillNotificationCommunityRedirect chuyển community ID đang nằm sai field
+// (redirect_user_id) sang redirect_community_id cho các notification cũ.
+// Chỉ áp dụng khi redirect_user_id thật sự là một community tồn tại — nhờ vậy
+// các row community_* có redirect_user_id là user (admin/creator) không bị đụng.
+// Idempotent: row đã có redirect_community_id sẽ bị bỏ qua.
+func backfillNotificationCommunityRedirect(db *gorm.DB) {
+	if !db.Migrator().HasTable("notifications") || !db.Migrator().HasTable("communities") {
+		return
+	}
+	if !db.Migrator().HasColumn("notifications", "redirect_community_id") {
+		return
+	}
+	res := db.Exec(`UPDATE notifications n
+		JOIN communities c ON c.id = n.redirect_user_id
+		SET n.redirect_community_id = n.redirect_user_id,
+		    n.redirect_user_id = NULL
+		WHERE n.type LIKE 'community%'
+		  AND n.redirect_community_id IS NULL
+		  AND n.redirect_user_id IS NOT NULL`)
+	if res.Error != nil {
+		log.Printf("Warning: backfill notifications.redirect_community_id: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("Backfilled %d community notification(s): redirect_user_id → redirect_community_id", res.RowsAffected)
 	}
 }
 

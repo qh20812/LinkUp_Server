@@ -6,17 +6,19 @@ import (
 )
 
 type NotificationResponse struct {
-	ID                string                  `json:"id"`
-	SenderID          *string                 `json:"sender_id,omitempty"`
-	SenderName        string                  `json:"sender_name,omitempty"`
-	SenderAvatar      string                  `json:"sender_avatar,omitempty"`
-	Type              models.NotificationType `json:"type"`
-	RedirectPostID    *string                 `json:"redirect_post_id,omitempty"`
-	RedirectUserID    *string                 `json:"redirect_user_id,omitempty"`
-	RedirectCommentID *string                 `json:"redirect_comment_id,omitempty"`
-	Content           string                  `json:"content"`
-	IsRead            bool                    `json:"is_read"`
-	CreatedAt         time.Time               `json:"created_at"`
+	ID                  string                  `json:"id"`
+	SenderID            *string                 `json:"sender_id,omitempty"`
+	SenderName          string                  `json:"sender_name,omitempty"`
+	SenderAvatar        string                  `json:"sender_avatar,omitempty"`
+	Type                models.NotificationType `json:"type"`
+	RedirectPostID      *string                 `json:"redirect_post_id,omitempty"`
+	RedirectUserID      *string                 `json:"redirect_user_id,omitempty"`
+	RedirectCommentID   *string                 `json:"redirect_comment_id,omitempty"`
+	RedirectCommunityID *string                 `json:"redirect_community_id,omitempty"`
+	RedirectAdID        *string                 `json:"redirect_ad_id,omitempty"`
+	Content             string                  `json:"content"`
+	IsRead              bool                    `json:"is_read"`
+	CreatedAt           time.Time               `json:"created_at"`
 }
 
 type SenderProfile struct {
@@ -26,15 +28,17 @@ type SenderProfile struct {
 
 func ToNotificationResponse(n *models.Notification, sender *SenderProfile) NotificationResponse {
 	r := NotificationResponse{
-		ID:                n.ID,
-		SenderID:          n.SenderID,
-		Type:              n.Type,
-		RedirectPostID:    n.RedirectPostID,
-		RedirectUserID:    n.RedirectUserID,
-		RedirectCommentID: n.RedirectCommentID,
-		Content:           n.Content,
-		IsRead:            n.IsRead,
-		CreatedAt:         n.CreatedAt,
+		ID:                  n.ID,
+		SenderID:            n.SenderID,
+		Type:                n.Type,
+		RedirectPostID:      n.RedirectPostID,
+		RedirectUserID:      n.RedirectUserID,
+		RedirectCommentID:   n.RedirectCommentID,
+		RedirectCommunityID: n.RedirectCommunityID,
+		RedirectAdID:        n.RedirectAdID,
+		Content:             n.Content,
+		IsRead:              n.IsRead,
+		CreatedAt:           n.CreatedAt,
 	}
 	if sender != nil {
 		r.SenderName = sender.DisplayName

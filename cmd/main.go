@@ -198,6 +198,7 @@ func main() {
 		reportRepository := repository.NewReportRepository(gormDB)
 		reportValidation := validations.NewReportValidation()
 		reportService := services.NewReportService(reportRepository, authRepository, postRepository, reportValidation)
+		reportService.SetNotificationService(notificationService)
 		reportController := controllers.NewReportController(reportService)
 		routes.RegisterReportRoutes(router, reportController, env, gormDB)
 

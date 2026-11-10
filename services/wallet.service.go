@@ -455,7 +455,7 @@ func (s *walletServiceImpl) ApproveTopup(ctx context.Context, adminID, topupID s
 				formatVND(credit), formatVND(topup.Amount), topup.Code,
 			)
 		}
-		_, _ = s.notificationService.Create(ctx, topup.UserID, nil, models.NotificationTypeMessage, message, nil, nil, nil)
+		_, _ = s.notificationService.Create(ctx, topup.UserID, nil, models.NotificationTypeWallet, message, nil, nil, nil)
 	}
 
 	s.logAudit(ctx, adminID, "wallet_topup.approve", topupID, note, map[string]any{
@@ -484,7 +484,7 @@ func (s *walletServiceImpl) RejectTopup(ctx context.Context, adminID, topupID st
 
 	if s.notificationService != nil {
 		message := fmt.Sprintf("Yêu cầu nạp %s đã bị từ chối. Lý do: %s", topup.Code, reason)
-		_, _ = s.notificationService.Create(ctx, topup.UserID, nil, models.NotificationTypeMessage, message, nil, nil, nil)
+		_, _ = s.notificationService.Create(ctx, topup.UserID, nil, models.NotificationTypeWallet, message, nil, nil, nil)
 	}
 
 	s.logAudit(ctx, adminID, "wallet_topup.reject", topupID, reason, map[string]any{
