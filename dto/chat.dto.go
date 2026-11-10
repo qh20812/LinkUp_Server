@@ -272,7 +272,7 @@ type MessageReactionPayload struct {
 }
 
 // MessageReactedPayload server → client. Broadcast cho cả room kèm danh sách
-// reactions mới của tin nhắn sau khi toggle. Action = added|updated|removed.
+// reactions mới của tin nhắn sau khi toggle. Action = added|removed.
 type MessageReactedPayload struct {
 	ChatID    string                 `json:"chat_id"`
 	MessageID string                 `json:"message_id"`

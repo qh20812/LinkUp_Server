@@ -309,6 +309,7 @@ func Run(db *gorm.DB) {
 	ensureForeignKey(db, "chat_user_settings", "fk_cus_user", "user_id", "users", "id")
 
 	// ===== Message reactions (Phase 4) table =====
+	// PK gồm cả emoji_id: 1 user được thả NHIỀU emoji trên cùng 1 tin.
 	if !db.Migrator().HasTable(&models.MessageReaction{}) {
 		if err := db.Exec(`CREATE TABLE IF NOT EXISTS message_reactions (
 			message_id VARCHAR(36) NOT NULL,
@@ -316,7 +317,7 @@ func Run(db *gorm.DB) {
 			emoji_id VARCHAR(36) NOT NULL,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
-			PRIMARY KEY (message_id, user_id),
+			PRIMARY KEY (message_id, user_id, emoji_id),
 			KEY idx_message_reactions_message (message_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
 			log.Printf("Warning: create message_reactions table: %v", err)
@@ -324,6 +325,7 @@ func Run(db *gorm.DB) {
 	}
 	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_message", "message_id", "messages", "id")
 	ensureForeignKey(db, "message_reactions", "fk_msg_reactions_user", "user_id", "users", "id")
+	ensureMessageReactionPK(db)
 
 	// ===== Challenge daily awards (trần điểm/ngày chống farm) =====
 	if !db.Migrator().HasTable(&models.ChallengeDailyAward{}) {
@@ -574,6 +576,39 @@ func ensureWalletTables(db *gorm.DB) {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`).Error; err != nil {
 			log.Printf("Warning: create wallet_topups table: %v", err)
 		}
+	}
+}
+
+// ensureMessageReactionPK nâng PK message_reactions từ (message_id, user_id)
+// lên (message_id, user_id, emoji_id) — cho phép 1 user thả nhiều emoji trên
+// cùng 1 tin. Idempotent: đọc information_schema, DB mới tạo đã đúng PK thì
+// bỏ qua; DB cũ giữ nguyên dữ liệu (mỗi user 1 emoji) và chỉ đổi khóa.
+func ensureMessageReactionPK(db *gorm.DB) {
+	if !db.Migrator().HasTable("message_reactions") {
+		return
+	}
+	type row struct {
+		Columns string
+	}
+	var r row
+	err := db.Raw(`SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY ORDINAL_POSITION) AS columns
+		FROM information_schema.KEY_COLUMN_USAGE
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'message_reactions'
+			AND CONSTRAINT_NAME = 'PRIMARY'`).Scan(&r).Error
+	if err != nil {
+		log.Printf("Warning: read message_reactions PK: %v", err)
+		return
+	}
+	if r.Columns == "message_id,user_id,emoji_id" {
+		return
+	}
+	// FK cần index leftmost trên message_id / user_id trước khi thay PK.
+	ensureIndex(db, "message_reactions", "idx_message_reactions_message", "message_id")
+	ensureIndex(db, "message_reactions", "idx_message_reactions_user", "user_id")
+	if err := db.Exec(`ALTER TABLE message_reactions
+		DROP PRIMARY KEY,
+		ADD PRIMARY KEY (message_id, user_id, emoji_id)`).Error; err != nil {
+		log.Printf("Warning: ensure message_reactions PK: %v", err)
 	}
 }
 

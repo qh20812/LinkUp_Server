@@ -764,33 +764,23 @@ func (r *ChatRepository) GetChatReadWatermarks(ctx context.Context, chatID strin
 
 // ── Message reactions (Phase 4) ─────────────────────────────────────────────
 
-// ToggleMessageReaction bật/tắt reaction của user trên tin nhắn.
-// - Chưa có → tạo mới, trả "added".
-// - Có và cùng emoji → xóa, trả "removed".
-// - Có nhưng khác emoji → đổi emoji, trả "updated".
+// ToggleMessageReaction bật/tắt reaction của user trên tin nhắn theo CẶP
+// (user, emoji) — user được thả nhiều emoji khác nhau trên cùng 1 tin:
+// - Chưa có cặp (message, user, emoji) → tạo mới, trả "added".
+// - Đã có đúng cặp đó → xóa, trả "removed".
 func (r *ChatRepository) ToggleMessageReaction(ctx context.Context, messageID, userID, emojiID string) (string, error) {
 	var existing models.MessageReaction
 	err := r.db.WithContext(ctx).
-		Where("message_id = ? AND user_id = ?", messageID, userID).
+		Where("message_id = ? AND user_id = ? AND emoji_id = ?", messageID, userID, emojiID).
 		First(&existing).Error
 	if err == nil {
-		if existing.EmojiID == emojiID {
-			err = r.db.WithContext(ctx).
-				Where("message_id = ? AND user_id = ?", messageID, userID).
-				Delete(&models.MessageReaction{}).Error
-			if err != nil {
-				return "", fmt.Errorf("delete message reaction: %w", err)
-			}
-			return "removed", nil
-		}
-		err = r.db.WithContext(ctx).Model(&existing).Updates(map[string]any{
-			"emoji_id":   emojiID,
-			"updated_at": time.Now().UTC(),
-		}).Error
+		err = r.db.WithContext(ctx).
+			Where("message_id = ? AND user_id = ? AND emoji_id = ?", messageID, userID, emojiID).
+			Delete(&models.MessageReaction{}).Error
 		if err != nil {
-			return "", fmt.Errorf("update message reaction: %w", err)
+			return "", fmt.Errorf("delete message reaction: %w", err)
 		}
-		return "updated", nil
+		return "removed", nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", fmt.Errorf("get message reaction: %w", err)
