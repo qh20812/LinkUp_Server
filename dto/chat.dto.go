@@ -158,11 +158,24 @@ type ChatConversationDTO struct {
 	ChatID          string          `json:"chat_id"`
 	Partner         ChatPartnerDTO  `json:"partner"`
 	LastMessage     *MessagePayload `json:"last_message,omitempty"`
+	LastCall        *LastCallDTO    `json:"last_call,omitempty"`
 	IsEncrypted     bool            `json:"is_encrypted"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	BackgroundType  string          `json:"background_type,omitempty"`
 	BackgroundValue string          `json:"background_value,omitempty"`
 	BackgroundOverlay int           `json:"background_overlay,omitempty"`
+}
+
+// LastCallDTO là cuộc gọi 1-1 gần nhất giữa user hiện tại và partner — dùng
+// cho preview conversation list vì cuộc gọi không nằm trong bảng messages.
+type LastCallDTO struct {
+	CallID    string    `json:"call_id"`
+	CallType  string    `json:"call_type"`
+	Status    string    `json:"status"`
+	IsMissed  bool      `json:"is_missed"`
+	Direction string    `json:"direction"` // outgoing | incoming
+	Duration  int       `json:"duration"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // ChatBackgroundDTO is the request body for updating chat background.

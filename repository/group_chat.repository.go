@@ -432,6 +432,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		LastMediaDuration int        `gorm:"column:last_media_duration"`
 		LastForwardedFrom *string    `gorm:"column:last_forwarded_from"`
 		LastCreated       *time.Time `gorm:"column:last_created_at"`
+		LastDeletedAt     *time.Time `gorm:"column:last_deleted_at"`
 		UpdatedAt         time.Time  `gorm:"column:updated_at"`
 		BackgroundType    string     `gorm:"column:background_type"`
 		BackgroundValue   string     `gorm:"column:background_value"`
@@ -454,6 +455,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
 			lm.forwarded_from AS last_forwarded_from,
 			lm.created_at AS last_created_at,
+			lm.deleted_at AS last_deleted_at,
 			COALESCE(lm.created_at, chats.created_at) AS updated_at,
 			COALESCE(cus.background_type, '') AS background_type,
 			COALESCE(cus.background_value, '') AS background_value,
@@ -463,8 +465,11 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		Joins(`LEFT JOIN messages AS lm ON lm.id = (
 			SELECT m2.id FROM messages m2
 			WHERE m2.chat_id = chats.id
-				AND ((m2.sender_id = ? AND m2.deleted_for_sender = false)
-					OR (m2.sender_id <> ? AND m2.deleted_for_receiver = false))
+				AND (
+					m2.deleted_at IS NOT NULL
+					OR (m2.sender_id = ? AND m2.deleted_for_sender = false)
+					OR (m2.sender_id <> ? AND m2.deleted_for_receiver = false)
+				)
 			ORDER BY m2.created_at DESC
 			LIMIT 1
 		)`, userID, userID).
@@ -477,7 +482,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 		// Xóa hội thoại là cục bộ: chỉ ẩn ở phía người dùng này, nhóm của các
 		// thành viên khác không đổi; hiện lại khi có tin nhắn mới hơn hidden_at.
 		Where("(cus.hidden_at IS NULL OR COALESCE(lm.created_at, chats.created_at) > cus.hidden_at)").
-		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmp.display_name, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value, cus.overlay_strength").
+		Group("chats.id, chats.name, chats.avatar_uri, lm.id, lm.content, lm.sender_id, lmp.display_name, lm.deleted_at, lmm.file_type, lmm.duration_seconds, lm.forwarded_from, lm.created_at, chats.created_at, cus.background_type, cus.background_value, cus.overlay_strength").
 		Order("COALESCE(lm.created_at, chats.created_at) DESC").
 		Scan(&rows).Error
 	if err != nil {
@@ -508,6 +513,7 @@ func (r *GroupChatRepository) ListUserGroupChats(ctx context.Context, userID str
 				MediaType:     r.LastMediaType,
 				DurationSeconds: r.LastMediaDuration,
 				ForwardedFrom: r.LastForwardedFrom,
+				Deleted:       r.LastDeletedAt != nil,
 				CreatedAt:     *r.LastCreated,
 			}
 		}

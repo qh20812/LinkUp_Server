@@ -410,6 +410,13 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		LastMediaDuration    int         `gorm:"column:last_media_duration"`
 		LastForwardedFrom    *string     `gorm:"column:last_forwarded_from"`
 		LastCreatedAt        *time.Time  `gorm:"column:last_created_at"`
+		LastDeletedAt        *time.Time  `gorm:"column:last_deleted_at"`
+		LastCallID           *string     `gorm:"column:last_call_id"`
+		LastCallType         string      `gorm:"column:last_call_type"`
+		LastCallStatus       string      `gorm:"column:last_call_status"`
+		LastCallDuration     int         `gorm:"column:last_call_duration"`
+		LastCallCallerID     string      `gorm:"column:last_call_caller_id"`
+		LastCallCreatedAt    *time.Time  `gorm:"column:last_call_created_at"`
 		UpdatedAt            time.Time   `gorm:"column:updated_at"`
 		BackgroundType       string      `gorm:"column:background_type"`
 		BackgroundValue      string      `gorm:"column:background_value"`
@@ -431,7 +438,17 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 			COALESCE(lmm.duration_seconds, 0) AS last_media_duration,
 			lm.forwarded_from AS last_forwarded_from,
 			lm.created_at AS last_created_at,
-			COALESCE(lm.created_at, chats.created_at) AS updated_at,
+			lm.deleted_at AS last_deleted_at,
+			lc.id AS last_call_id,
+			COALESCE(lc.call_type, '') AS last_call_type,
+			COALESCE(lc.status, '') AS last_call_status,
+			COALESCE(lc.duration, 0) AS last_call_duration,
+			COALESCE(lc.caller_id, '') AS last_call_caller_id,
+			lc.created_at AS last_call_created_at,
+			GREATEST(
+				COALESCE(lm.created_at, chats.created_at),
+				COALESCE(lc.created_at, chats.created_at)
+			) AS updated_at,
 			COALESCE(cus.background_type, '') AS background_type,
 			COALESCE(cus.background_value, '') AS background_value,
 			COALESCE(cus.overlay_strength, 100) AS background_overlay`).
@@ -441,9 +458,22 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		Joins(`LEFT JOIN messages AS lm ON lm.id = (
 			SELECT m2.id FROM messages m2
 			WHERE m2.chat_id = chats.id
-				AND ((m2.sender_id = ? AND m2.deleted_for_sender = false)
-					OR (m2.sender_id <> ? AND m2.deleted_for_receiver = false))
+				AND (
+					m2.deleted_at IS NOT NULL
+					OR (m2.sender_id = ? AND m2.deleted_for_sender = false)
+					OR (m2.sender_id <> ? AND m2.deleted_for_receiver = false)
+				)
 			ORDER BY m2.created_at DESC
+			LIMIT 1
+		)`, userID, userID).
+		// Cuộc gọi 1-1 không phải message — lấy cuộc gọi gần nhất giữa 2 người
+		// để conversation list có thể hiện "Cuộc gọi nhỡ/đến/đi".
+		Joins(`LEFT JOIN calls AS lc ON lc.id = (
+			SELECT c2.id FROM calls c2
+			WHERE c2.is_group = 0
+				AND ((c2.caller_id = ? AND c2.callee_id = partner.user_id)
+					OR (c2.callee_id = ? AND c2.caller_id = partner.user_id))
+			ORDER BY c2.created_at DESC
 			LIMIT 1
 		)`, userID, userID).
 		// Tên người gửi tin cuối — cần cho preview system message ở sidebar
@@ -455,7 +485,7 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 		// Hội thoại đã "xóa" ở phía người dùng này chỉ ẩn đi; nó tự hiện lại khi
 		// có tin nhắn mới hơn mốc hidden_at (deleted-for-me, không deleted-for-all).
 		Where("(cus.hidden_at IS NULL OR COALESCE(lm.created_at, chats.created_at) > cus.hidden_at)").
-		Order("COALESCE(lm.created_at, chats.created_at) DESC").
+		Order("updated_at DESC").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list user chats: %w", err)
@@ -504,7 +534,24 @@ func (r *ChatRepository) ListUserChats(ctx context.Context, userID string) ([]dt
 				DurationSeconds: row.LastMediaDuration,
 				ForwardedFrom: row.LastForwardedFrom,
 				E2EVersion:    e2eVersion,
+				Deleted:       row.LastDeletedAt != nil,
 				CreatedAt:     *row.LastCreatedAt,
+			}
+		}
+
+		if row.LastCallID != nil && row.LastCallCreatedAt != nil {
+			direction := "incoming"
+			if row.LastCallCallerID == userID {
+				direction = "outgoing"
+			}
+			conv.LastCall = &dto.LastCallDTO{
+				CallID:    *row.LastCallID,
+				CallType:  row.LastCallType,
+				Status:    row.LastCallStatus,
+				IsMissed:  row.LastCallStatus == string(models.CallStatusMissed),
+				Direction: direction,
+				Duration:  row.LastCallDuration,
+				CreatedAt: *row.LastCallCreatedAt,
 			}
 		}
 
