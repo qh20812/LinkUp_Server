@@ -6,6 +6,7 @@ import (
 	errorsapp "linkup/errors"
 	"linkup/models"
 	"linkup/repository"
+	"log"
 	"mime/multipart"
 	"path/filepath"
 	"strings"
@@ -21,8 +22,10 @@ type StoryService interface {
 	InteractWithStory(storyID, userID string, req dto.InteractStoryRequest) error
 	GetAnalytics(storyID, userID string) (*dto.StoryAnalyticsResponse, error)
 	DeleteStory(ctx context.Context, storyID, userID string) error
+	CleanupExpiredStories(ctx context.Context) (int, error)
 	ToggleStoryMute(userID, targetUserID string) (bool, error)
 	HasActiveStory(userID string) (bool, error)
+	HasActiveStoryForViewer(targetUserID, viewerID string) (bool, error)
 	GetUserActiveStories(userID string, viewerID string) ([]dto.StoryResponse, error)
 }
 
@@ -44,6 +47,64 @@ func NewStoryService(repo repository.StoryRepository, profileRepo *repository.Pr
 		followRepo:   followRepo,
 		blockRepo:    blockRepo,
 	}
+}
+
+// storyActive — story còn trong cửa sổ hiển thị 24h.
+func storyActive(st *models.Story) bool {
+	return st.ExpiresAt != nil && st.ExpiresAt.After(time.Now())
+}
+
+// canViewUserStory kiểm tra viewer có được xem story của owner hay không.
+// Quy tắc (policy 2026-11-11):
+//   - self → luôn được.
+//   - block 2 chiều → không.
+//   - viewer mute owner → không.
+//   - owner private (profiles.is_private_profile) → chỉ follower; guest → không.
+//   - owner public → mọi người, kể cả guest.
+//
+// Guest (viewerID == "") không thể bị block/mute và không follow ai.
+func (s *storyService) canViewUserStory(ctx context.Context, viewerID, ownerID string) (bool, error) {
+	if viewerID == ownerID {
+		return true, nil
+	}
+
+	if viewerID != "" {
+		if s.blockRepo != nil {
+			blocked, err := s.blockRepo.IsBlockedBetween(ctx, viewerID, ownerID)
+			if err != nil {
+				return false, err
+			}
+			if blocked {
+				return false, nil
+			}
+		}
+		muted, err := s.repo.IsMuted(viewerID, ownerID)
+		if err != nil {
+			return false, err
+		}
+		if muted {
+			return false, nil
+		}
+	}
+
+	if s.profileRepo == nil {
+		return true, nil
+	}
+	profile, err := s.profileRepo.FindByUserID(ctx, ownerID)
+	if err != nil {
+		return false, err
+	}
+	// Không có profile → coi như public (user cũ / dữ liệu thiếu).
+	if profile == nil || !profile.IsPrivateProfile {
+		return true, nil
+	}
+	if viewerID == "" {
+		return false, nil
+	}
+	if s.followRepo == nil {
+		return false, nil
+	}
+	return s.followRepo.IsFollowing(ctx, viewerID, ownerID)
 }
 
 func (s *storyService) CreateStory(ctx context.Context, userID string, fileHeader *multipart.FileHeader, caption string) (*dto.CreateStoryResponse, error) {
@@ -181,9 +242,21 @@ func (s *storyService) ViewStory(storyID, viewerID string) (*models.Story, error
 	if err != nil {
 		return nil, errorsapp.New(errorsapp.ErrCodeStoryNotFound)
 	}
+	if !storyActive(story) {
+		return nil, errorsapp.New(errorsapp.ErrCodeStoryNotFound)
+	}
 
 	// Nếu người xem không phải chủ story
 	if story.UserID != viewerID {
+		// Privacy: block / mute / private profile.
+		allowed, err := s.canViewUserStory(context.Background(), viewerID, story.UserID)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, errorsapp.New(errorsapp.ErrCodeStoryNotFound)
+		}
+
 		// Kiểm tra xem user này đã từng xem story này chưa
 		hasViewed, err := s.repo.HasUserViewed(storyID, viewerID)
 		if err != nil {
@@ -206,6 +279,20 @@ func (s *storyService) InteractWithStory(storyID string, userID string, req dto.
 	story, err := s.repo.FindByID(storyID)
 	if err != nil {
 		return errorsapp.New(errorsapp.ErrCodeStoryInteractNotFound)
+	}
+	if !storyActive(story) {
+		return errorsapp.New(errorsapp.ErrCodeStoryInteractNotFound)
+	}
+
+	// Privacy: không được xem story thì cũng không được tương tác.
+	if story.UserID != userID {
+		allowed, err := s.canViewUserStory(context.Background(), userID, story.UserID)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return errorsapp.New(errorsapp.ErrCodeStoryInteractNotFound)
+		}
 	}
 
 	notifyOwner := func(notifType models.NotificationType, content string, opts ...PushOption) {
@@ -366,7 +453,28 @@ func (s *storyService) HasActiveStory(userID string) (bool, error) {
 	return s.repo.HasActiveStoryByUserID(userID)
 }
 
+// HasActiveStoryForViewer như HasActiveStory nhưng áp dụng privacy: trả false
+// khi viewer không được xem story của target (block/mute/private không follow).
+func (s *storyService) HasActiveStoryForViewer(targetUserID, viewerID string) (bool, error) {
+	allowed, err := s.canViewUserStory(context.Background(), viewerID, targetUserID)
+	if err != nil {
+		return false, err
+	}
+	if !allowed {
+		return false, nil
+	}
+	return s.repo.HasActiveStoryByUserID(targetUserID)
+}
+
 func (s *storyService) GetUserActiveStories(userID string, viewerID string) ([]dto.StoryResponse, error) {
+	allowed, err := s.canViewUserStory(context.Background(), viewerID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return []dto.StoryResponse{}, nil
+	}
+
 	stories, err := s.repo.GetActiveStoriesByUserID(userID)
 	if err != nil {
 		return nil, err
@@ -414,10 +522,38 @@ func (s *storyService) DeleteStory(ctx context.Context, storyID, userID string) 
 		return errorsapp.New(errorsapp.ErrCodeStoryForbidden)
 	}
 
+	// Xoá media Cloudinary best-effort (DeleteByURL tự bỏ qua nếu không có
+	// record / media thuộc user khác). Story vẫn phải xoá được dù Cloudinary lỗi.
+	if s.mediaService != nil && story.MediaURI != "" {
+		_ = s.mediaService.DeleteByURL(ctx, userID, story.MediaURI)
+	}
+
 	if err := s.repo.DeleteStory(storyID); err != nil {
 		return errorsapp.New(errorsapp.ErrCodeStoryDeleteFailed)
 	}
 	return nil
+}
+
+// CleanupExpiredStories xoá story đã quá expires_at + media Cloudinary tương ứng.
+// Chạy định kỳ từ worker trong cmd/main.go. Trả số story đã xoá thành công.
+func (s *storyService) CleanupExpiredStories(ctx context.Context) (int, error) {
+	stories, err := s.repo.ListExpiredStories(200)
+	if err != nil {
+		return 0, err
+	}
+
+	cleaned := 0
+	for _, st := range stories {
+		if s.mediaService != nil && st.MediaURI != "" {
+			_ = s.mediaService.DeleteByURL(ctx, st.UserID, st.MediaURI)
+		}
+		if err := s.repo.DeleteStory(st.ID); err != nil {
+			log.Printf("[StoryWorker] delete expired story %s: %v", st.ID, err)
+			continue
+		}
+		cleaned++
+	}
+	return cleaned, nil
 }
 
 // ToggleStoryMute bật/tắt ẩn story của targetUserID. Trả về trạng thái muted hiện tại.

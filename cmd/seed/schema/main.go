@@ -470,6 +470,7 @@ func Run(env config.Env) error {
 			caption TEXT,
 			created_at DATETIME NOT NULL,
 			expires_at DATETIME NULL,
+			INDEX idx_stories_expires_at (expires_at),
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_stories_user_id (user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
@@ -1021,7 +1022,7 @@ func Run(env config.Env) error {
 			story_id CHAR(36) NOT NULL,
 			viewer_id CHAR(36) NOT NULL,
 			viewed_at DATETIME(3) NULL,
-			INDEX idx_story_views_story_id (story_id),
+			UNIQUE INDEX uq_story_views_story_viewer (story_id, viewer_id),
 			INDEX idx_story_views_viewer_id (viewer_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
@@ -1043,7 +1044,7 @@ func Run(env config.Env) error {
 			user_id CHAR(36) NOT NULL,
 			muted_user_id CHAR(36) NOT NULL,
 			created_at DATETIME(3) NULL,
-			INDEX idx_story_mutes_user_id (user_id),
+			UNIQUE INDEX uq_story_mutes_user_target (user_id, muted_user_id),
 			INDEX idx_story_mutes_muted_user_id (muted_user_id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 

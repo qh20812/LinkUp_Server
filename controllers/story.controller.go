@@ -172,7 +172,7 @@ func (ctrl *StoryController) ToggleMute(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"muted": muted})
 }
 
-// CheckUserStory kiểm tra user có story active không
+// CheckUserStory kiểm tra user có story active không (đã áp dụng privacy theo viewer)
 func (ctrl *StoryController) CheckUserStory(c *gin.Context) {
 	targetUserID := c.Param("userID")
 	if targetUserID == "" {
@@ -180,7 +180,10 @@ func (ctrl *StoryController) CheckUserStory(c *gin.Context) {
 		return
 	}
 
-	has, err := ctrl.service.HasActiveStory(targetUserID)
+	viewerID, _ := c.Get("userID")
+	viewerStr, _ := viewerID.(string)
+
+	has, err := ctrl.service.HasActiveStoryForViewer(targetUserID, viewerStr)
 	if err != nil {
 		errorsapp.Respond(c, http.StatusInternalServerError, err)
 		return

@@ -59,3 +59,20 @@ func (r *BlockRepository) FindByUserID(ctx context.Context, userID string) ([]mo
 	}
 	return blocks, nil
 }
+
+// IsBlockedBetween cho biết có tồn tại chặn theo BẤT KỲ chiều nào giữa a và b
+// (a chặn b hoặc b chặn a). Dùng để ẩn story/profile hai chiều.
+func (r *BlockRepository) IsBlockedBetween(ctx context.Context, a, b string) (bool, error) {
+	if a == "" || b == "" || a == b {
+		return false, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&models.Block{}).
+		Where("(user_id = ? AND blocked_user_id = ?) OR (user_id = ? AND blocked_user_id = ?)", a, b, b, a).
+		Count(&count).Error
+	if err != nil {
+		return false, fmt.Errorf("count blocks between: %w", err)
+	}
+	return count > 0, nil
+}

@@ -21,8 +21,8 @@ func RegisterStoryRoutes(router *gin.Engine, ctrl *controllers.StoryController, 
 		// 2. Lấy danh sách các story đầu trang chủ (Optional auth để lọc theo viewer + scope=following)
 		storyGroup.GET("/feed", middlewares.OptionalAuth(env, db), ctrl.GetHomeFeed)
 
-		// 3. Kiểm tra user có story active không (Công khai)
-		storyGroup.GET("/user/:userID/active", ctrl.CheckUserStory)
+		// 3. Kiểm tra user có story active không (Optional auth để áp dụng privacy theo viewer)
+		storyGroup.GET("/user/:userID/active", middlewares.OptionalAuth(env, db), ctrl.CheckUserStory)
 
 		// 4. Lấy danh sách story của 1 user (Optional auth để xác định đã xem chưa)
 		storyGroup.GET("/user/:userID", middlewares.OptionalAuth(env, db), ctrl.GetUserStories)

@@ -64,6 +64,15 @@ func Run(db *gorm.DB) {
 	ensureColumn(db, "ads", "suspended_reason", "TEXT NULL")
 	ensureColumn(db, "ad_packages", "is_active", "TINYINT(1) NOT NULL DEFAULT 1")
 	ensureColumn(db, "reports", "target_ad_id", "VARCHAR(36) NULL")
+	// Worker story dọn theo expires_at — cần index để không full scan.
+	ensureIndex(db, "stories", "idx_stories_expires_at", "expires_at")
+	// Unique index cho story_views / story_mutes: LogView dùng
+	// ON DUPLICATE KEY UPDATE nên bắt buộc phải có unique key; nếu không
+	// view bị đếm trùng và mute có thể tạo nhiều row. Dedupe trước khi ALTER.
+	dedupeRows(db, "story_views", "id", "story_id", "viewer_id")
+	ensureUniqueIndex(db, "story_views", "uq_story_views_story_viewer", "story_id, viewer_id")
+	dedupeRows(db, "story_mutes", "id", "user_id", "muted_user_id")
+	ensureUniqueIndex(db, "story_mutes", "uq_story_mutes_user_target", "user_id, muted_user_id")
 	// Đích điều hướng chuyên dụng cho notification cộng đồng / quảng cáo
 	// (trước đây community ID bị nhét vào redirect_user_id).
 	ensureColumn(db, "notifications", "redirect_community_id", "VARCHAR(36) NULL")
@@ -687,6 +696,42 @@ func ensureIndex(db *gorm.DB, table, indexName, columns string) {
 	}
 	if err := db.Exec("CREATE INDEX " + indexName + " ON " + table + " (" + columns + ")").Error; err != nil {
 		log.Printf("Warning: ensure index %s: %v", indexName, err)
+	}
+}
+
+// ensureUniqueIndex thêm unique index nếu chưa tồn tại (idempotent).
+// Khác ensureIndex: dùng ALTER TABLE ... ADD UNIQUE INDEX để MySQL chấp nhận
+// cả khi index đã tồn tại dưới tên khác nhưng cùng cột (khi đó HasIndex theo
+// tên sẽ trả false và ALTER có thể báo trùng — chấp nhận log warning).
+func ensureUniqueIndex(db *gorm.DB, table, indexName, columns string) {
+	if !db.Migrator().HasTable(table) {
+		return
+	}
+	if db.Migrator().HasIndex(table, indexName) {
+		return
+	}
+	if err := db.Exec("ALTER TABLE " + table + " ADD UNIQUE INDEX " + indexName + " (" + columns + ")").Error; err != nil {
+		log.Printf("Warning: ensure unique index %s: %v", indexName, err)
+	}
+}
+
+// dedupeRows xoá bản ghi trùng theo cặp (colA, colB), giữ lại row có id nhỏ
+// nhất. Chạy trước khi thêm unique index để ALTER không fail trên dữ liệu cũ.
+func dedupeRows(db *gorm.DB, table, idColumn, colA, colB string) {
+	if !db.Migrator().HasTable(table) {
+		return
+	}
+	query := "DELETE t1 FROM " + table + " t1 JOIN " + table + " t2" +
+		" ON t1." + colA + " = t2." + colA +
+		" AND t1." + colB + " = t2." + colB +
+		" AND t1." + idColumn + " > t2." + idColumn
+	res := db.Exec(query)
+	if res.Error != nil {
+		log.Printf("Warning: dedupe %s: %v", table, res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		log.Printf("Deduped %d duplicate row(s) in %s", res.RowsAffected, table)
 	}
 }
 

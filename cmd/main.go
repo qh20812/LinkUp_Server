@@ -188,6 +188,20 @@ func main() {
 		storyController := controllers.NewStoryController(storyService)
 		routes.RegisterStoryRoutes(router, storyController, env, gormDB)
 
+		// Worker dọn story hết hạn + media Cloudinary (mỗi 30 phút).
+		go func() {
+			ticker := time.NewTicker(30 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				n, err := storyService.CleanupExpiredStories(context.Background())
+				if err != nil {
+					log.Printf("[StoryWorker] cleanup error: %v", err)
+				} else if n > 0 {
+					log.Printf("[StoryWorker] cleaned %d expired stories", n)
+				}
+			}
+		}()
+
 		// Wire sau khi media + story repo đã khởi tạo
 		mediaService.SetHub(hub)
 		// Đánh fail media kẹt staging từ lần chạy trước (crash/deploy giữa upload).

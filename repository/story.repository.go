@@ -22,6 +22,7 @@ type StoryRepository interface {
 	GetViewedStoryIDs(viewerID string) (map[string]struct{}, error)
 	HasActiveStoryByUserID(userID string) (bool, error)
 	GetActiveStoriesByUserID(userID string) ([]models.Story, error)
+	ListExpiredStories(limit int) ([]models.Story, error)
 	HasUserViewed(storyID, viewerID string) (bool, error)
 	LogView(storyID, viewerID string) error
 	CountViews(storyID string) (int64, error)
@@ -64,18 +65,38 @@ func (r *storyRepository) GetActiveStories() ([]models.Story, error) {
 // GetActiveStoriesForViewer lấy story active cho 1 viewer cụ thể:
 // loại bỏ story của user đã bị viewer mute, của user đã block/mute viewer,
 // và (nếu followingOnly) chỉ giữ những user viewer đang theo dõi + chính mình.
+//
+// Privacy: tài khoản public ai cũng xem; tài khoản private (profiles.is_private_profile)
+// chỉ chính chủ + follower xem. Khách chưa đăng nhập chỉ thấy story của tài khoản public.
 func (r *storyRepository) GetActiveStoriesForViewer(viewerID string, followingOnly bool) ([]models.Story, error) {
 	var stories []models.Story
 
 	if viewerID == "" {
-		err := r.db.Where("expires_at > ?", time.Now()).Order("created_at DESC").Find(&stories).Error
+		// Không xác định được following khi chưa đăng nhập → không trả gì.
+		if followingOnly {
+			return []models.Story{}, nil
+		}
+		err := r.db.Where("expires_at > ?", time.Now()).
+			Where("user_id NOT IN (SELECT user_id FROM profiles WHERE is_private_profile = 1)").
+			Order("created_at DESC").Find(&stories).Error
 		return stories, err
 	}
 
 	query := r.db.Where("expires_at > ?", time.Now()).
 		Where("user_id NOT IN (SELECT muted_user_id FROM story_mutes WHERE user_id = ?)", viewerID).
 		Where("user_id NOT IN (SELECT user_id FROM blocks WHERE blocked_user_id = ?)", viewerID).
-		Where("user_id NOT IN (SELECT blocked_user_id FROM blocks WHERE user_id = ?)", viewerID)
+		Where("user_id NOT IN (SELECT blocked_user_id FROM blocks WHERE user_id = ?)", viewerID).
+		// Private profile: chỉ self hoặc follower được xem.
+		Where(`(
+			user_id = ?
+			OR NOT EXISTS (
+				SELECT 1 FROM profiles p
+				WHERE p.user_id = stories.user_id AND p.is_private_profile = 1
+			)
+			OR user_id IN (
+				SELECT following_id FROM follows WHERE follower_id = ?
+			)
+		)`, viewerID, viewerID)
 
 	if followingOnly {
 		query = query.Where("user_id = ? OR user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)", viewerID, viewerID)
@@ -110,6 +131,17 @@ func (r *storyRepository) GetActiveStoriesByUserID(userID string) ([]models.Stor
 	var stories []models.Story
 	err := r.db.Where("user_id = ? AND expires_at > ?", userID, time.Now()).
 		Order("created_at ASC").Find(&stories).Error
+	return stories, err
+}
+
+// ListExpiredStories lấy tối đa `limit` story đã quá hạn để worker dọn dẹp.
+func (r *storyRepository) ListExpiredStories(limit int) ([]models.Story, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	var stories []models.Story
+	err := r.db.Where("expires_at IS NOT NULL AND expires_at <= ?", time.Now()).
+		Order("expires_at ASC").Limit(limit).Find(&stories).Error
 	return stories, err
 }
 
