@@ -49,6 +49,17 @@ func FriendlyDeviceName(userAgent string) string {
 		os = "Linux"
 	}
 
+	// Native app clients usually send a non-browser User-Agent (okhttp, Expo,
+	// CFNetwork, ...). Keep them out of the "Web" fallback in clientDeviceInfo.
+	if os == "" {
+		switch {
+		case strings.Contains(ua, "cfnetwork"), strings.Contains(ua, "darwin"):
+			os = "iOS"
+		case strings.Contains(ua, "okhttp"), strings.Contains(ua, "expo"), strings.Contains(ua, "react-native"):
+			os = "Mobile"
+		}
+	}
+
 	switch {
 	case browser != "" && os != "":
 		return browser + " trên " + os

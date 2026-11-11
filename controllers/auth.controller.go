@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"net/http"
+	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -137,11 +139,37 @@ func (h *AuthController) RefreshToken(c *gin.Context) {
 func clientDeviceInfo(c *gin.Context) (deviceName, ipAddress, userAgent string) {
 	userAgent = c.GetHeader("User-Agent")
 	ipAddress = c.ClientIP()
-	deviceName = "Web"
-	if name := utils.FriendlyDeviceName(userAgent); name != "" {
-		deviceName = name
+	deviceName = sanitizeDeviceName(c.GetHeader("X-Device-Name"))
+	if deviceName == "" {
+		deviceName = utils.FriendlyDeviceName(userAgent)
+	}
+	if deviceName == "" {
+		deviceName = "Thiết bị không xác định"
 	}
 	return deviceName, ipAddress, userAgent
+}
+
+const maxDeviceNameRunes = 100
+
+func sanitizeDeviceName(raw string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, raw)
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" {
+		return ""
+	}
+	runes := []rune(cleaned)
+	if len(runes) > maxDeviceNameRunes {
+		cleaned = string(runes[:maxDeviceNameRunes])
+	}
+	return cleaned
 }
 
 func (h *AuthController) Logout(c *gin.Context) {

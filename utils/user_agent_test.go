@@ -46,6 +46,26 @@ func TestFriendlyDeviceName(t *testing.T) {
 			want: "Windows 8.1",
 		},
 		{
+			name: "okhttp mobile",
+			ua:   "okhttp/4.12.0",
+			want: "Mobile",
+		},
+		{
+			name: "expo ios",
+			ua:   "Expo/57.0.0 CFNetwork/1494.0.7 Darwin/23.6.0",
+			want: "iOS",
+		},
+		{
+			name: "expo android",
+			ua:   "Expo/57.0.0 okhttp/4.12.0",
+			want: "Mobile",
+		},
+		{
+			name: "custom app with android",
+			ua:   "LinkUpMobile/1.0 (Android 14)",
+			want: "Android",
+		},
+		{
 			name: "empty",
 			ua:   "",
 			want: "",
